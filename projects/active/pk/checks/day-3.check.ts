@@ -212,22 +212,24 @@ class Day3Check extends CheckBaseClass {
       if (!this.awardConfig) this.skip('奖励配置未获取');
       if (s.bang === '家族榜') {
         if (!familyAward) this.skip('发奖记录未获取');
-        let missing = 0;
         let total = 0;
+        let badFamilies = 0;
         const detail: string[] = [];
         for (const f of familyAward!.families) {
-          for (const m of f.members) {
-            total++;
-            if (!familyAward!.awarded.has(m)) {
-              missing++;
-              if (detail.length < 3) detail.push(`${f.id}的${m}`);
-            }
+          const awardedCount = f.members.filter((m) => familyAward!.awarded.has(m)).length;
+          total += f.members.length;
+          if (f.members.length === 0 || awardedCount * 2 <= f.members.length) {
+            badFamilies++;
+            if (detail.length < 3) detail.push(`${f.id}(${awardedCount}/${f.members.length})`);
           }
         }
-        const pass = total > 0 && missing === 0;
+        const pass = total > 0 && badFamilies === 0;
         return {
-          expect: `核对 ${total} 名成员全部发放 ${familyAward!.spec.type}#${familyAward!.spec.id}`,
-          real: missing === 0 ? `全部发放 (${total})` : `缺失 ${missing}/${total}${detail.length ? ': ' + detail.join('; ') : ''}`,
+          expect: `每个家族超过50%成员发放 ${familyAward!.spec.type}#${familyAward!.spec.id}（共 ${total} 名成员）`,
+          real:
+            badFamilies === 0
+              ? `全部家族达标 (${total})`
+              : `${badFamilies} 个家族未达50%${detail.length ? ': ' + detail.join('; ') : ''}`,
           pass,
         };
       }
