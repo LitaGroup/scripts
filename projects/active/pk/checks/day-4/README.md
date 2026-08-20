@@ -1,0 +1,233 @@
+# 第4天检查
+
+> 针对 202608 的PK检查，检查日期：2026-08-20 的数据
+
+## 时间配置
+
+- `2026-08-20T23:07:00+08:00` topic=player_100_50 locale=ko key=20260820 的日榜结算
+- `2026-08-21T00:07:00+08:00` topic=player_100_50 locale=ko key=20260820 的日榜结算
+- `2026-08-20T01:07:00+08:00` 
+  - topic=player_100_50 locale=vi key=20260820 的日榜结算
+  - topic=player_in_200_100 locale=in key=20260820 的日榜结算
+
+
+
+## 检查内容
+
+- 结算检查：
+
+  - 检查 状态 是否为已结算：
+
+    - select * from mod_common_round where biz={} and topic={} and `key`="{}" and locale='{locale}'
+    - status 预期 200
+
+  - 检查发奖情况是否符合预期
+
+    - 获取前 n 名
+
+      - ```
+        curl --request POST \
+          --url {host}/active/v3/pk-v202608/m/user/rank \
+          --header 'Content-Type: application/json' \
+          --header 'l-user-id: 7586' \ 
+          --header 'l-user-locale: in' \  # 指定大区
+          --data '{
+            "key": "-", 
+            "count": 100 # 前 n 名
+        }'
+        ```
+
+      - 
+
+    - 获取奖励配置 `http://localhost:3000/api/documents/12.md`
+
+    - 获取奖励实际发放
+
+    - 进行匹配
+
+
+
+
+
+
+
+说明：
+
+脚本集合，集中了 自动化测试脚本、线上检查脚本 等
+
+
+
+技术架构：
+
+
+
+分为三层：
+
+- 资源层，提供 MySQL、Redis、Nacos、API 以及 不同环境的连接器，其中，测试环境通过host、账号、密码等直连，且拥有读写权限，用于测试场景的各种处理；生产环境通过 中间  API 代理请求，只读不写，用户数据查询和检查
+- 服务层，提供了常用的业务实现，包括了：
+  - 测试环境：模拟送礼、模拟下单、模拟触发事件等
+  - 生产环境：用户查询、奖励详情查询、奖励发放查询、LitaTeam查询、排行榜查询等
+- 业务层，提供了 测试用例 和 线上检查 两种场景的基类 和 基本工具
+
+
+
+### 环境定义
+
+主要分为两类脚本：测试用例 和 线上检查。
+
+测试用例 依赖测试环境的资源类库
+
+线上检查 依赖线上相关的资源类库
+
+
+
+### 资源层
+
+- MySQLTestResource  -  测试环境的MySQL直连，基于数据库密码实现
+- MySQLProdResource - 生产环境的MySQL访问库，基于 API 代理实现
+- APIProdResource - 生产环境的API 访问实现，固定的 host 为：https://api.cinta.team/，需要提供 method、body、headers 等
+- 其它后续补充
+
+
+
+## 脚本约定
+
+
+
+### 输入输出
+
+脚本的运行方式为：
+
+`node xxxxx.ts {parameters}`
+
+
+
+脚本的输出，定义为：
+
+- 每行为一组独立处理的数据
+- 结构为：`[{type}] {data}\n`，如果不是以 `[{type}]` 开头，则默认 type=log，type定义如下
+  - log - 日志，data部分为文本内容
+  - start - 操作开始，data部分为 JSON 序列化后的数据，`{"total":13,"time":0,"startTime":"2026-08-23T12:23:23.332"}`
+  - act - 步骤操作，data部分为 JSON 序列化后的数据，内容为`{"no": 1,"title":"操作了什么步骤","status":"success","message":"","time":234}`
+    - status - success 成功 / fail 失败，message内容是失败的原因 / skip 跳过，message 为跳过的原因
+  - check - 检查步骤，data部分为 JSON 序列化后的数据，内容为`{"no": 1,"title":"操作了什么步骤","expect":"期望xxxxxx","real":"实际xxxxxxxx","status":"success","message":"","time":2343}`
+    - status - success 成功 / fail 失败，message内容是失败的原因 / skip 跳过，message 为跳过的原因
+  - done - 操作结束，data部分为 JSON 序列化后的数据，内容为：`{"status":"success","total":13,"success":13,"fail":0,"skip":0,"message":"","time":2342,"cost":2342}`
+  - 说明：time 为 从 start 开始的消耗的毫秒数
+- 输出时间使用 标准输出 来输出，且不要有缓冲（实时输出，实时看结果）
+
+
+
+## 脚本命名规范
+
+
+
+测试：`xxxxxx.test.ts`
+
+检查：`xxxxx.check.ts`
+
+
+
+增加服务层的几个服务，注意：使用服务时，需要先告知服务是 生产 还是 测试：
+
+- AwardService 奖励相关服务，提供：
+  - 奖励发放查询（根据查询条件）
+- ApiService 接口调用服务，支持 设定 HEADER（l-user-id/l-user-locale/l-trace-id/l-debug-timestamp）提供：
+  - 运行定时任务
+  - 运行消费任务
+  - 调用接口
+- RankService 获取榜单服务，通过接口获取榜单排行信息，主要参数：biz  topic  key   count  locale
+
+
+
+AwardService 经常的查询有以下：
+
+
+
+```sql
+-- 查询发奖记录
+SELECT * FROM mod_common_award_record
+WHERE
+biz={biz} and topic={topic} and create_time between {发奖时间} and {发奖时间后30秒};
+
+-- 查询某些玩家的中奖记录
+SELECT * FROM mod_common_award_record
+WHERE
+biz={biz} and topic={topic} and player in ({players}) and create_time between {发奖时间} and {发奖时间后30秒};
+
+-- 查询某些玩家的中奖记录 指定玩家类型
+SELECT * FROM mod_common_award_record
+WHERE
+biz={biz} and topic={topic} and player in ({players}) and player_type={playerTpye} and create_time between {发奖时间} and {发奖时间后30秒};
+
+-- 检查奖励配置
+select * from mod_common_award
+where biz={biz} and name={name}
+order by stage, sequence
+```
+
+
+
+
+
+编写一个线上的检查脚本：`day-3.check.ts`，表明是 pk 活动针对第3天的检查脚本，检查内容和步骤如下：
+
+
+
+- 结算时间
+
+  - `2026-08-19T22:37:00+08:00` topic=player_n_100 locale=ko 结算
+  - `2026-08-19T23:37:00+08:00` topic=player_n_100 locale=ph 结算
+  - `2026-08-20T00:37:00+08:00` 
+    - topic=player_n_100 locale=vi 结算
+    - topic=player_in_n_200 locale=in 结算
+    - topic=room_in_n_200 locale=in 结算
+    - topic=family_in_n_200 locale=in 结算
+
+- 结算检查：
+
+  - 检查 状态 是否为已结算：
+
+    - select * from mod_common_round where biz={} and topic={} and `key`="-" and locale='{locale}'
+    - status 预期 200
+
+  - 检查发奖情况是否符合预期
+
+    - 获取前 n 名
+
+      - ```
+        curl --request POST \
+          --url {host}/active/v3/pk-v202608/m/user/rank \
+          --header 'Content-Type: application/json' \
+          --header 'l-user-id: 7586' \ 
+          --header 'l-user-locale: in' \  # 指定大区
+          --data '{
+            "key": "-", 
+            "count": 100 # 前 n 名
+        }'
+        ```
+
+      - 
+
+    - 获取奖励配置 `http://localhost:3000/api/documents/12.md`
+
+    - 获取奖励实际发放
+
+    - 进行匹配
+
+  - 检查入围名单：select * from mod_common_player_list where biz={biz} and `key`={topic} 是否前x名都进入榜单且score一致
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

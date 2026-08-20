@@ -1,0 +1,9 @@
+# Local secrets (l-user-token etc.) — never commit
+config.json
+
+# Dependencies
+node_modules/
+
+# OS / editor
+.DS_Store
+*.log

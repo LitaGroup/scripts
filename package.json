@@ -1,0 +1,7 @@
+{
+  "name": "scripts",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "符合输出协议的脚本集合"
+}
