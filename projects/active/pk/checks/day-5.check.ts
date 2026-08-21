@@ -3,7 +3,7 @@ import { MySQLProdResource } from '../../../../src/resources/MySQLProdResource.t
 import { RankService, type RankItem } from '../../../../src/services/RankService.ts';
 
 const BIZ = 'pk-v202608';
-const DOC_URL = 'http://localhost:3000/api/documents/12.md';
+const DOC_URL = 'http://project.cinta.team/api/documents/3.md';
 const KEY_DAILY = '20260821';
 const AWARD_LEAD_MS = 60_000;
 const AWARD_WINDOW_MS = 3_600_000;

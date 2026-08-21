@@ -4,7 +4,7 @@ import { RankService, type RankItem } from '../../../../src/services/RankService
 import { PlayerService } from '../../../../src/services/PlayerService.ts';
 
 const BIZ = 'pk-v202608';
-const DOC_URL = 'http://localhost:3000/api/documents/12.md';
+const DOC_URL = 'http://project.cinta.team/api/documents/3.md';
 const SCORE_TOLERANCE = 1.0;
 const KEY_TOTAL = '-';
 
