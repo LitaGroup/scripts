@@ -1,3 +1,16 @@
 {
-  "userToken": "your-l-user-token-here"
+  "userToken": "your-l-user-token-here",
+  "mysql": {
+    "host": "your-test-mysql-host",
+    "port": 3306,
+    "user": "your-test-user",
+    "password": "your-test-password",
+    "charset": "utf8mb4",
+    "defaultDatabase": "funbit"
+  },
+  "redis": {
+    "host": "redis-server.test.cinta.team",
+    "port": 6379,
+    "db": 0
+  }
 }

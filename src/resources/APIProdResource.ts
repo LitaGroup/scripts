@@ -1,5 +1,4 @@
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { loadConfig } from './config.ts';
 import type { Database } from './databases.ts';
 
 export interface APIProdConfig {
@@ -28,31 +27,6 @@ export interface RequestOptions {
 const DEFAULT_HOST = 'https://api.cinta.team/';
 const QUERY_PATH = 'admin-ai/v1/query/execute';
 const DEFAULT_TIMEOUT_MS = 30_000;
-
-let cachedConfig: APIProdConfig | null = null;
-
-function loadConfig(): APIProdConfig {
-  if (cachedConfig) return cachedConfig;
-  const path = process.env.LITA_CONFIG_PATH ?? resolve(process.cwd(), 'config.json');
-  let raw: string;
-  try {
-    raw = readFileSync(path, 'utf-8');
-  } catch (e) {
-    throw new Error(`APIProdResource: cannot read config file at ${path}. Create config.json (see config.example.json) or set LITA_CONFIG_PATH. Cause: ${(e as Error).message}`);
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch (e) {
-    throw new Error(`APIProdResource: invalid JSON in config file ${path}: ${(e as Error).message}`);
-  }
-  const cfg = parsed as APIProdConfig;
-  if (!cfg.userToken || typeof cfg.userToken !== 'string') {
-    throw new Error(`APIProdResource: config file ${path} is missing string field "userToken".`);
-  }
-  cachedConfig = cfg;
-  return cfg;
-}
 
 function generateTraceId(): string {
   const ts = Date.now().toString(36);
@@ -83,6 +57,10 @@ export class APIProdResource {
 
   async request(path: string, options: RequestOptions = {}): Promise<Response> {
     const cfg = loadConfig();
+    const token = cfg.userToken;
+    if (!token || typeof token !== 'string') {
+      throw new Error('APIProdResource: config file is missing string field "userToken".');
+    }
     const trace = generateTraceId();
     const url = joinUrl(this.host, path);
     const method = options.method ?? 'GET';
@@ -92,7 +70,7 @@ export class APIProdResource {
       'Connection': 'keep-alive',
       'Content-Type': 'application/json',
       'l-trace-id': trace,
-      'l-user-token': cfg.userToken,
+      'l-user-token': token,
       ...(options.headers ?? {}),
     };
     const init: RequestInit = {

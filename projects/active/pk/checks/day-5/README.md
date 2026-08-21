@@ -1,18 +1,14 @@
-# 第4天检查
+# 第5天检查
 
-> 针对 202608 的PK检查，检查日期：2026-08-20 的数据
+> 针对 260817 的PK检查，检查日期：2026-08-21 的数据
 
 ## 时间配置
 
-- `2026-08-20T23:07:00+08:00` topic=player_100_50 locale=ko key=20260820 的日榜结算
-- `2026-08-21T00:07:00+08:00` topic=player_100_50 locale=ko key=20260820 的日榜结算
-- `2026-08-21T01:07:00+08:00` 
-  - topic=player_100_50 locale=vi key=20260820 的日榜结算
-  - topic=player_in_200_100 locale=in key=20260820 的日榜结算
-
-
-
-
+- `2026-08-21T23:07:00+08:00` topic=player_100_50 locale=ko key=20260821 的日榜结算
+- `2026-08-22T00:07:00+08:00` topic=player_100_50 locale=ph key=20260821 的日榜结算
+- `2026-08-22T01:07:00+08:00`
+  - topic=player_100_50 locale=vi key=20260821 的日榜结算
+  - topic=player_in_200_100 locale=in key=20260821 的日榜结算
 
 ## 检查内容
 
@@ -33,31 +29,16 @@
         curl --request POST \
           --url {host}/active/v3/pk-v202608/m/user/rank \
           --header 'Content-Type: application/json' \
-          --header 'l-user-id: 7586' \ 
+          --header 'l-user-id: 7586' \
           --header 'l-user-locale: in' \  # 指定大区
           --data '{
-            "key": "-", 
+            "key": "20260821",
             "count": 100 # 前 n 名
         }'
         ```
-
-      - 
 
     - 获取奖励配置 `http://localhost:3000/api/documents/12.md`
 
     - 获取奖励实际发放
 
     - 进行匹配检查
-
-
-
-
-
-
-
-
-
-
-
-
-
