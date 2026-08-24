@@ -3,6 +3,7 @@ import { APITestResource } from '../resources/APITestResource.ts';
 import { MySQLTestResource } from '../resources/MySQLTestResource.ts';
 import { RedisTestResource } from '../resources/RedisTestResource.ts';
 import { PkFamilyService } from '../services/PkFamilyService.ts';
+import { PkPlayerService } from '../services/PkPlayerService.ts';
 import { LitaTeamMessageService } from '../services/LitaTeamMessageService.ts';
 
 /**
@@ -14,6 +15,7 @@ export abstract class TestBaseClass extends CheckBaseClass {
   private _mysql: MySQLTestResource | null = null;
   private _redis: RedisTestResource | null = null;
   private _family: PkFamilyService | null = null;
+  private _player: PkPlayerService | null = null;
   private _litaTeam: LitaTeamMessageService | null = null;
 
   protected get api(): APITestResource {
@@ -30,6 +32,10 @@ export abstract class TestBaseClass extends CheckBaseClass {
 
   protected get family(): PkFamilyService {
     return (this._family ??= new PkFamilyService({ api: this.api, mysql: this.mysql, redis: this.redis }));
+  }
+
+  protected get player(): PkPlayerService {
+    return (this._player ??= new PkPlayerService({ api: this.api, mysql: this.mysql, redis: this.redis }));
   }
 
   protected get litaTeam(): LitaTeamMessageService {

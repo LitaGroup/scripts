@@ -30,6 +30,12 @@ export function endOfDayMs(locale: string, dayStr: string): number {
   return localMs(locale, dayStr) + 24 * 3600 * 1000 - 1000;
 }
 
+/** 返回该 locale 的任意本地时间毫秒时间戳（dtStr 形如 "2026-08-19 23:30:00"） */
+export function localAtMs(locale: string, dtStr: string): number {
+  const offset = LOCALE_TZ[locale] ?? 8;
+  return Date.parse(dtStr.replace(' ', 'T') + formatOffset(offset));
+}
+
 /** ISO 8601 duration 表达式（P5D/P125D）转秒数 */
 export function expireSeconds(expr: string): number {
   const e = (expr ?? '').toUpperCase().replace(/^P/, '');

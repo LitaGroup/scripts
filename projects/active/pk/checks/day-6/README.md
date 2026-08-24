@@ -17,10 +17,10 @@
 1. 检查原阶段（room_in_200_100）是否完成结算
    1. 预期：status = 200
    2. 预期：奖励发放（3个给用户 player_type=USER、3个给房间 player_type=ROOM
-   3. 预期：晋级名单  mod_common_player_list 中 key='room_in_200_100' locale='in' 有 100 个ID
+   3. 预期：晋级名单 mod_common_player_list 中 key='room_in_200_100' locale='in'，数量与接口前 100 名榜单实际数量一致（以接口数量为准）
 2. 检查新阶段（room_in_100_50）是否初始化完成
    1. 预期：status = 100
-   2. 预期：有初始化的积分数据，且等于晋级名单得分的50%（继承50%积分）
+   2. 预期：有初始化的积分数据，且等于晋级名单的得分（100%继承）
       1. select * from mod_common_rank_record where biz={} and topic={} and `key`='-' and trans_no like 'INIT-%'
 
 
@@ -37,7 +37,7 @@
 1. 检查原阶段是否完成结算
    1. 预期：status=200
    2. 预期：奖励发放，包括：给排名前面的（陪玩）和贡献者的（用户 top1），配置阶段 200进100-总榜，核对前 10 名
-   3. 预期：晋级名单 mod_common_player_list 中 key='{topic}' locale='{locale}' 有 50（in 有 100）个ID
+   3. 预期：晋级名单 mod_common_player_list 中 key='{topic}' locale='{locale}'，数量与接口前 50（in 为 100）名榜单实际数量一致（以接口数量为准）
 2. 检查新阶段（nextTopic）是否初始化完成
    1. 预期：status = 100
    2. 预期：start_time=2026-08-23T00:00:00 本地时间 finish_time=2026-08-25T23:30:00 本地时间
@@ -59,8 +59,8 @@
 1. 检查原阶段（family_in_200_100）是否完成结算
    1. 预期：status = 200
    2. 预期：奖励发放（给家族成员 player_type=USER）
-   3. 预期：晋级名单  mod_common_player_list 中 key='family_in_200_100' locale='in' 有 100 个ID
+   3. 预期：晋级名单 mod_common_player_list 中 key='family_in_200_100' locale='in'，数量与接口前 100 名榜单实际数量一致（以接口数量为准）
 2. 检查新阶段（family_in_100_50）是否初始化完成
    1. 预期：status = 100
-   2. 预期：有初始化的积分数据，且等于晋级名单得分的50%（继承50%积分）
+   2. 预期：有初始化的积分数据，且等于晋级名单的得分（100%继承）
       1. select * from mod_common_rank_record where biz={} and topic={} and `key`='-' and trans_no like 'INIT-%'

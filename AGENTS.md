@@ -9,7 +9,7 @@ Script collection: automated test scripts (`*.test.ts`) and online health-check 
 - No build / test / lint / typecheck tooling is configured; do not assume any.
 
 ## Layout
-- Scripts: `projects/<category>/<activity>/{checks,tests}` (current: `projects/active/pk/{checks,tests}`, empty).
+- Scripts: `projects/<category>/<activity>/{checks,tests}` (current: `projects/active/pk/{checks,tests}`).
   - `tests/`  — automated test cases (`.test.ts`)
   - `checks/` — online health checks (`.check.ts`)
 - Shared layers live in top-level `src/`: `src/resources/` (resource layer), `src/services/` (service layer), `src/base/` (business layer).

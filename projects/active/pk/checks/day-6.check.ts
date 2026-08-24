@@ -70,7 +70,7 @@ const PLAYER_PROMOTIONS: PlayerPromotion[] = [
 ];
 
 // 每个榜单晋级检查项数量（用于 start.total）
-const ROOM_CHECK_COUNT = 8;
+const ROOM_CHECK_COUNT = 9;
 const FAMILY_CHECK_COUNT = 9;
 const PLAYER_CHECK_COUNT = 11;
 
@@ -199,7 +199,13 @@ class Day6Check extends CheckBaseClass {
     return r.data.map((row) => ({ player: String(row[0]), score: Number(row[1]) }));
   }
 
-  private async checkInitScores(title: string, topic: string, locale: string, playerList: { player: string; score: number }[]): Promise<void> {
+  private async checkInitScores(
+    title: string,
+    topic: string,
+    locale: string,
+    playerList: { player: string; score: number }[],
+    scoreRatio: number,
+  ): Promise<void> {
     let initScores: Map<string, number> = new Map();
     await this.act(`[${title}] 获取新阶段(${topic})初始化积分`, async () => {
       const r = await MySQLProdResource.query(
@@ -210,7 +216,8 @@ class Day6Check extends CheckBaseClass {
       this.log(`初始化积分 ${initScores.size} 条`);
     });
 
-    await this.check(`[${title}] 初始化积分等于晋级名单得分的50%`, async (): Promise<CheckResult> => {
+    const ratioText = scoreRatio === 1 ? '' : `的${scoreRatio * 100}%`;
+    await this.check(`[${title}] 初始化积分等于晋级名单得分${ratioText}`, async (): Promise<CheckResult> => {
       if (playerList.length === 0) this.skip('晋级名单为空');
       let missing = 0;
       let mismatch = 0;
@@ -222,7 +229,7 @@ class Day6Check extends CheckBaseClass {
           if (detail.length < 3) detail.push(`${pl.player}无初始化积分`);
           continue;
         }
-        const expected = pl.score * 0.5;
+        const expected = pl.score * scoreRatio;
         if (Math.abs(amt - expected) > SCORE_TOLERANCE) {
           mismatch++;
           if (detail.length < 3) detail.push(`${pl.player}(${amt}≠${expected})`);
@@ -231,7 +238,7 @@ class Day6Check extends CheckBaseClass {
       const extra = initScores.size - (playerList.length - missing);
       const pass = missing === 0 && mismatch === 0 && extra === 0;
       return {
-        expect: `初始化积分 ${playerList.length} 条且等于晋级名单得分的50%`,
+        expect: `初始化积分 ${playerList.length} 条且等于晋级名单得分${ratioText}`,
         real: pass
           ? `全部一致 (${playerList.length})`
           : `缺失 ${missing}，分数不一致 ${mismatch}，多出 ${Math.max(extra, 0)}${detail.length ? ': ' + detail.join('; ') : ''}`,
@@ -253,6 +260,7 @@ class Day6Check extends CheckBaseClass {
 
     let awardRecords: { playerType: string; awardType: string; awardId: number }[] = [];
     let playerList: { player: string; score: number }[] = [];
+    let rankCount = 0;
 
     // 1. 原阶段是否完成结算
     await this.check(`[${title}] 原阶段(${p.oldTopic})结算 status=200`, async (): Promise<CheckResult> => {
@@ -305,14 +313,24 @@ class Day6Check extends CheckBaseClass {
       };
     });
 
-    // 3. 晋级名单
+    // 3. 晋级名单（数量以接口前N名的实际数量为准）
+    await this.act(`[${title}] 获取前 ${p.promoteCount} 名榜单`, async () => {
+      const rr = await this.rank.queryRank(BIZ, p.oldTopic, KEY_TOTAL, p.promoteCount, p.locale);
+      rankCount = rr.list.length;
+      this.log(`round.status=${rr.round.status}, 实际 ${rankCount} 名`);
+    });
+
     await this.act(`[${title}] 获取晋级名单`, async () => {
       playerList = await this.fetchPlayerList(p.oldTopic, p.locale);
       this.log(`晋级名单 ${playerList.length} 个ID`);
     });
 
-    await this.check(`[${title}] 晋级名单有 ${p.promoteCount} 个ID`, async (): Promise<CheckResult> => {
-      return { expect: String(p.promoteCount), real: String(playerList.length), pass: playerList.length === p.promoteCount };
+    await this.check(`[${title}] 晋级名单数量与榜单一致`, async (): Promise<CheckResult> => {
+      return {
+        expect: `前${p.promoteCount}名榜单实际 ${rankCount} 名`,
+        real: String(playerList.length),
+        pass: playerList.length === rankCount,
+      };
     });
 
     // 4. 新阶段是否初始化完成
@@ -326,7 +344,7 @@ class Day6Check extends CheckBaseClass {
       return { expect: '100', real: String(status), pass: status === 100 };
     });
 
-    await this.checkInitScores(title, p.newTopic, p.locale, playerList);
+    await this.checkInitScores(title, p.newTopic, p.locale, playerList, 1);
   }
 
   private async checkFamilyPromotion(p: RoomPromotion): Promise<void> {
@@ -356,8 +374,8 @@ class Day6Check extends CheckBaseClass {
     });
 
     // 2. 原阶段奖励发放（给前3名家族的成员，player_type=USER）
-    await this.act(`[${title}] 获取前 ${p.awardTop} 名家族榜`, async () => {
-      const rr = await this.rank.queryRank(BIZ, p.oldTopic, KEY_TOTAL, p.awardTop, p.locale);
+    await this.act(`[${title}] 获取前 ${p.promoteCount} 名家族榜`, async () => {
+      const rr = await this.rank.queryRank(BIZ, p.oldTopic, KEY_TOTAL, p.promoteCount, p.locale);
       rankList = rr.list;
       this.log(`round.status=${rr.round.status}, 实际 ${rankList.length} 名`);
       if (rankList.length === 0) throw new Error('榜单为空');
@@ -368,7 +386,7 @@ class Day6Check extends CheckBaseClass {
       const spec = { type: cfg[0].type, id: cfg[0].id };
       const families: { id: string; members: string[] }[] = [];
       const allMembers: string[] = [];
-      for (const it of rankList) {
+      for (const it of rankList.slice(0, p.awardTop)) {
         const members = await this.player.getMembersOfFamily(it.player);
         families.push({ id: it.player, members });
         for (const m of members) allMembers.push(m);
@@ -408,14 +426,18 @@ class Day6Check extends CheckBaseClass {
       };
     });
 
-    // 3. 晋级名单
+    // 3. 晋级名单（数量以接口前N名的实际数量为准）
     await this.act(`[${title}] 获取晋级名单`, async () => {
       playerList = await this.fetchPlayerList(p.oldTopic, p.locale);
       this.log(`晋级名单 ${playerList.length} 个ID`);
     });
 
-    await this.check(`[${title}] 晋级名单有 ${p.promoteCount} 个ID`, async (): Promise<CheckResult> => {
-      return { expect: String(p.promoteCount), real: String(playerList.length), pass: playerList.length === p.promoteCount };
+    await this.check(`[${title}] 晋级名单数量与榜单一致`, async (): Promise<CheckResult> => {
+      return {
+        expect: `前${p.promoteCount}名榜单实际 ${rankList.length} 名`,
+        real: String(playerList.length),
+        pass: playerList.length === rankList.length,
+      };
     });
 
     // 4. 新阶段是否初始化完成
@@ -429,7 +451,7 @@ class Day6Check extends CheckBaseClass {
       return { expect: '100', real: String(status), pass: status === 100 };
     });
 
-    await this.checkInitScores(title, p.newTopic, p.locale, playerList);
+    await this.checkInitScores(title, p.newTopic, p.locale, playerList, 1);
   }
 
   private async checkPlayerPromotion(p: PlayerPromotion): Promise<void> {
@@ -461,8 +483,8 @@ class Day6Check extends CheckBaseClass {
     });
 
     // 2. 原阶段奖励发放（名次奖励给陪玩 + 贡献top1用户）
-    await this.act(`[${title}] 获取前 ${p.awardTop} 名总榜`, async () => {
-      const rr = await this.rank.queryRank(BIZ, p.oldTopic, KEY_TOTAL, p.awardTop, p.locale);
+    await this.act(`[${title}] 获取前 ${p.promoteCount} 名总榜`, async () => {
+      const rr = await this.rank.queryRank(BIZ, p.oldTopic, KEY_TOTAL, p.promoteCount, p.locale);
       rankList = rr.list;
       this.log(`round.status=${rr.round.status}, 实际 ${rankList.length} 名`);
       if (rankList.length === 0) throw new Error('榜单为空');
@@ -470,7 +492,7 @@ class Day6Check extends CheckBaseClass {
 
     await this.act(`[${title}] 获取发奖记录`, async () => {
       const ids: string[] = [];
-      for (const it of rankList) {
+      for (const it of rankList.slice(0, p.awardTop)) {
         ids.push(it.player);
         if (it.contributors[0]) ids.push(it.contributors[0].player);
       }
@@ -493,7 +515,7 @@ class Day6Check extends CheckBaseClass {
       let missing = 0;
       let checked = 0;
       const detail: string[] = [];
-      for (const it of rankList) {
+      for (const it of rankList.slice(0, p.awardTop)) {
         for (const e of expectedForRank(cfg, it.rank)) {
           let recipientId: string;
           if (e.recipient === 'entity') {
@@ -518,14 +540,18 @@ class Day6Check extends CheckBaseClass {
       };
     });
 
-    // 3. 晋级名单
+    // 3. 晋级名单（数量以接口前N名的实际数量为准）
     await this.act(`[${title}] 获取晋级名单`, async () => {
       playerList = await this.fetchPlayerList(p.oldTopic, p.locale);
       this.log(`晋级名单 ${playerList.length} 个ID`);
     });
 
-    await this.check(`[${title}] 晋级名单有 ${p.promoteCount} 个ID`, async (): Promise<CheckResult> => {
-      return { expect: String(p.promoteCount), real: String(playerList.length), pass: playerList.length === p.promoteCount };
+    await this.check(`[${title}] 晋级名单数量与榜单一致`, async (): Promise<CheckResult> => {
+      return {
+        expect: `前${p.promoteCount}名榜单实际 ${rankList.length} 名`,
+        real: String(playerList.length),
+        pass: playerList.length === rankList.length,
+      };
     });
 
     // 4. 新阶段是否初始化完成（状态 + 周期时间）
@@ -533,7 +559,7 @@ class Day6Check extends CheckBaseClass {
       return this.checkRoundStatusAndPeriod(p.newTopic, p.locale, stageStart, stageFinish);
     });
 
-    await this.checkInitScores(title, p.newTopic, p.locale, playerList);
+    await this.checkInitScores(title, p.newTopic, p.locale, playerList, 0.5);
 
     // 5. 新阶段 1v1 PK 是否初始化完成
     await this.check(`[${title}] 1v1阶段(${p.newTopic1v1})初始化 status=100 且周期正确`, async (): Promise<CheckResult> => {
