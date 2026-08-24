@@ -71,12 +71,9 @@ function roundSpecs(p: PkLocale): RoundSpec[] {
   return specs.sort((a, b) => a.startMs - b.startMs);
 }
 
-// 期望状态：已结算=200，进行中=100，未开始=0
-function expectedStatus(spec: RoundSpec, now: number): number {
-  if (now >= spec.settleMs) return 200;
-  if (now >= spec.startMs) return 100;
-  return 0;
-}
+// 状态变更依据：是否执行过初始化 / 是否执行过结算
+// 0=未初始化，100=已初始化(未结算)，200=已结算
+// 初始化可能在开始时间之前执行，故开始时间之前 0 和 100 均合法
 
 interface LocaleData {
   whitelistCount: number;
@@ -165,14 +162,26 @@ class Day7Check extends CheckBaseClass {
 
     // 3. 逐轮检查（第三阶段 3 天 × 每天 2 轮）
     for (const s of specs) {
-      // 3.1 轮次状态：200=已结算 / 100=进行中 / 0=未初始化
+      // 3.1 轮次状态：200=已结算 / 100=已初始化 / 0=未初始化
       await this.check(`[${title}] 轮次 ${s.key} 状态`, async (): Promise<CheckResult> => {
-        const expect = expectedStatus(s, now);
         const actual = data.roundStatus.get(s.key);
+        let expect: string;
+        let pass: boolean;
+        if (now >= s.settleMs) {
+          expect = '200';
+          pass = actual === 200;
+        } else if (now >= s.startMs) {
+          expect = '100';
+          pass = actual === 100;
+        } else {
+          // 未到开始时间：初始化可能已执行(100)或未执行(0)，均合法
+          expect = '0|100';
+          pass = actual === 0 || actual === 100;
+        }
         return {
-          expect: String(expect),
+          expect,
           real: actual === undefined ? '(无记录)' : String(actual),
-          pass: actual === expect,
+          pass,
         };
       });
 
