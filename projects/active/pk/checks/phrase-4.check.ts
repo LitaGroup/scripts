@@ -12,6 +12,9 @@ const AWARD_WINDOW_MS = 3_600_000;
 const FIRST_PERIOD_KEY = '2026082600'; // 第四阶段第一期PK（08-26 00:00 本地）
 const FIRST_PERIOD_KEY2 = '2026082618'; // 首日第二轮（08-26 18:00 本地）
 const SECOND_DAY_KEY = '2026082700'; // 次日第一轮（08-27 00:00 本地）
+const SECOND_DAY_KEY2 = '2026082718'; // 次日第二轮（08-27 18:00 本地）
+const THIRD_DAY_KEY = '2026082800'; // 第三日第一轮（08-28 00:00 本地）
+const THIRD_DAY_KEY2 = '2026082818'; // 第三日第二轮（08-28 18:00 本地）
 const REVIVE_COUNT = 4;
 
 // 胜场 -> BUFF：1→1.0 2→1.0 3→1.05 4→1.10 5→1.15 6→1.20（胜场 1/2 也可能落表，BUFF 默认 1.0）
@@ -88,7 +91,7 @@ const PLAYER_PROMOTIONS: PlayerPromotion[] = [
 // 每个榜单晋级检查项数量（用于 start.total）
 const ROOM_CHECK_COUNT = 9;
 const FAMILY_CHECK_COUNT = 10;
-const PLAYER_CHECK_COUNT = 20;
+const PLAYER_CHECK_COUNT = 23;
 
 function quoteStr(s: string): string {
   return "'" + s.replace(/'/g, "''") + "'";
@@ -815,6 +818,24 @@ class Phrase4Check extends CheckBaseClass {
       }
       return { expect, real: `对阵${pairs}条`, pass: pairs === p.pairCountDay2 };
     });
+
+    // 复活赛结算后的其余场次（次日第二轮、第三日两轮）共用同一核对逻辑
+    const laterRounds: { key: string; start: string; desc: string }[] = [
+      { key: SECOND_DAY_KEY2, start: `2026-08-27T18:00:00${p.tz}`, desc: '次日第二轮' },
+      { key: THIRD_DAY_KEY, start: `2026-08-28T00:00:00${p.tz}`, desc: '第三日第一轮' },
+      { key: THIRD_DAY_KEY2, start: `2026-08-28T18:00:00${p.tz}`, desc: '第三日第二轮' },
+    ];
+    for (const r of laterRounds) {
+      await this.check(`[${title}] ${r.desc}对阵(key=${r.key})`, async (): Promise<CheckResult> => {
+        const pairs = this.pairCounts.get(r.key);
+        const expect = `对阵${p.pairCountDay2}条（含复活赛前${REVIVE_COUNT}名）`;
+        if (pairs === undefined) {
+          if (Date.now() < Date.parse(r.start)) this.skip(`${r.desc}尚未生成`);
+          return { expect, real: '(无对阵数据)', pass: false };
+        }
+        return { expect, real: `对阵${pairs}条`, pass: pairs === p.pairCountDay2 };
+      });
+    }
   }
 }
 
