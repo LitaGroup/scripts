@@ -1,6 +1,9 @@
 # Local secrets (l-user-token etc.) — never commit
 config.json
 
+# APP script data config (accounts/passwords) — never commit
+config.app.json
+
 # Dependencies
 node_modules/
 

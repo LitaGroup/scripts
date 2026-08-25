@@ -63,21 +63,21 @@ interface PlayerPromotion {
 
 const ROOM_PROMOTION: RoomPromotion = {
   locale: 'in',
-  oldTopic: 'room_in_100_50',
-  newTopic: 'room_in_50_20',
-  promoteTime: '2026-08-25T23:37:00+07:00',
-  promoteCount: 50,
-  configStage: '100进50-总榜',
+  oldTopic: 'room_in_50_20',
+  newTopic: 'room_in_20_10',
+  promoteTime: '2026-08-26T23:37:00+07:00',
+  promoteCount: 20,
+  configStage: '50进20-总榜',
   awardTop: 3,
 };
 
 const FAMILY_PROMOTION: RoomPromotion = {
   locale: 'in',
-  oldTopic: 'family_in_100_50',
-  newTopic: 'family_in_50_20',
-  promoteTime: '2026-08-25T23:37:00+07:00',
-  promoteCount: 50,
-  configStage: '100进50-总榜',
+  oldTopic: 'family_in_50_20',
+  newTopic: 'family_in_20_10',
+  promoteTime: '2026-08-26T23:37:00+07:00',
+  promoteCount: 20,
+  configStage: '50进20-总榜',
   awardTop: 3,
 };
 
@@ -306,7 +306,7 @@ class Phrase4Check extends CheckBaseClass {
   }
 
   // ============================================================
-  // 房间榜：room_in_100_50 -> room_in_50_20
+  // 房间榜：room_in_50_20 -> room_in_20_10
   // ============================================================
   private async checkRoomPromotion(p: RoomPromotion): Promise<void> {
     const title = `房间榜 ${p.oldTopic}→${p.newTopic} / ${p.locale}`;
@@ -401,7 +401,7 @@ class Phrase4Check extends CheckBaseClass {
   }
 
   // ============================================================
-  // 家族榜：family_in_100_50 -> family_in_50_20
+  // 家族榜：family_in_50_20 -> family_in_20_10
   // ============================================================
   private async checkFamilyPromotion(p: RoomPromotion): Promise<void> {
     const title = `家族榜 ${p.oldTopic}→${p.newTopic} / ${p.locale}`;

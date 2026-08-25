@@ -1,0 +1,8 @@
+{
+  "accounts": {
+    "default": {
+      "username": "your-test-account-username",
+      "password": "your-test-account-password"
+    }
+  }
+}

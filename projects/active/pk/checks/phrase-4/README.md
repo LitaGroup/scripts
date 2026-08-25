@@ -12,15 +12,15 @@
 
 ## 房间榜
 
-检查大区：in，晋级时间：`2026-08-25T23:37:00+07:00`
+检查大区：in，晋级时间：`2026-08-26T23:37:00+07:00`
 
 
 
-1. 检查原阶段（room_in_100_50）是否完成结算
+1. 检查原阶段（room_in_50_20）是否完成结算
    1. 预期：status = 200
    2. 预期：奖励发放（3个给用户 player_type=USER、3个给房间 player_type=ROOM
-   3. 预期：晋级名单 mod_common_player_list 中 key='room_in_100_50' locale='in'，数量与接口前 50 名榜单实际数量一致（以接口数量为准）
-2. 检查新阶段（room_in_50_20）是否初始化完成
+   3. 预期：晋级名单 mod_common_player_list 中 key='room_in_50_20' locale='in'，数量与接口前 20 名榜单实际数量一致（以接口数量为准）
+2. 检查新阶段（room_in_20_10）是否初始化完成
    1. 预期：status = 100
    2. 预期：有初始化的积分数据，且等于晋级名单的得分（100%继承）
       1. select * from mod_common_rank_record where biz={} and topic={} and `key`='-' and trans_no like 'INIT-%'
@@ -29,15 +29,15 @@
 
 ## 家族榜
 
-检查大区：in，晋级时间：`2026-08-25T23:37:00+07:00`
+检查大区：in，晋级时间：`2026-08-26T23:37:00+07:00`
 
 
 
-1. 检查原阶段（family_in_100_50）是否完成结算
+1. 检查原阶段（family_in_50_20）是否完成结算
    1. 预期：status = 200
    2. 预期：奖励发放（给家族成员 player_type=USER 和 发放奖励给 家族 player_type=FAMILY）
-   3. 预期：晋级名单 mod_common_player_list 中 key='family_in_100_50' locale='in'，数量与接口前 50 名榜单实际数量一致（以接口数量为准）
-2. 检查新阶段（family_in_50_20）是否初始化完成
+   3. 预期：晋级名单 mod_common_player_list 中 key='family_in_50_20' locale='in'，数量与接口前 20 名榜单实际数量一致（以接口数量为准）
+2. 检查新阶段（family_in_20_10）是否初始化完成
    1. 预期：status = 100
    2. 预期：有初始化的积分数据，且等于晋级名单的得分（100%继承）
       1. select * from mod_common_rank_record where biz={} and topic={} and `key`='-' and trans_no like 'INIT-%'
