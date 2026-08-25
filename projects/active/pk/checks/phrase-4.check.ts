@@ -14,7 +14,7 @@ const FIRST_PERIOD_KEY2 = '2026082618'; // 首日第二轮（08-26 18:00 本地�
 const SECOND_DAY_KEY = '2026082700'; // 次日第一轮（08-27 00:00 本地）
 const REVIVE_COUNT = 4;
 
-// 胜场 -> BUFF：1→1.0 2→1.0 3→1.05 4→1.10 5→1.15 6→1.20（仅 BUFF>1.0 落表）
+// 胜场 -> BUFF：1→1.0 2→1.0 3→1.05 4→1.10 5→1.15 6→1.20（胜场 1/2 也可能落表，BUFF 默认 1.0）
 function expectedBuff(wins: number): number {
   if (wins >= 6) return 1.2;
   if (wins === 5) return 1.15;
@@ -673,9 +673,8 @@ class Phrase4Check extends CheckBaseClass {
           const wins = buffData.wins.get(player) ?? 0;
           const exp = expectedBuff(wins);
           checkedRows++;
-          if (wins < 3) {
-            problems.push(`${t}:${player}胜场${wins}不应有BUFF记录(${buff})`);
-          } else if (Math.abs(buff - exp) > 1e-9) {
+          // 胜场 1/2 允许有 BUFF 记录（默认 1.0），统一按映射值核对
+          if (Math.abs(buff - exp) > 1e-9) {
             problems.push(`${t}:${player}胜场${wins}应${exp}实${buff}`);
           }
         }
@@ -689,7 +688,7 @@ class Phrase4Check extends CheckBaseClass {
       }
       const pass = checkedRows > 0 && problems.length === 0;
       return {
-        expect: `BUFF=胜场映射（3→1.05 4→1.10 5→1.15 6→1.20），核对 ${checkedRows} 条`,
+        expect: `BUFF=胜场映射（1/2→1.0 3→1.05 4→1.10 5→1.15 6→1.20），核对 ${checkedRows} 条`,
         real: problems.length === 0 ? `全部一致 (${checkedRows})` : problems.slice(0, 3).join('; ') + (problems.length > 3 ? ` 等${problems.length}个问题` : ''),
         pass,
       };

@@ -93,7 +93,7 @@
 
 1. **复活赛时间**：复活赛实际周期为 `2026-08-26T00:00:00` ~ `2026-08-26T23:30:00` 本地（与 `mod_common_round` 一致），结算时间取 `2026-08-26T23:37:00` 本地。检查按时间自适应：结算前预期 status=100，结算后预期 status=200。
 2. **复活赛积分代入**：复活赛前 4 名代入新阶段的积分 = 复活赛总积分 + 上阶段总积分 × 50%，记录在 `mod_common_rank_record`（trans_no = `{复活赛topic}.revive.{player}`），非 `INIT-%` 记录。
-3. **BUFF 存储**：`mod_buffpk_player_buff`（biz/topic/locale/player/buff），仅胜场 ≥3（BUFF>1.0）的玩家落表；新阶段的陪玩榜 topic 与 1v1 topic 都会写入相同记录。脚本核对：每条记录 buff == 胜场映射值，且晋级名单内胜场 ≥3 的玩家必须有记录。
+3. **BUFF 存储**：`mod_buffpk_player_buff`（biz/topic/locale/player/buff），胜场 ≥3（BUFF>1.0）的玩家必须落表，胜场 1/2 的玩家也可能落表（BUFF 默认 1.0）；新阶段的陪玩榜 topic 与 1v1 topic 都会写入相同记录。脚本核对：每条记录 buff == 胜场映射值（1/2→1.0），且晋级名单内胜场 ≥3 的玩家必须有记录。
 4. **陪玩榜奖励配置阶段**：使用文档 `100进46-总榜`（与线上 `mod_common_award` 中 name=`player_50_20` / `player_in_100_46` 的配置一致；文档中陪玩榜无 `100进50-总榜`）。
 5. **晋级名单数量**：复活赛结算后，`mod_common_player_list`（key=原阶段topic）会追加复活赛前 4 名（score=0），因此数量预期 = 接口前 N 名实际数量 + 4（结算前不追加）。
 6. **INIT 积分检查**：复活赛前 4 名 score=0，不走 `INIT-%` 代入，核对时剔除。
