@@ -138,6 +138,7 @@ export abstract class FamilySettleBase extends TestBaseClass {
     }
 
     await this.check('晋级家族的家族长/管理员收到 LitaTeam 消息', async (): Promise<CheckResult> => {
+      await new Promise((resolve) => setTimeout(resolve, 1000)); // 消息落库有延迟，等待 1s 再查
       if (c.litaFinal) {
         await this.checkLitaTeamFinal();
       } else {
