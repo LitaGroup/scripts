@@ -105,7 +105,7 @@ class SampleTest extends AppBaseClass {
     // ---------- 1. 处理登录状态为未登录 ----------
     await this.act('打开APP进入首页，处理弹窗', async () => {
       // APP 启动后可能落在任意 tab，等待就绪即可（home=MainActivity，登录态会先命中）
-      await this.ensureAnyState(['home', 'logged-in', 'logged-out']);
+      await this.ensureAnyState(['home', 'logged-in', 'logged-out'], 30_000);
     });
 
     await this.act('检查登录状态，已登录则退出登录', async () => {
@@ -145,7 +145,7 @@ class SampleTest extends AppBaseClass {
     // ---------- 2. 验证 手机号+密码 登录 ----------
     await this.act('再次打开APP，进入"我的"tab', async () => {
       await this.activateApp();
-      await this.ensureAnyState(['home', 'logged-in', 'logged-out']); // APP 就绪
+      await this.ensureAnyState(['home', 'logged-in', 'logged-out'], 30_000); // 冷启动较慢，显式延长超时
       const state = await this.enterMeTab();
       if (state !== 'logged-out') throw new Error(`期望未登录(拉起登录页)，实际: ${state}`);
     });
@@ -153,15 +153,16 @@ class SampleTest extends AppBaseClass {
     await this.act(`手机号+密码登录（${TEST_PHONE}）`, async () => {
       await this.driver.click(by.id(ID.phoneLoginEntry)); // 手机号登录图标
       if (!(await this.driver.waitFor(by.id(ID.phoneInput)))) throw new Error('手机号输入页未出现');
-      // 选择中国区号 +86（底部弹出的国家列表，必要时在列表内滑动查找）
+      // 选择中国区号 +86（底部弹出的国家列表；按区号值 "(+86)" 定位，不受 APP 语言影响）
       await this.driver.click(by.id(ID.countryCode));
-      const china = by.text('China');
-      for (let i = 0; i < 6 && !(await this.driver.exists(china)); i++) {
+      if (!(await this.driver.waitFor(by.id(ID.countryList)))) throw new Error('国家列表未出现');
+      const chinaRow = by.xpath(`//*[@text='(+86)']/ancestor::*[@clickable='true'][1]`);
+      for (let i = 0; i < 6 && !(await this.driver.exists(chinaRow)); i++) {
         await this.driver.swipeInElement(by.id(ID.countryList), 'up');
         await sleep(500);
       }
-      if (!(await this.driver.exists(china))) throw new Error('国家列表中未找到 China (+86)');
-      await this.driver.click(china);
+      if (!(await this.driver.exists(chinaRow))) throw new Error('国家列表中未找到区号 (+86)');
+      await this.driver.click(chinaRow);
       await this.driver.input(by.id(ID.phoneInput), TEST_PHONE);
       // 输入后校验：确认内容真实写入
       const typedPhone = await this.driver.textOf(by.id(ID.phoneInput));
