@@ -793,10 +793,13 @@ class Phrase4Check extends CheckBaseClass {
     await this.check(`[${title}] 第一期PK对阵(key=${FIRST_PERIOD_KEY})`, async (): Promise<CheckResult> => {
       const roundStatus = await this.fetchRoundStatus(p.newTopic1v1, p.locale, FIRST_PERIOD_KEY);
       const pairs = this.pairCounts.get(FIRST_PERIOD_KEY);
-      const expect = `status=100, 对阵${p.pairCountDay1}条`;
+      // 首日第二轮（18:00 本地）开始后，第一期应已结算 status=200；之前进行中 status=100
+      const settled = Date.now() >= Date.parse(`2026-08-26T18:00:00${p.tz}`);
+      const expectStatus = settled ? 200 : 100;
+      const expect = `status=${expectStatus}, 对阵${p.pairCountDay1}条`;
       if (roundStatus === null && pairs === undefined) return { expect, real: '(无对阵数据)', pass: false };
       const real = `status=${roundStatus ?? '(无轮次)'}, 对阵${pairs ?? 0}条`;
-      return { expect, real, pass: roundStatus === 100 && pairs === p.pairCountDay1 };
+      return { expect, real, pass: roundStatus === expectStatus && pairs === p.pairCountDay1 };
     });
 
     await this.check(`[${title}] 首日第二轮对阵(key=${FIRST_PERIOD_KEY2})`, async (): Promise<CheckResult> => {
