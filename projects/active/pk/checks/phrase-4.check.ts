@@ -791,10 +791,15 @@ class Phrase4Check extends CheckBaseClass {
     });
 
     await this.check(`[${title}] 第一期PK对阵(key=${FIRST_PERIOD_KEY})`, async (): Promise<CheckResult> => {
-      const roundStatus = await this.fetchRoundStatus(p.newTopic1v1, p.locale, FIRST_PERIOD_KEY);
+      const rr = await MySQLProdResource.query(
+        'active',
+        `select status, finish_time from mod_common_round where biz=${quoteStr(BIZ)} and topic=${quoteStr(p.newTopic1v1)} and ${'`key`'}=${quoteStr(FIRST_PERIOD_KEY)} and locale=${quoteStr(p.locale)} limit 1`,
+      );
+      const roundStatus = rr.data.length > 0 ? Number(rr.data[0][0]) : null;
+      const finishTime = rr.data.length > 0 ? Number(rr.data[0][1]) : null;
       const pairs = this.pairCounts.get(FIRST_PERIOD_KEY);
-      // 首日第二轮（18:00 本地）开始后，第一期应已结算 status=200；之前进行中 status=100
-      const settled = Date.now() >= Date.parse(`2026-08-26T18:00:00${p.tz}`);
+      // 过了该轮次自身的结算时间(finish_time)即为 status=200，之前进行中 status=100
+      const settled = finishTime !== null && Date.now() >= finishTime;
       const expectStatus = settled ? 200 : 100;
       const expect = `status=${expectStatus}, 对阵${p.pairCountDay1}条`;
       if (roundStatus === null && pairs === undefined) return { expect, real: '(无对阵数据)', pass: false };
