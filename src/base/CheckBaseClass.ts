@@ -21,6 +21,7 @@ export abstract class CheckBaseClass {
   private successCount = 0;
   private failCount = 0;
   private skipCount = 0;
+  private failures: string[] = [];
 
   protected abstract run(): Promise<void>;
 
@@ -61,6 +62,7 @@ export abstract class CheckBaseClass {
         status = 'fail';
         message = (e as Error).message;
         this.failCount++;
+        this.failures.push(`${title}: ${message}`);
       }
     }
     this.emit('act', { no: this.no, title, status, message, time: this.elapsed() });
@@ -85,6 +87,7 @@ export abstract class CheckBaseClass {
         status = 'fail';
         message = r?.message ?? `期望 ${expect}，实际 ${real}`;
         this.failCount++;
+        this.failures.push(`${title}: ${message}`);
       }
     } catch (e) {
       if (e instanceof SkipSignal) {
@@ -95,6 +98,7 @@ export abstract class CheckBaseClass {
         status = 'fail';
         message = (e as Error).message;
         this.failCount++;
+        this.failures.push(`${title}: ${message}`);
       }
     }
     this.emit('check', { no: this.no, title, expect, real, status, message, time: this.elapsed() });
@@ -115,7 +119,11 @@ export abstract class CheckBaseClass {
   private emitDone(runError: Error | null): void {
     const time = this.elapsed();
     const status = this.failCount > 0 || runError !== null ? 'fail' : 'success';
-    const message = runError ? runError.message : '';
+    const message = runError
+      ? runError.message
+      : this.failures.length > 0
+        ? this.failures.slice(0, 5).join('；') + (this.failures.length > 5 ? ` 等${this.failures.length}条` : '')
+        : '';
     this.emit('done', {
       status,
       total: this.no,
