@@ -748,21 +748,22 @@ class Phrase4Check extends CheckBaseClass {
 
     await this.check(`[${title}] 复活赛积分代入新阶段`, async (): Promise<CheckResult> => {
       if (!reviveSettled) this.skip(`未到复活赛结算时间 ${p.reviveSettleTime}`);
-      if (reviveData.top.length === 0) return { expect: '代入积分=复活赛积分+上阶段积分×50%', real: '(复活赛无数据)', pass: false };
+      if (reviveData.top.length === 0) return { expect: '代入积分=floor(复活赛积分)+floor(上阶段积分)×50%（比对整数部分）', real: '(复活赛无数据)', pass: false };
       const problems: string[] = [];
       for (const t of reviveData.top) {
         const join = reviveData.joins.get(t.player);
         const oldScore = reviveData.oldScores.get(t.player) ?? 0;
-        const expected = t.score + oldScore * 0.5;
+        // 先向下取整，再计算 50%，相加后只比对整数部分
+        const expected = Math.floor(t.score) + Math.floor(oldScore) * 0.5;
         if (join === undefined) {
           problems.push(`${t.player}无代入记录`);
-        } else if (Math.abs(join - expected) > SCORE_TOLERANCE) {
-          problems.push(`${t.player}(${join}≠复活${t.score}+旧${oldScore}×50%)`);
+        } else if (Math.trunc(join) !== Math.trunc(expected)) {
+          problems.push(`${t.player}(${Math.trunc(join)}≠floor(复活${t.score})+floor(旧${oldScore})×50%=${Math.trunc(expected)})`);
         }
       }
       const pass = problems.length === 0;
       return {
-        expect: `代入积分=复活赛积分+上阶段积分×50%（${reviveData.top.length} 名）`,
+        expect: `代入积分=floor(复活赛积分)+floor(上阶段积分)×50%，比对整数部分（${reviveData.top.length} 名）`,
         real: pass ? `全部一致 (${reviveData.top.length})` : problems.slice(0, 3).join('; '),
         pass,
       };
