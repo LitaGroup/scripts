@@ -1,26 +1,23 @@
 # Bucket 分桶（AB 通用服务）技术交接文档
 
-> 本文以**代码实现为准**整理，与 `docs/bucket/README.md` 存在若干差异，差异汇总见第 9 节。
+> 本文以**代码实现为准**整理；`docs/bucket/README.md` 已按实现同步修正（历史差异记录见第 9 节）。
 
 ## 1. 概述
 
-Bucket 是 basic-common 服务提供的通用 AB 分桶服务。业务方在数据库 `bucket_config` 表中为每个 topic 配置多条 Google Aviator 表达式（带优先级），客户端请求接口时，服务端基于请求 Header 中的用户上下文逐条求值，返回所有 topic 的命中值。
+Bucket 是 basic-common 服务提供的通用 AB 分桶服务。业务方在数据库 `bucket_config` 表中为每个 topic 配置多条 Google Aviator 表达式（带优先级），客户端请求接口时，服务端基于请求体 JSON 参数中的用户上下文逐条求值，返回所有 topic 的命中值。
 
 整体链路：
 
 ```
-客户端 Header (L-*)
+客户端 JSON body
    │
    ▼
-HttpRequestFilter（框架包，全局 Servlet Filter）── 解析 Header → Session（ThreadLocal）
+BucketController ── POST /v1/bucket/get（@RequestBody GetParameter）
    │
    ▼
-BucketController ── POST /v1/bucket/get
-   │
-   ▼
-AbBucketServiceImpl.getAll()
+AbBucketServiceImpl.getAll(GetParameter)
    ├─ Caffeine 缓存（10s）取全量 bucket_config
-   ├─ buildEnv() 构建 Aviator 变量表（来自 Session）
+   ├─ buildEnv(parameter) 构建 Aviator 变量表（来自请求参数）
    ├─ 按 topic 分组，同 topic 按 priority 升序，首个命中即返回 value
    └─ 未命中返回 "0"
    │
@@ -31,23 +28,29 @@ R { status: 0, msg: "", data: { topic: value, ... } }
 ## 2. 对外接口
 
 - **方法/路径**：`POST /basic-common/v1/bucket/get`
-  - `@PostMapping("get")`（`BucketController.java:18`）
+  - `@PostMapping("get")`（`BucketController.java:35`）
   - `/basic-common` 前缀来自 `application.yml` 的 `server.servlet.context-path`
-- **请求参数**：无 body，用户上下文全部通过 Header 传递
+- **请求参数**：JSON body（`@RequestBody(required = false)`），类型为 `AbBucketService.GetParameter`，所有字段均可选，未传字段对应变量为 `null`
 
-| Header | 说明 | 解析目标 |
-| --- | --- | --- |
-| `L-User-ID` | 当前登录用户 ID | `Session.userID` |
-| `L-User-Locale` | 数据大区（如 in、th、ar） | `Session.locale`（`LocaleEnum`） |
-| `L-Lang` | 多语言（如 in、zh、en）；缺省时由 locale 推导 | `Session.lang`（`LangEnum`） |
-| `L-Trace-ID` | 链路 ID；缺省时自动生成 | `Session.traceID` |
-| `L-Version` | 客户端版本号 | `Session.version` |
-| `L-App-Platform` | 客户端平台（android / ios / h5 ...） | `Session.platform`（`PlatformEnum`） |
-| `L-IP` | 客户端真实 IP；缺省时回退 `X-Forwarded-For` → `X-Real-IP` → remoteAddr | `Session.ip` |
-| `L-App-ID` | App 标识（lita / cinta / lite） | `Session.app`（`AppEnum`） |
-| `L-Device-ID` | 设备 ID | `Session.device` |
+| JSON 字段 | 类型 | 说明 | 反序列化方式 |
+| --- | --- | --- | --- |
+| `user` | number（Long） | 用户 ID | 直接映射 |
+| `locale` | string（`LocaleEnum`） | 数据大区 | `@JsonCreator from(String)`，支持 value（如 `in`、`th`、`zh-tw`）及别名（如 `id`→Indonesia） |
+| `lang` | string（`LangEnum`） | 多语言 | `@JsonCreator from(String)`，支持 value 及别名 |
+| `platform` | **number**（`PlatformEnum`） | 客户端平台 | `@JsonValue` 在 `int value` 字段上：Android=`1`、IOS=`2`、Browser=`3`、Internal=`4`、Unknown=`0` |
+| `ip` | string | 客户端 IP | 直接映射 |
+| `app` | string（`AppEnum`） | App 标识 | `@JsonValue` 在 `value` 字段上：`MST`→Lita、`FRIEND`→Cinta、`LITE`→Lite |
+| `version` | string | 客户端版本号 | 直接映射 |
+| `device` | string | 设备 ID | 直接映射 |
 
-Header 解析由框架包 `gg.lita.framework:web` 的 `HttpRequestFilter`（`@WebFilter("/*")`，`@Order(0)`）完成，Controller 本身不读 Header、不校验登录。
+请求示例：
+
+```json
+{ "user": 12345, "locale": "in", "platform": 2, "app": "MST", "version": "8.20.0" }
+```
+
+- 非法的枚举值（如 `platform: "ios"`、`app: "lita"`）会导致 Jackson 反序列化失败，返回 400。
+- 框架包 `HttpRequestFilter` 仍会解析 `L-*` Header 写入 `Session`，但本接口**不再读取 Session**，上下文完全由请求参数决定。
 
 ### 响应示例
 
@@ -72,9 +75,10 @@ Header 解析由框架包 `gg.lita.framework:web` 的 `HttpRequestFilter`（`@We
 
 | 文件 | 职责 |
 | --- | --- |
-| `src/main/java/gg/lita/basic/basiccommon/controller/BucketController.java` | HTTP 入口，`/v1/bucket/get`，调用 service 并用 `R` 包装返回 |
-| `src/main/java/gg/lita/basic/basiccommon/service/AbBucketService.java` | Service 接口，定义 `Map<String, String> getAll()` |
-| `src/main/java/gg/lita/basic/basiccommon/service/impl/AbBucketServiceImpl.java` | 核心实现：Caffeine 缓存、构建 Aviator env、分组求值 |
+| `src/main/java/gg/lita/basic/basiccommon/controller/BucketController.java` | HTTP 入口，`/v1/bucket/get`，`@RequestBody` 接收 `GetParameter`，调用 service 并用 `R` 包装返回 |
+| `src/main/java/gg/lita/basic/basiccommon/service/AbBucketService.java` | Service 接口，定义入参内部类 `GetParameter`（@Data）与 `Map<String, String> getAll(GetParameter)` |
+| `src/main/java/gg/lita/basic/basiccommon/service/impl/AbBucketServiceImpl.java` | 核心实现：Caffeine 缓存、由参数构建 Aviator env、分组求值、注册自定义函数 |
+| `src/main/java/gg/lita/basic/basiccommon/component/VersionCompareFunction.java` | Aviator 自定义函数 `versionCompare(v1, v2)`，版本号分段比较（见 4.4） |
 | `src/main/java/gg/lita/basic/basiccommon/mapper/basic/BucketConfigMapper.java` | MyBatis-Plus Mapper，注解 SQL 全量拉取配置 |
 | `src/main/java/gg/lita/basic/basiccommon/model/basic/BucketConfig.java` | `bucket_config` 表实体 |
 | `src/main/java/gg/lita/basic/basiccommon/component/BasicDataSourceConfiguration.java` | `basic` 数据源（HikariCP → `lita_basic` 库），`@MapperScan` 扫描 `mapper.basic` 包 |
@@ -83,10 +87,11 @@ Header 解析由框架包 `gg.lita.framework:web` 的 `HttpRequestFilter`（`@We
 
 | 类 | 职责 |
 | --- | --- |
-| `HttpRequestFilter` | 全局 Filter，解析 `L-*` Header 写入 `Session` ThreadLocal，并写 MDC |
-| `Session` | 用户上下文（ThreadLocal 持有）：userID / app / locale / lang / platform / version / ip / device / traceID 等 |
+| `HttpRequestFilter` | 全局 Filter，解析 `L-*` Header 写入 `Session` ThreadLocal，并写 MDC（⚠️ bucket 接口已不再依赖 Session） |
+| `Session` | 用户上下文（ThreadLocal 持有）：userID / app / locale / lang / platform / version / ip / device / traceID 等（bucket 接口已改为从请求参数取上下文） |
 | `R<T>` | 统一响应包装 |
 | `BaseController` | 控制器基类（本模块未使用其方法） |
+| `LocaleEnum` / `LangEnum` / `PlatformEnum` / `AppEnum` | 枚举，`GetParameter` 字段类型；`LocaleEnum`/`LangEnum` 通过 `@JsonCreator from(String)` 反序列化，`PlatformEnum`/`AppEnum` 通过 `@JsonValue` 字段反序列化 |
 
 ### 技术栈
 
@@ -96,11 +101,11 @@ Header 解析由框架包 `gg.lita.framework:web` 的 `HttpRequestFilter`（`@We
 
 ## 4. 核心实现细节
 
-### 4.1 求值主流程（`AbBucketServiceImpl.getAll()`，第 35-54 行）
+### 4.1 求值主流程（`AbBucketServiceImpl.getAll()`，第 40-59 行）
 
 ```java
 List<BucketConfig> configs = configCache.get("all", k -> baseMapper.getAll());
-Map<String, Object> env = buildEnv();          // 每请求构建一次，所有表达式复用
+Map<String, Object> env = buildEnv(parameter);   // 每请求构建一次，所有表达式复用
 // 按 topic 分组（LinkedHashMap 保序），同 topic 内已按 priority 升序
 // 逐条 evaluate，首个命中即取值并 break；未命中默认 "0"
 ```
@@ -111,7 +116,7 @@ Map<String, Object> env = buildEnv();          // 每请求构建一次，所有
 - 同 topic 只取**最高优先级（数字最小）的一条命中**，DB 唯一键 `idx_topic_priority(topic, priority)` 保证同 topic 优先级不重复。
 - 分组用 `LinkedHashMap`，响应中 topic 顺序与 SQL 排序一致。
 
-### 4.2 表达式求值（`evaluate()`，第 56-73 行）
+### 4.2 表达式求值（`evaluate()`，第 61-78 行）
 
 ```java
 Object result = AviatorEvaluator.execute(expression, env, true);  // cached=true
@@ -128,9 +133,23 @@ Object result = AviatorEvaluator.execute(expression, env, true);  // cached=true
   - 任何异常（语法错误、变量类型不符等）→ `log.warn("AB表达式求值失败 ...")` 并视为不命中，不影响其他 topic。
   - ⚠️ 配置写错时**静默失败**，只能通过日志排查。
 
-### 4.3 变量注入（`buildEnv()`，第 75-87 行）
+### 4.4 自定义函数（`VersionCompareFunction`，注册于 `AbBucketServiceImpl` 静态块，第 27-30 行）
 
-见第 6 节变量表。其中 `session.getUserID64()`：userID 为空或 `Long.parseLong` 失败时**静默返回 `0L`**，因此未登录/异常用户的 `user` 变量恒为 `0`。
+```java
+static {
+    AviatorEvaluator.addFunction(new VersionCompareFunction());
+}
+```
+
+- **函数签名**：`versionCompare(v1, v2)` → 返回 `-1 / 0 / 1`
+- **比较规则**：按 `.` 分段；数值段按 `long` 比较（避免 `string.compareTo` 的字典序陷阱，如 `'8.9.0' > '8.20.0'`），非数值段按字典序；段数不足补 `0`（`8.20` == `8.20.0`）
+- **null 语义**：null/空白按最小版本处理，`versionCompare(nil, '8.20.0')` 返回 `-1`，`>=` 判断安全不命中且不产生 warn 日志
+- **注册方式**：`AviatorEvaluator` 为全局静态实例，`static` 块注册一次即可；取值用 `arg.getValue(env)`（兼容 `AviatorString`/`AviatorNil`），返回用 `FunctionUtils.wrapReturn()`
+- 单元测试：`src/test/java/gg/lita/basic/basiccommon/component/VersionCompareFunctionTest.java`（本模块首个 bucket 相关测试）
+
+### 4.3 变量注入（`buildEnv()`，第 80-94 行）
+
+见第 6 节变量表。`parameter == null`（空 body）时返回空 env（所有变量缺失）。与原 Session 时代的差异：`user` 不再有"解析失败/未登录静默转 `0L`"的逻辑，未传 `user` 时变量为 `null`，`user % 100` 等运算会求值失败（异常被兜底为不命中）。
 
 ## 5. 缓存机制
 
@@ -145,30 +164,30 @@ Object result = AviatorEvaluator.execute(expression, env, true);  // cached=true
 
 ## 6. 表达式可用变量（以代码为准）
 
-`buildEnv()` 实际注入 **8 个变量**：
+`buildEnv()` 实际注入 **8 个变量**（来源均为请求体 JSON 字段，未传时为 `null`）：
 
 | 变量 | 类型 | 来源 | 取值说明 / 缺省 |
 | --- | --- | --- | --- |
-| `user` | long | `L-User-ID` | 用户 ID 的数字形式；**解析失败/未登录为 `0`** |
-| `locale` | String | `L-User-Locale` | 小写码，如 `'in'`、`'th'`、`'ar'`；未知为 `'unknown'` |
-| `lang` | String | `L-Lang`（缺省时由 locale 推导） | 如 `'in'`、`'zh'`、`'en'` |
-| `platform` | String | `L-App-Platform` | ⚠️ **数字字符串**：Android=`'1'`、IOS=`'2'`、Browser=`'3'`、Internal=`'4'`、Unknown=`'0'` |
-| `ip` | String | `L-IP` | 客户端 IP |
-| `app` | String | `L-App-ID` | `'Lita'` / `'Cinta'` / `'Lite'` / `'Unknown'` |
-| `version` | String | `L-Version` | 客户端版本号 |
-| `device` | String | `L-Device-ID` | 设备 ID |
+| `user` | long | JSON `user` | 用户 ID 的数字形式；**未传为 `null`**（不再静默转 `0`） |
+| `locale` | String | JSON `locale` | `LocaleEnum.getValue()`，小写码如 `'in'`、`'th'`、`'ar'`；未传为 `null` |
+| `lang` | String | JSON `lang` | `LangEnum.getValue()`，如 `'in'`、`'zh'`、`'en'`；未传为 `null` |
+| `platform` | String | JSON `platform` | ⚠️ **数字字符串**：Android=`'1'`、IOS=`'2'`、Browser=`'3'`、Internal=`'4'`、Unknown=`'0'`；未传为 `null` |
+| `ip` | String | JSON `ip` | 客户端 IP |
+| `app` | String | JSON `app` | `AppEnum.getName()`：`'Lita'` / `'Cinta'` / `'Lite'` / `'Unknown'`；未传为 `null` |
+| `version` | String | JSON `version` | 客户端版本号 |
+| `device` | String | JSON `device` | 设备 ID |
 
-`L-App-Platform` 的归一化：`PlatformEnum.from()` 将 header 值小写后按别名匹配（`ios/iphone/2`→IOS，`android/1`→Android，`h5/web/browser/3`→Browser，`internal/4`→Internal），匹配不到为 `Unknown`。
+注意 JSON 字段与 env 值的差异：`app` 入参传 `@JsonValue`（`MST`/`FRIEND`/`LITE`），但 env 中 `app` 是 `getName()`（`'Lita'`/`'Cinta'`/`'Lite'`）；`platform` 入参传数字，env 中是数字字符串。
 
 ### 表达式示例
 
 ```
-user % 100 < 10                          -- 按用户 ID 尾号分 10% 灰度
-user == 0                                -- 未登录用户
-app == 'Lita'                            -- 仅 Lita App
-platform == '2'                          -- 仅 iOS（注意是数字字符串）
-locale == 'in' && lang == 'en'           -- 印尼大区 + 英文
-string.compareTo(version, '8.20.0') >= 0 -- 版本号不低于 8.20.0（字典序比较，注意位数）
+user != nil && user % 100 < 10             -- 按用户 ID 尾号分 10% 灰度（先判空，未传 user 时运算会失败）
+user == nil                                -- 未传 user 的请求
+app == 'Lita'                              -- 仅 Lita App
+platform == '2'                            -- 仅 iOS（注意是数字字符串）
+locale == 'in' && lang == 'en'             -- 印尼大区 + 英文
+versionCompare(version, '8.20.0') >= 0     -- 版本号不低于 8.20.0（自定义函数，数值分段比较）
 ```
 
 ## 7. 数据库表结构与实体映射
@@ -199,12 +218,14 @@ string.compareTo(version, '8.20.0') >= 0 -- 版本号不低于 8.20.0（字典�
 
 - **只写布尔表达式**（求值结果判定宽松，非布尔也会被当命中处理，容易误配）。
 - 平台判断写 `platform == '2'`，**不是** `platform == 'IOS'`。
-- 表达式中可用 `user == 0` 判未登录，但注意与真实 ID 0 无法区分。
+- 使用 `user` 前建议判空（`user != nil`）：未传 `user` 时变量为 `null`，`user % 100` 等运算会求值失败并静默不命中。
 - 表达式写错会**静默不命中**，排查关键字：日志 `AB表达式求值失败`。
 - 空 `condition` 的记录永远不命中，可用来占位/停用某条规则。
 - `traceID` **不可用于表达式**（未注入 env）。
 
-## 9. 与 README 的差异汇总
+## 9. README 历史差异记录
+
+以下为 README 原始描述与代码实现的差异，**README 已按代码修正**（2026-09-03 同步）：
 
 | # | README 描述 | 代码实现 |
 | --- | --- | --- |
@@ -215,8 +236,20 @@ string.compareTo(version, '8.20.0') >= 0 -- 版本号不低于 8.20.0（字典�
 | 5 | `platform` 取值 `Android/IOS/Browser` | 实际是**数字字符串** `'1'/'2'/'3'`（`PlatformEnum.toString()` 返回 int value 的字符串） |
 | 6 | 未命中返回 `0` | 实际返回**字符串 `"0"`**；`value` 列在实体/接口中均为 String |
 
+### 2026-09-03 第二次同步：入参由 Session/Header 改为 JSON 参数
+
+- 接口不再从 `Session`（`L-*` Header）取用户上下文，改为 `@RequestBody GetParameter` JSON 传参；`GetParameter` 定义在 `AbBucketService` 接口内（避免 Service 反向依赖 Controller）。
+- `locale`/`lang`/`platform`/`app` 字段使用与 `Session` 相同的枚举类型（`LocaleEnum`/`LangEnum`/`PlatformEnum`/`AppEnum`），env 注入值保持与原来一致（`getValue()` / `getValue()` / `toString()` / `getName()`），存量表达式无需改动。
+- 行为变化：`user` 未传时为 `null`（原为未登录静默转 `0`）；`user == 0` 判未登录的写法不再适用。
+
+### 2026-09-03 第三次同步：新增自定义函数 `versionCompare`
+
+- 新增 `VersionCompareFunction`（`component/` 目录），在 `AbBucketServiceImpl` 静态块中全局注册，提供 `versionCompare(v1, v2)` 版本号数值分段比较，返回 -1/0/1。
+- 版本判断推荐改用 `versionCompare(version, '8.20.0') >= 0`；旧的 `string.compareTo(version, '8.20.0') >= 0` 写法仍可用，但存在字典序陷阱（`'8.9.0' > '8.20.0'`）。
+- null/空白参数按最小版本处理，不产生 warn 日志。
+
 ## 10. 运维与排障
 
 - **配置不生效**：等待 ≥10 秒（缓存过期）；确认表达式语法正确（看 `AB表达式求值失败` warn 日志）。
 - **topic 缺失**：该 topic 在 `bucket_config` 中无任何记录时，响应中不会出现该 key（只对库里存在的 topic 求值）。
-- **测试现状**：本模块无任何单元/集成测试，`src/test` 下测试均与 bucket 无关。
+- **测试现状**：bucket 相关测试仅 `VersionCompareFunctionTest`，其余 `src/test` 下测试均与 bucket 无关。
