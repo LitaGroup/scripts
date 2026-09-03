@@ -5,6 +5,7 @@ import { loadConfig } from '../../../../src/resources/config.ts';
 const TEST_HOST = 'https://api.test.cinta.team/';
 const DB = 'lita_basic';
 const TABLE = 'bucket_config';
+const TOPIC_TABLE = 'bucket_topic';
 const BASE = 'admin-main/bucket';
 const TOPIC = 'test-admin-t1';
 const DESCRIPTION = 'admin接口测试topic';
@@ -13,21 +14,21 @@ const POLL_TIMEOUT_MS = 15_000;
 const POLL_INTERVAL_MS = 2_000;
 
 interface RuleRow {
-  id: number;
+  id: string;
   topic: string;
   condition: string;
-  value: number;
+  value: string;
   description: string;
-  priority: number;
-  createTime: number;
-  updateTime: number;
+  priority: string;
+  createTime: string;
+  updateTime: string;
 }
 
 interface TopicRow {
   topic: string;
   description: string;
-  ruleCount: number;
-  createTime: number;
+  ruleCount: string;
+  createTime: string;
 }
 
 function sqlStr(s: string): string {
@@ -53,7 +54,7 @@ class AdminTest extends TestBaseClass {
   protected async run(): Promise<void> {
     try {
       await this.act('清理历史测试配置', async () => {
-        await this.mysql.execute(`DELETE FROM ${TABLE} WHERE topic LIKE ${sqlStr('test-admin-%')}`, DB);
+        await this.cleanup();
       });
 
       await this.act('新增 topic + 3 条规则（topic/add、rule/add×3）', async () => {
@@ -68,7 +69,7 @@ class AdminTest extends TestBaseClass {
         const t = this.topics.find((x) => x.topic === TOPIC);
         if (!t) return { expect: `含 ${TOPIC}`, real: '未找到', pass: false };
         const problems: string[] = [];
-        if (t.ruleCount !== 3) problems.push(`ruleCount=${t.ruleCount}`);
+        if (Number(t.ruleCount) !== 3) problems.push(`ruleCount=${JSON.stringify(t.ruleCount)}`);
         if (t.description !== DESCRIPTION) problems.push(`description=${JSON.stringify(t.description)}`);
         return {
           expect: 'ruleCount=3 且 description 正确',
@@ -82,16 +83,15 @@ class AdminTest extends TestBaseClass {
         if (!Array.isArray(this.rules) || this.rules.length !== 3) {
           return { expect: '3 条规则', real: `${Array.isArray(this.rules) ? this.rules.length : '非数组'} 条`, pass: false };
         }
-        const priorities = this.rules.map((r) => r.priority);
+        const priorities = this.rules.map((r) => Number(r.priority));
         const asc = priorities[0] < priorities[1] && priorities[1] < priorities[2];
         const conditions = this.rules.map((r) => r.condition).join(' / ');
         const typesOk = this.rules.every(
-          (r) => typeof r.id === 'number' && typeof r.value === 'number' && typeof r.priority === 'number'
-            && typeof r.createTime === 'number' && typeof r.updateTime === 'number',
+          (r) => ['id', 'value', 'priority', 'createTime', 'updateTime'].every((k) => typeof (r as unknown as Record<string, unknown>)[k] === 'string'),
         );
         return {
-          expect: 'priority 升序 [1,2,3]，全字段 number',
-          real: `priorities=[${priorities}]，conditions=${conditions}，类型正确=${typesOk}`,
+          expect: 'priority 升序 [1,2,3]，数字字段统一 string 序列化',
+          real: `priorities=[${priorities}]，conditions=${conditions}，全字段 string=${typesOk}`,
           pass: asc && typesOk,
         };
       });
@@ -157,6 +157,7 @@ class AdminTest extends TestBaseClass {
 
       await this.check('rule/update 占位头行 ID → 报错「规则不存在」（头行不可编辑）', async (): Promise<CheckResult> => {
         const headId = await this.headRowId();
+        if (headId === null) this.skip('新实现已取消占位头行（topic 元数据迁移至 bucket_topic）');
         return this.expectError(
           () => this.adminCall('rule/update', { id: headId, topic: TOPIC, condition: 'true', value: 9, priority: 9 }),
           '规则不存在',
@@ -193,10 +194,12 @@ class AdminTest extends TestBaseClass {
       await this.check('rule/list：删除后返回 2 条', async (): Promise<CheckResult> => {
         const list = (await this.adminCall('rule/list', { topic: TOPIC })) as RuleRow[];
         const priorities = Array.isArray(list) ? list.map((r) => r.priority) : [];
+        const ok = Array.isArray(list) && list.length === 2
+          && Number(priorities[0]) === 1 && Number(priorities[1]) === 3;
         return {
           expect: '2 条，priorities=[1,3]',
-          real: `${Array.isArray(list) ? list.length : '非数组'} 条，priorities=[${priorities}]`,
-          pass: Array.isArray(list) && list.length === 2 && priorities[0] === 1 && priorities[1] === 3,
+          real: `${Array.isArray(list) ? list.length : '非数组'} 条，priorities=[${priorities}]（type=${typeof priorities[0]}）`,
+          pass: ok,
         };
       });
 
@@ -206,6 +209,7 @@ class AdminTest extends TestBaseClass {
 
       await this.check('rule/delete 占位头行 ID → 报错「规则不存在」（头行不可删）', async (): Promise<CheckResult> => {
         const headId = await this.headRowId();
+        if (headId === null) this.skip('新实现已取消占位头行（topic 元数据迁移至 bucket_topic）');
         return this.expectError(() => this.adminCall('rule/delete', { id: headId }), '规则不存在');
       });
 
@@ -234,9 +238,14 @@ class AdminTest extends TestBaseClass {
       });
     } finally {
       await this.act('清理测试配置', async () => {
-        await this.mysql.execute(`DELETE FROM ${TABLE} WHERE topic LIKE ${sqlStr('test-admin-%')}`, DB);
+        await this.cleanup();
       });
     }
+  }
+
+  private async cleanup(): Promise<void> {
+    await this.mysql.execute(`DELETE FROM ${TABLE} WHERE topic LIKE ${sqlStr('test-admin-%')}`, DB);
+    await this.mysql.execute(`DELETE FROM ${TOPIC_TABLE} WHERE topic LIKE ${sqlStr('test-admin-%')}`, DB);
   }
 
   private async adminCall(path: string, body: unknown): Promise<unknown> {
@@ -259,13 +268,12 @@ class AdminTest extends TestBaseClass {
     return data.data;
   }
 
-  private async headRowId(): Promise<number> {
+  private async headRowId(): Promise<number | null> {
     const rows = await this.mysql.query(
       `SELECT id FROM ${TABLE} WHERE topic = ${sqlStr(TOPIC)} AND priority = 0`,
       DB,
     );
-    if (rows.length === 0) throw new Error('占位头行不存在');
-    return Number(rows[0].id);
+    return rows.length === 0 ? null : Number(rows[0].id);
   }
 
   private async simulateValue(user: string): Promise<string> {
