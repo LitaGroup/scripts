@@ -9,7 +9,7 @@ Script collection: automated test scripts (`*.test.ts`) and online health-check 
 - No build / test / lint / typecheck tooling is configured; do not assume any.
 
 ## Layout
-- Scripts: `projects/<category>/<activity>/{checks,tests}` (current: `projects/active/pk/{checks,tests}`).
+- Scripts: `projects/<category>/<activity>/{checks,tests}` (current: `projects/active/pk/{checks,tests}`, `projects/funbit/option/{checks,tests}`.
   - `tests/`  — automated test cases (`.test.ts`)
   - `checks/` — online health checks (`.check.ts`)
 - APP scripts (Appium-based): `projects/app/<module>/` (current: `projects/app/core/`); platform/flavor/kind are encoded in the file name, so `checks`/`tests` subfolders are NOT used.
