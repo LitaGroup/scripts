@@ -110,13 +110,13 @@ export abstract class CheckBaseClass {
     }
   }
 
-  private emitStart(): void {
+  protected emitStart(): void {
     this.startMs = Date.now();
     this.started = true;
     this.emit('start', { total: this.total, time: 0, startTime: new Date(this.startMs).toISOString() });
   }
 
-  private emitDone(runError: Error | null): void {
+  protected emitDone(runError: Error | null): void {
     const time = this.elapsed();
     const status = this.failCount > 0 || runError !== null ? 'fail' : 'success';
     const message = runError
@@ -136,11 +136,11 @@ export abstract class CheckBaseClass {
     });
   }
 
-  private elapsed(): number {
+  protected elapsed(): number {
     return Date.now() - this.startMs;
   }
 
-  private emit(type: string, data: unknown): void {
+  protected emit(type: string, data: unknown): void {
     const payload = typeof data === 'string' ? data : JSON.stringify(data);
     process.stdout.write(`[${type}] ${payload}\n`);
   }

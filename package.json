@@ -5,6 +5,7 @@
   "type": "module",
   "description": "符合输出协议的脚本集合",
   "dependencies": {
+    "exceljs": "^4.4.0",
     "ioredis": "^6.0.0",
     "mysql2": "^3.23.4"
   }

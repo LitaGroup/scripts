@@ -8,7 +8,7 @@
 |:---|:---|:---|
 | 线下测试 | 测试环境的自动化测试用例（`.test.ts`） | `projects/<category>/<activity>/tests/` |
 | 线上检查 | 生产环境健康检查（`.check.ts`） | `projects/<category>/<activity>/checks/` |
-| 数据导出 | 数据查询/导出脚本 | 按项目放置 |
+| 数据导出 | 数据导出脚本（`.export.ts`，支持 csv/xlsx/json/yaml/json-line/markdown） | `projects/<category>/<activity>/exports/` |
 
 ## 技术栈
 
@@ -24,12 +24,26 @@
 
 1. **资源层**（`src/resources/`）— MySQL / Redis / Nacos / API / Appium 连接器
 2. **服务层**（`src/services/`）— 环境感知的业务实现（`'prod' | 'test'`）
-3. **业务层**（`src/base/`）— `CheckBaseClass` / `AppBaseClass` 基类，统一 `act`/`check` 步骤与输出协议
+3. **业务层**（`src/base/`）— `CheckBaseClass` / `AppBaseClass` / `ExportBaseClass` 基类，统一 `act`/`check` 步骤与输出协议
 
 参考示例：
 
-- `projects/active/pk/` — 活动脚本示例（`tests/` 测试用例、`checks/` 线上检查）
+- `projects/active/pk/` — 活动脚本示例（`tests/` 测试用例、`checks/` 线上检查、`exports/` 数据导出）
 - `projects/app/sample/` — APP 端（Appium）脚本示例
+
+## 数据导出脚本
+
+基于 `ExportBaseClass` 编写（`xxxxxx.export.ts`），内置 csv / xlsx / json / yaml / json-line / markdown 六种格式：
+
+```bash
+node xxxxxxx.export.ts --output-dir=xxxxx [--format=csv]
+```
+
+- `--output-dir`（必填）输出目录，不存在自动创建；缺失时直接 fail
+- `--format` 输出格式，默认 `csv`；非法值直接 fail
+- 导出调用 `export(title, data, {columns?, filename?})`，每个导出为一个 `act` 步骤；`done` 前输出 `[files]` 行（文件名与相对地址）
+
+编写说明见 [docs/export-scripts.md](docs/export-scripts.md)，可运行示例见 `projects/active/pk/exports/sample.export.ts`。
 
 ## 项目交接
 
@@ -42,7 +56,7 @@
 
 ```
 projects/
-  active/          # 活动类项目（tests/ + checks/）
+  active/          # 活动类项目（tests/ + checks/ + exports/）
   app/             # APP 端 Appium 脚本（文件名区分平台/flavor/类型）
 src/
   resources/       # 资源层
@@ -50,7 +64,7 @@ src/
   base/            # 业务基类
 config.example.json       # 配置模板（secrets 放 config.json，gitignored）
 config.app.example.json   # APP 脚本配置模板
-docs/              # 补充文档（如 APP 脚本约定）
+docs/              # 补充文档（APP 脚本约定、导出脚本说明等）
 ```
 
 更多约定（命名、输出协议、环境耦合等）详见 [AGENTS.md](AGENTS.md)。
