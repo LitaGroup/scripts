@@ -19,11 +19,11 @@ class Bucket extends TestBaseClass {
   }
 
   protected async run(): Promise<void> {
-    await this.act(`调用 basic-common/v1/bucket/get 接口（l-user-id=${BUCKET_USER_ID}）`, async () => {
+    await this.act(`调用 basic-common/v1/bucket/get 接口（body user=${BUCKET_USER_ID}）`, async () => {
+      // bucket 接口上下文改为 JSON body 传参，l-* header 不再读取（HANDOFF 2026-09-03）
       this.bucketData = asRecord(await this.api.request('basic-common/v1/bucket/get', {
         method: 'POST',
-        body: {},
-        userId: BUCKET_USER_ID,
+        body: { user: BUCKET_USER_ID },
         extraHeaders: TRACE_HEADERS,
       }));
     });
