@@ -78,6 +78,18 @@ export class AppiumResource {
     this.sessionId = sid;
     // 隐式等待置 0：存在性判断立即返回，等待逻辑由 waitFor 显式轮询
     await this.setImplicitWait(0);
+    // 语音房等持续动画页面默认 waitForIdleTimeout=10s，会导致每次找元素卡死；强制关闭
+    try {
+      await this.updateSettings({
+        waitForIdleTimeout: 0,
+        // exists() 否定路径必须尽快返回；默认/过高会导致语音房每次探测卡数秒
+        waitForSelectorTimeout: 0,
+        actionAcknowledgmentTimeout: 1_000,
+        ignoreUnimportantViews: false,
+      });
+    } catch {
+      // 旧驱动可能不支持部分 setting，忽略
+    }
     return sid;
   }
 
@@ -90,6 +102,16 @@ export class AppiumResource {
 
   async setImplicitWait(ms: number): Promise<void> {
     await this.request('POST', `session/${this.sid()}/timeouts`, { implicit: ms });
+  }
+
+  /** 更新 UiAutomator2 settings（如 waitForIdleTimeout） */
+  async updateSettings(settings: Record<string, unknown>): Promise<void> {
+    // Appium 2 UiAutomator2 实际生效路径是 /appium/settings；/settings 会 404
+    try {
+      await this.request('POST', `session/${this.sid()}/appium/settings`, { settings });
+    } catch {
+      await this.request('POST', `session/${this.sid()}/settings`, { settings });
+    }
   }
 
   // ---------- 元素操作 ----------
@@ -227,6 +249,16 @@ export class AppiumResource {
     } catch {
       // 键盘未弹出时忽略
     }
+  }
+
+  /** 触发当前聚焦输入框的 IME action（如 search / send），比按物理 Enter 更稳定 */
+  async performEditorAction(action: 'search' | 'send' | 'go' | 'done' | 'next' | 'previous'): Promise<void> {
+    await this.execute('mobile: performEditorAction', [{ action }]);
+  }
+
+  /** 按下 Android keycode（如 66=ENTER、4=BACK） */
+  async pressKey(keycode: number): Promise<void> {
+    await this.execute('mobile: pressKey', [{ keycode }]);
   }
 
   /** 执行 Appium mobile: 扩展命令（如 mobile: activateApp / mobile: terminateApp） */
