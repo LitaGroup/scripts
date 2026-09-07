@@ -57,14 +57,18 @@ node xxxxxxx.export.ts --output-dir=xxxxx [--format=csv]
 ```
 projects/
   active/          # 活动类项目（tests/ + checks/ + exports/）
-  app/             # APP 端 Appium 脚本（文件名区分平台/flavor/类型）
+  app/             # APP 端 Appium（文件名区分 ios|android + lita|lite）
+    core/          # 发版登录冒烟（双端）+ _lib
+    sample/        # 样例与跑通手册
 src/
   resources/       # 资源层
   services/        # 服务层
   base/            # 业务基类
 config.example.json       # 配置模板（secrets 放 config.json，gitignored）
-config.app.example.json   # APP 脚本配置模板
+config.app.example.json   # APP 脚本账号模板（iOS/Android 可共用）
 docs/              # 补充文档（APP 脚本约定、导出脚本说明等）
 ```
+
+App 登录冒烟见 `projects/app/core/LOGIN_SMOKE.md`（iOS Lita + Android Lite）。
 
 更多约定（命名、输出协议、环境耦合等）详见 [AGENTS.md](AGENTS.md)。

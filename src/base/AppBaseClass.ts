@@ -347,7 +347,12 @@ export abstract class AppBaseClass extends CheckBaseClass {
 
   /** 确保已登录：依赖 'logged-in' / 'logged-out' 两个状态；未登录时使用 account() 执行 login() */
   protected async ensureLoggedIn(timeoutMs = this.stateTimeoutMs): Promise<void> {
-    const state = await this.currentState();
+    // 冷启动可能短暂 unknown（开屏/引导未就绪），先等到登录态可判定
+    let state = await this.currentState();
+    if (state !== 'logged-in' && state !== 'logged-out') {
+      await this.ensureAnyState(['logged-in', 'logged-out'], Math.min(timeoutMs, 60_000));
+      state = await this.currentState();
+    }
     if (state === 'logged-in') return;
     if (state !== 'logged-out') {
       throw new Error(`无法确认登录状态（当前: ${state}），请检查 'logged-in'/'logged-out' 状态定义`);

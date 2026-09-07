@@ -1,8 +1,10 @@
 {
   "accounts": {
     "default": {
-      "username": "your-test-account-username",
-      "password": "your-test-account-password"
+      "username": "your-phone-number-without-country-code",
+      "password": "your-test-account-password",
+      "countryCode": "62"
     }
-  }
+  },
+  "_comment": "iOS (lita) 与 Android Lite 登录冒烟默认共用 accounts.default；并行双端建议分号或错开执行"
 }

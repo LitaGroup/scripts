@@ -1,6 +1,12 @@
 # 示例代码
 
 基础环境：模拟器/真机已完成 Lita Lite App 的安装（`com.litalite.android`），Appium 可用。
+- Android：`step-1-open-me.android.lite.test.ts` / `step-2-phone-login.android.lite.test.ts`
+- **iOS 登录样例**：`login.ios.lita.test.ts`（复用 `../core/_lib`，bundleId `but.lita.ios`）
+- **Android 登录样例**：`step-2-phone-login.android.lite.test.ts`（Lite）
+- **正式冒烟（双端）**：`../core/login-phone-password.*.test.ts`、`login-entries.*.test.ts`
+- **用例文档**：[LOGIN_SMOKE.md](../core/LOGIN_SMOKE.md)
+- **跑通说明**：[IOS_RUNBOOK.md](./IOS_RUNBOOK.md) / [ANDROID_RUNBOOK.md](./ANDROID_RUNBOOK.md)
 
 ---
 

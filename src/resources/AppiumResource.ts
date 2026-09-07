@@ -46,6 +46,8 @@ export const by = {
     const l = xpathLiteral(t);
     return ['xpath', `//*[contains(@text,${l}) or contains(@content-desc,${l}) or contains(@label,${l}) or contains(@name,${l})]`];
   },
+  /** iOS NSPredicate（仅 XCUITest） */
+  iosPredicate: (predicate: string): Locator => ['-ios predicate string', predicate],
 };
 
 export function sleep(ms: number): Promise<void> {
