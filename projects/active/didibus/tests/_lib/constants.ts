@@ -1,7 +1,8 @@
-import { DIDIBUS_BIZ, DIDIBUS_TICKET_TYPE } from '../../../../../src/services/DidibusService.ts';
+import { DIDIBUS_BIZ, DIDIBUS_ACCOUNT_NAME } from '../../../../../src/services/DidibusService.ts';
 
 export const BIZ = DIDIBUS_BIZ;
-export const TICKET_TYPE = DIDIBUS_TICKET_TYPE;
+/** 探险券账户标识（v1.5.0 mod_account 体系，对应 mod_account.name） */
+export const ACCOUNT_NAME = DIDIBUS_ACCOUNT_NAME;
 
 export const LOCALE = 'in';
 export const LOCALES = ['in', 'vi', 'ph', 'ko'];
@@ -32,12 +33,21 @@ export const NON_ACTIVITY_GIFT_ID = 10561;
 export const EXPECT_TICKET_PER_COIN_SENDER = 2;
 export const EXPECT_TICKET_PER_COIN_RECEIVER = 0.5;
 
-/** 里程 EVENT / award 名称（技术设计固定值） */
-export const MILEAGE_NAME = 'DIDIBUS_MILEAGE';
+/** 里程 EVENT 名（mod_common_event，技术设计固定值；里程 award 条目 award_id 引用其 id） */
+export const MILEAGE_EVENT_NAME = 'DIDIBUS_MILEAGE';
+
 export const POOL_NORMAL = 'normal';
 export const POOL_FLYING = 'flying';
-export const POOL_NAME_NORMAL = 'DIDIBUS_LUCKYDRAW_NORMAL';
-export const POOL_NAME_FLYING = 'DIDIBUS_LUCKYDRAW_FLYING';
+
+/** 礼物道具奖池 name（lucky-gift，mod_common_award.name，小写点分命名） */
+export const POOL_NAME_NORMAL = 'bus.normal';
+export const POOL_NAME_FLYING = 'bus.flying';
+
+/** 里程奖池 name（lucky-mileage，两巴士独立奖池，档位与概率各不相同，权重和=1.0 必得） */
+export const MILEAGE_POOL_NAME: Record<string, string> = {
+  [POOL_NORMAL]: 'bus.mileage.normal',
+  [POOL_FLYING]: 'bus.mileage.flying',
+};
 export const DAILY_ENTRY_AWARD = 'daily-entry';
 export const AWARD_SEND_TOTAL = 'gift-send-total';
 export const AWARD_SEND_DAILY = 'gift-send-daily';

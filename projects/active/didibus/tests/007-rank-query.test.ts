@@ -53,11 +53,12 @@ class RankQuery007 extends DidibusTestBase {
       const data = await this.didibus.rankQuery(TOPIC_SEND, USER_A, 'in', this.ts('in'));
       const list = this.didibus.parseRankList(data);
       const orderOk = list.length >= 3 && list[0].player === U1 && list[1].player === U2 && list[2].player === USER_A;
-      const selfRank = data['selfRank'] as Record<string, unknown> | number | null | undefined;
-      const selfRankVal = typeof selfRank === 'object' && selfRank !== null ? Number(selfRank['rank']) : Number(selfRank);
+      // 自身排名字段为 my（含 rank），兼容旧名 selfRank
+      const mine = (data['my'] ?? data['selfRank']) as Record<string, unknown> | number | null | undefined;
+      const selfRankVal = typeof mine === 'object' && mine !== null ? Number(mine['rank']) : Number(mine);
       return {
-        expect: 'U1>U2>A，selfRank(A)=3',
-        real: `list=${list.map((e) => `${e.player}:${e.amount}`).join(',')}，selfRank=${JSON.stringify(selfRank)}`,
+        expect: 'U1>U2>A，my.rank(A)=3',
+        real: `list=${list.map((e) => `${e.player}:${e.amount}`).join(',')}，my=${JSON.stringify(mine)}`,
         pass: orderOk && selfRankVal === 3,
       };
     });
@@ -100,10 +101,10 @@ class RankQuery007 extends DidibusTestBase {
       };
     });
 
-    await this.check('/detail 聚合：account / bus / luckydraw / dailyTop1 / marquee 五块齐全', async (): Promise<CheckResult> => {
+    await this.check('/detail 聚合：account / bus / luckyGift / dailyTop1 / marquee 五块齐全', async (): Promise<CheckResult> => {
       this.needActive();
       const d = await this.didibus.detail(USER_A, 'in', this.ts('in'));
-      const keys = ['account', 'bus', 'luckydraw', 'dailyTop1', 'marquee'];
+      const keys = ['account', 'bus', 'luckyGift', 'dailyTop1', 'marquee'];
       const missing = keys.filter((k) => !(k in d));
       return {
         expect: `含 ${keys.join('/')}`,

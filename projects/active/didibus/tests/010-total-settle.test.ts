@@ -1,5 +1,5 @@
 import { type CheckResult } from '../../../../src/base/CheckBaseClass.ts';
-import { USER_A, USER_B, USER_C, RANK_USERS, ALL_USERS, TOPIC_SEND, TOPIC_RECV, AWARD_SEND_TOTAL, AWARD_RECV, AWARD_RECV_CONTRIBUTOR } from './_lib/constants.ts';
+import { LOCALE, USER_A, USER_B, USER_C, RANK_USERS, ALL_USERS, TOPIC_SEND, TOPIC_RECV, AWARD_SEND_TOTAL, AWARD_RECV, AWARD_RECV_CONTRIBUTOR } from './_lib/constants.ts';
 import { T_D1, CRON_TOTAL_KO, CRON_TOTAL_PH, CRON_TOTAL_INVI, CRON_TOTAL_EARLY, localIso, localTs } from './_lib/times.ts';
 import { int } from './_lib/helpers.ts';
 import { DidibusTestBase } from './_lib/DidibusTestBase.ts';
@@ -41,10 +41,11 @@ class TotalSettle010 extends DidibusTestBase {
   protected async run(): Promise<void> {
     await this.probeActive();
 
-    await this.act('清理轮次、全部测试用户数据与 Redis', async () => {
+    await this.act('清理轮次、全部测试用户数据、历史发奖记录与 Redis', async () => {
       this.needActive();
       await this.didibus.cleanRounds();
       await this.didibus.cleanUsers(ALL_USERS);
+      await this.didibus.cleanAwardRecords();
       await this.didibus.cleanRedis();
     });
 
@@ -139,23 +140,25 @@ class TotalSettle010 extends DidibusTestBase {
       return { expect: JSON.stringify(expect), real: JSON.stringify(got), pass: JSON.stringify(got) === JSON.stringify(expect) };
     });
 
-    await this.check('送礼总榜发奖：Top2(S1)/Top3(S4) 自动发放，Top1(S2) CUSTOM 不自动发放', async (): Promise<CheckResult> => {
+    await this.check('送礼总榜发奖：Top2(S1)/Top3(S4) 自动发放，Top1(S2) CUSTOM 仅留 view_only 记录不发放', async (): Promise<CheckResult> => {
       this.needActive();
       const stage2Ids = await this.awardIdsOf(AWARD_SEND_TOTAL, 2);
       const stage3Ids = await this.awardIdsOf(AWARD_SEND_TOTAL, 3);
-      const stage1Ids = await this.awardIdsOf(AWARD_SEND_TOTAL, 1);
       if (stage2Ids.length === 0 || stage3Ids.length === 0) {
         return { expect: 'gift-send-total stage2/3 配置存在', real: '缺失', pass: false, message: '预置数据缺失：mod_common_award gift-send-total' };
       }
       const s1Awards = await this.playerAwardIds(S1);
       const s4Awards = await this.playerAwardIds(S4);
-      const s2Awards = await this.playerAwardIds(S2);
+      // Top1 CUSTOM：应恰好 1 条 view_only 审计记录（不实际发放）
+      const s2Rows = await this.didibus.queryAwardRecords({ player: S2 });
+      const s2ViewOnly = s2Rows.filter((r) => String(r['mod']) === 'view_only');
+      const s2RealIssued = s2Rows.filter((r) => String(r['mod']) !== 'view_only');
       const s1Ok = stage2Ids.every((id) => s1Awards.includes(id));
       const s4Ok = stage3Ids.every((id) => s4Awards.includes(id));
-      const s2Ok = stage1Ids.length === 0 || !stage1Ids.some((id) => s2Awards.includes(id));
+      const s2Ok = s2ViewOnly.length === 1 && s2RealIssued.length === 0;
       return {
-        expect: `S1 含 stage2 奖励 ${JSON.stringify(stage2Ids)}，S4 含 stage3 ${JSON.stringify(stage3Ids)}，S2 不含 stage1 ${JSON.stringify(stage1Ids)}`,
-        real: `S1=${JSON.stringify(s1Awards)}，S4=${JSON.stringify(s4Awards)}，S2=${JSON.stringify(s2Awards)}`,
+        expect: `S1 含 stage2 奖励 ${JSON.stringify(stage2Ids)}，S4 含 stage3 ${JSON.stringify(stage3Ids)}，S2 仅 1 条 view_only 记录`,
+        real: `S1=${JSON.stringify(s1Awards)}，S4=${JSON.stringify(s4Awards)}，S2 view_only=${s2ViewOnly.length} 条/实发=${s2RealIssued.length} 条`,
         pass: s1Ok && s4Ok && s2Ok,
       };
     });
@@ -198,7 +201,8 @@ class TotalSettle010 extends DidibusTestBase {
           problems.push(`stage${stage} 配置缺失`);
           continue;
         }
-        const gotIds = await this.playerAwardIds(contributor);
+        // 只看 gift-recv topic 的发奖记录，避免与送礼榜同 award_id 的奖励混淆
+        const gotIds = (await this.didibus.queryAwardRecords({ player: contributor, topic: TOPIC_RECV })).map((r) => int(r['award_id']));
         if (!expectIds.every((id) => gotIds.includes(id))) {
           problems.push(`贡献者${contributor}(stage${stage})：期望含 ${JSON.stringify(expectIds)}，实际 ${JSON.stringify(gotIds)}`);
         }

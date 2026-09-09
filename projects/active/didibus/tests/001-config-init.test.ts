@@ -6,7 +6,10 @@ import {
   LOCALES,
   LOCALE,
   USER_A,
-  MILEAGE_NAME,
+  MILEAGE_EVENT_NAME,
+  MILEAGE_POOL_NAME,
+  POOL_NORMAL,
+  POOL_FLYING,
   POOL_NAME_NORMAL,
   POOL_NAME_FLYING,
   DAILY_ENTRY_AWARD,
@@ -47,7 +50,7 @@ class ConfigInit001 extends TestBaseClass {
 
   constructor() {
     super();
-    this.total = 17;
+    this.total = 18;
   }
 
   protected async run(): Promise<void> {
@@ -64,10 +67,10 @@ class ConfigInit001 extends TestBaseClass {
       };
     });
 
-    await this.check('active_coin 存在 N-A-DIDIBUS 且 4 大区 locale_config 齐全', async (): Promise<CheckResult> => {
-      const rows = await this.didibus.queryActiveCoin();
+    await this.check('mod_account 存在 DIDIBUS-MILEAGE 且 4 大区 locale_config 齐全', async (): Promise<CheckResult> => {
+      const rows = await this.didibus.queryAccountDef();
       if (rows.length === 0) {
-        return { expect: 'active_coin 存在 N-A-DIDIBUS', real: '无记录', pass: false, message: '预置数据缺失：active_coin' };
+        return { expect: 'mod_account 存在 DIDIBUS-MILEAGE', real: '无记录', pass: false, message: '预置数据缺失：mod_account' };
       }
       const lc = String(rows[0]['locale_config'] ?? '');
       const missing = LOCALES.filter((l) => !lc.includes(`"${l}"`));
@@ -79,7 +82,7 @@ class ConfigInit001 extends TestBaseClass {
     });
 
     await this.check('mod_common_event 存在 DIDIBUS_MILEAGE', async (): Promise<CheckResult> => {
-      const rows = await this.didibus.queryEvent(MILEAGE_NAME);
+      const rows = await this.didibus.queryEvent(MILEAGE_EVENT_NAME);
       return {
         expect: '1 条',
         real: `${rows.length} 条`,
@@ -88,21 +91,8 @@ class ConfigInit001 extends TestBaseClass {
       };
     });
 
-    await this.check('里程条目：stage=0、EVENT、mod=VIEW、权重和=1.0（100% 必得）', async (): Promise<CheckResult> => {
-      const rows = await this.didibus.queryAwardConfig(MILEAGE_NAME);
-      if (rows.length === 0) {
-        return { expect: '≥1 条里程配置', real: '0 条', pass: false, message: `预置数据缺失：mod_common_award ${MILEAGE_NAME}` };
-      }
-      const bad = rows.filter((r) => int(r['stage']) !== 0 || String(r['award_type']) !== 'EVENT' || String(r['mod']) !== 'VIEW');
-      const weightSum = rows.reduce((s, r) => s + Number(r['weight'] ?? 0), 0);
-      const tiers = rows.map((r) => int(r['award_count'])).sort((a, b) => a - b);
-      const ok = bad.length === 0 && Math.abs(weightSum - 1) < 1e-6;
-      return {
-        expect: '全部 stage=0/EVENT/VIEW，权重和=1.0',
-        real: `档位=${JSON.stringify(tiers)}，权重和=${weightSum.toFixed(4)}${bad.length ? '，存在类型不符条目' : ''}`,
-        pass: ok,
-      };
-    });
+    await this.checkMileagePool(MILEAGE_POOL_NAME[POOL_NORMAL]);
+    await this.checkMileagePool(MILEAGE_POOL_NAME[POOL_FLYING]);
 
     await this.checkPool(POOL_NAME_NORMAL);
     await this.checkPool(POOL_NAME_FLYING);
@@ -145,15 +135,15 @@ class ConfigInit001 extends TestBaseClass {
       };
     });
 
-    await this.check('每日进入奖励：daily-entry 存在且 award_type=ACTIVE_COIN、count>0', async (): Promise<CheckResult> => {
+    await this.check('每日进入奖励：daily-entry 存在且 award_type=ACCOUNT、count>0', async (): Promise<CheckResult> => {
       const rows = (await this.didibus.queryAwardConfig(DAILY_ENTRY_AWARD)).filter((r) => int(r['stage']) === 0);
       if (rows.length === 0) {
         return { expect: 'daily-entry stage=0 存在', real: '0 条', pass: false, message: `预置数据缺失：mod_common_award ${DAILY_ENTRY_AWARD}` };
       }
-      const ok = rows.some((r) => String(r['award_type']) === 'ACTIVE_COIN' && int(r['award_count']) > 0);
+      const ok = rows.some((r) => String(r['award_type']) === 'ACCOUNT' && int(r['award_count']) > 0 && int(r['award_id']) === 901);
       return {
-        expect: 'ACTIVE_COIN 且 award_count>0',
-        real: rows.map((r) => `${r['award_type']}×${r['award_count']}`).join(','),
+        expect: 'ACCOUNT 且 award_id=901（mod_account.id）且 award_count>0',
+        real: rows.map((r) => `${r['award_type']}#${r['award_id']}×${r['award_count']}`).join(','),
         pass: ok,
       };
     });
@@ -197,6 +187,24 @@ class ConfigInit001 extends TestBaseClass {
     await this.checkRankAward(AWARD_SEND_DAILY, [1, 2, 3, 4, 5, 6]);
     await this.checkRankAward(AWARD_RECV, [1, 2, 3]);
     await this.checkRankAward(AWARD_RECV_CONTRIBUTOR, [1, 2, 3]);
+  }
+
+  private async checkMileagePool(name: string): Promise<void> {
+    await this.check(`里程奖池 ${name}：stage=0、EVENT、mod=VIEW、权重和=1.0（100% 必得）`, async (): Promise<CheckResult> => {
+      const rows = await this.didibus.queryAwardConfig(name);
+      if (rows.length === 0) {
+        return { expect: '≥1 条里程配置', real: '0 条', pass: false, message: `预置数据缺失：mod_common_award ${name}` };
+      }
+      const bad = rows.filter((r) => int(r['stage']) !== 0 || String(r['award_type']) !== 'EVENT' || String(r['mod']) !== 'VIEW');
+      const weightSum = rows.reduce((s, r) => s + Number(r['weight'] ?? 0), 0);
+      const tiers = rows.map((r) => int(r['award_count'])).sort((a, b) => a - b);
+      const ok = bad.length === 0 && Math.abs(weightSum - 1) < 1e-6;
+      return {
+        expect: '全部 stage=0/EVENT/VIEW，权重和=1.0',
+        real: `档位=${JSON.stringify(tiers)}，权重和=${weightSum.toFixed(4)}${bad.length ? '，存在类型不符条目' : ''}`,
+        pass: ok,
+      };
+    });
   }
 
   private async checkPool(name: string): Promise<void> {

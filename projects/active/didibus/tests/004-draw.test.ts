@@ -3,8 +3,7 @@ import type { DrawResult } from '../../../../src/services/DidibusService.ts';
 import {
   LOCALE,
   USER_A,
-  ACTIVITY_GIFTS,
-  MILEAGE_NAME,
+  MILEAGE_POOL_NAME,
   POOL_NORMAL,
   POOL_FLYING,
   TOPIC_SEND,
@@ -17,11 +16,13 @@ import { DidibusTestBase } from './_lib/DidibusTestBase.ts';
 const INIT_BALANCE = 100000;
 
 /**
- * 004-draw —— 抽奖核心链路（扣费 + 里程必得 + bus 探索 + 榜单加成 + 轮播）
- * 模拟时间：全部 T_D1。里程档位/奖池价格从配置动态读取（mod_common_award / m/luckydraw/detail）。
+ * 004-draw —— 抽奖核心链路（扣费 + 里程必得 + bus 探索 + 探索不影响榜单 + 轮播）
+ * 模拟时间：全部 T_D1。里程档位/奖池价格从配置动态读取（mod_common_award / m/lucky-gift/detail）。
+ * v1.4.0 双 LuckydrawModule：每次 /draw 写 2 批抽奖记录（topic=lucky-gift 扣券 + topic=lucky-mileage 里程必得），
+ * 两巴士里程奖池独立（bus.mileage.normal / bus.mileage.flying，档位各不相同）。
  */
 class Draw004 extends DidibusTestBase {
-  private tiers: number[] = [];
+  private tiers: Record<string, number[]> = { [POOL_NORMAL]: [], [POOL_FLYING]: [] };
   private priceNormal = 30;
   private priceFlying = 80;
   private draw1!: DrawResult;
@@ -44,24 +45,28 @@ class Draw004 extends DidibusTestBase {
   protected async run(): Promise<void> {
     await this.probeActive();
 
-    await this.act('清理 A 数据与 Redis', async () => {
+    await this.act('清理 A 数据、历史发奖记录与 Redis', async () => {
       this.needActive();
       await this.didibus.cleanUsers([USER_A]);
+      await this.didibus.cleanAwardRecords();
       await this.didibus.cleanRedis();
     });
 
-    await this.act('读取里程档位配置（mod_common_award DIDIBUS_MILEAGE）', async () => {
+    await this.act('读取里程档位配置（mod_common_award bus.mileage.normal / bus.mileage.flying）', async () => {
       this.needActive();
-      const rows = await this.didibus.queryAwardConfig(MILEAGE_NAME);
-      if (rows.length === 0) throw new Error('预置数据缺失：mod_common_award DIDIBUS_MILEAGE');
-      this.tiers = uniq(rows.map((r) => int(r['award_count']))).sort((a, b) => a - b);
-      this.log(`里程档位=${JSON.stringify(this.tiers)}`);
+      for (const pool of [POOL_NORMAL, POOL_FLYING]) {
+        const name = MILEAGE_POOL_NAME[pool];
+        const rows = await this.didibus.queryAwardConfig(name);
+        if (rows.length === 0) throw new Error(`预置数据缺失：mod_common_award ${name}`);
+        this.tiers[pool] = uniq(rows.map((r) => int(r['award_count']))).sort((a, b) => a - b);
+      }
+      this.log(`里程档位：normal=${JSON.stringify(this.tiers[POOL_NORMAL])}，flying=${JSON.stringify(this.tiers[POOL_FLYING])}`);
     });
 
-    await this.act('读取奖池价格（/m/luckydraw/detail）', async () => {
+    await this.act('读取奖池价格（/m/lucky-gift/detail）', async () => {
       this.needActive();
       try {
-        const d = await this.didibus.luckydrawDetail(USER_A, LOCALE, this.ts());
+        const d = await this.didibus.luckyGiftDetail(USER_A, LOCALE, this.ts());
         const pools = d['pools'] as Record<string, Record<string, unknown>> | undefined;
         const normal = pools?.[POOL_NORMAL];
         const flying = pools?.[POOL_FLYING];
@@ -69,7 +74,7 @@ class Draw004 extends DidibusTestBase {
         if (flying?.['price'] !== undefined) this.priceFlying = int(flying['price']);
         this.log(`奖池价格：normal=${this.priceNormal}，flying=${this.priceFlying}`);
       } catch (e) {
-        this.log(`luckydraw/detail 读取失败，使用默认价格 normal=30/flying=80：${(e as Error).message}`);
+        this.log(`lucky-gift/detail 读取失败，使用默认价格 normal=30/flying=80：${(e as Error).message}`);
       }
     });
 
@@ -91,36 +96,43 @@ class Draw004 extends DidibusTestBase {
       return { expect: String(expect), real: String(real) };
     });
 
-    await this.check('里程必得：totalMileage ∈ 配置档位集合 且 > 0', async (): Promise<CheckResult> => {
+    await this.check('里程必得：totalMileage ∈ normal 档位集合 且 > 0', async (): Promise<CheckResult> => {
       this.needActive();
       const m = int(this.draw1.totalMileage);
       return {
-        expect: `∈ ${JSON.stringify(this.tiers)}`,
+        expect: `∈ ${JSON.stringify(this.tiers[POOL_NORMAL])}`,
         real: String(m),
-        pass: m > 0 && this.tiers.includes(m),
+        pass: m > 0 && this.tiers[POOL_NORMAL].includes(m),
       };
     });
 
-    await this.check('抽奖记录：mod_luckydraw_record 1 批 + item 1 条，/m/luckydraw/result 可查', async (): Promise<CheckResult> => {
+    await this.check('抽奖记录：lucky-gift/lucky-mileage 各 1 批 + item 各 1 条，双 result 接口可查', async (): Promise<CheckResult> => {
       this.needActive();
       const records = await this.didibus.queryLuckydrawRecords(USER_A);
-      if (records.length !== 1) {
-        return { expect: '1 批记录', real: `${records.length} 批`, pass: false };
+      const giftRec = records.find((r) => String(r['topic']) === 'lucky-gift');
+      const mileageRec = records.find((r) => String(r['topic']) === 'lucky-mileage');
+      if (!giftRec || !mileageRec || records.length !== 2) {
+        return { expect: '2 批记录（lucky-gift + lucky-mileage）', real: `${records.length} 批`, pass: false };
       }
-      const items = await this.didibus.queryLuckydrawItems(records[0]['id'] as number);
-      const recordId = int(records[0]['id']);
+      const giftItems = await this.didibus.queryLuckydrawItems(giftRec['id'] as number);
+      const mileageItems = await this.didibus.queryLuckydrawItems(mileageRec['id'] as number);
+      const giftId = int(giftRec['id']);
+      const mileageId = int(mileageRec['id']);
+      // 里程 item 的 award_count 即本次抽中里程值，应与 totalMileage 一致
+      const mileageSum = mileageItems.reduce((s, r) => s + int(r['award_count']), 0);
       let resultOk = false;
       let resultMsg = '';
       try {
-        await this.didibus.luckydrawResult(USER_A, LOCALE, this.ts(), POOL_NORMAL, recordId);
+        await this.didibus.luckyGiftResult(USER_A, LOCALE, this.ts(), POOL_NORMAL, giftId);
+        await this.didibus.luckyMileageResult(USER_A, LOCALE, this.ts(), POOL_NORMAL, mileageId);
         resultOk = true;
       } catch (e) {
         resultMsg = (e as Error).message;
       }
       return {
-        expect: 'record=1、item=1、result 可查',
-        real: `record=${records.length}、item=${items.length}、result=${resultOk ? '可查' : `失败:${resultMsg}`}`,
-        pass: items.length === 1 && resultOk,
+        expect: `record=2、item=1+1、里程 item 里程和=${int(this.draw1.totalMileage)}、result 均可查`,
+        real: `item=${giftItems.length}+${mileageItems.length}、里程和=${mileageSum}、result=${resultOk ? '可查' : `失败:${resultMsg}`}`,
+        pass: giftItems.length === 1 && mileageItems.length === 1 && mileageSum === int(this.draw1.totalMileage) && resultOk,
       };
     });
 
@@ -150,18 +162,27 @@ class Draw004 extends DidibusTestBase {
       return { expect: String(expect), real: String(real) };
     });
 
-    await this.check('里程：totalMileage ∈ [10×minTier, 10×maxTier]，bus 累计 = 两次之和', async (): Promise<CheckResult> => {
+    await this.check('里程：flying×10 每次 ∈ flying 档位集合（item.award_count 逐条校验），bus 累计 = 两次之和', async (): Promise<CheckResult> => {
       this.needActive();
       const m2 = int(this.draw2.totalMileage);
-      const min = 10 * this.tiers[0];
-      const max = 10 * this.tiers[this.tiers.length - 1];
+      const flyingTiers = this.tiers[POOL_FLYING];
+      const min = 10 * flyingTiers[0];
+      const max = 10 * flyingTiers[flyingTiers.length - 1];
       const totalMiles = int(this.draw1.totalMileage) + m2;
       const rows = await this.didibus.queryBusDistance(USER_A);
       const dbDistance = rows.length > 0 ? int(rows[0]['distance']) : -1;
+      // 逐条校验里程 item：flying×10 的里程记录应有 10 条 item，每条 ∈ flying 档位，和 = totalMileage
+      const mileageRec = (await this.didibus.queryLuckydrawRecords(USER_A))
+        .filter((r) => String(r['topic']) === 'lucky-mileage' && String(r['pool']) === POOL_FLYING)
+        .pop();
+      const items = mileageRec ? await this.didibus.queryLuckydrawItems(mileageRec['id'] as number) : [];
+      const itemTiers = items.map((r) => int(r['award_count']));
+      const itemsOk = items.length === 10 && itemTiers.every((t) => flyingTiers.includes(t))
+        && itemTiers.reduce((s, t) => s + t, 0) === m2;
       return {
-        expect: `totalMileage ∈ [${min}, ${max}]，DB 累计=${totalMiles}`,
-        real: `totalMileage=${m2}，DB=${dbDistance}`,
-        pass: m2 >= min && m2 <= max && dbDistance === totalMiles,
+        expect: `totalMileage ∈ [${min}, ${max}]，10 条 item 均 ∈ ${JSON.stringify(flyingTiers)}，DB 累计=${totalMiles}`,
+        real: `totalMileage=${m2}，item=${items.length} 条 ${itemsOk ? '全部符合' : `不符:${JSON.stringify(itemTiers)}`}，DB=${dbDistance}`,
+        pass: m2 >= min && m2 <= max && itemsOk && dbDistance === totalMiles,
       };
     });
 
@@ -183,37 +204,26 @@ class Draw004 extends DidibusTestBase {
       this.needActive();
       const crossed = [...(this.draw1.bus?.crossed ?? []), ...(this.draw2.bus?.crossed ?? [])];
       if (crossed.length === 0) this.skip('未越过探索点，无发奖可校验');
-      const records = await this.didibus.queryAwardRecords({ player: USER_A });
-      const busAwards = records.filter((r) => String(r['topic']).startsWith('bus.'));
+      const records = await this.didibus.queryAwardRecords({ topic: 'bus', player: USER_A });
       return {
         expect: `≥ ${crossed.length} 条（每个探索点 ≥1 条奖励）`,
-        real: `${busAwards.length} 条（topic=bus.*）`,
-        pass: busAwards.length >= crossed.length,
+        real: `${records.length} 条（biz+topic=bus）`,
+        pass: records.length >= crossed.length,
       };
     });
 
-    await this.check('榜单加成：crossed 白名单礼物 buff 加到送礼/收礼总榜', async (): Promise<CheckResult> => {
+    await this.check('探索获得礼物仅入背包：送礼/收礼总榜无变化（buff 倍率在赠送环节计入，见 003）', async (): Promise<CheckResult> => {
       this.needActive();
+      // 需求口径（2026-09-09 确认）：探索发奖不造成 rank 变化；只有礼物被赠送时才按 coin×buff 计分
       const crossed = [...(this.draw1.bus?.crossed ?? []), ...(this.draw2.bus?.crossed ?? [])];
       if (crossed.length === 0) this.skip('未越过探索点');
-      const giftIds = Object.keys(ACTIVITY_GIFTS).map(Number);
-      if (giftIds.length === 0) this.skip('活动礼物 ID 待提供（无法计算 buff 期望）');
-      let expectBuff = 0;
-      for (const c of crossed) {
-        const rows = await this.didibus.queryAwardConfig(c.awardName);
-        for (const r of rows) {
-          if (int(r['stage']) !== c.stage) continue;
-          if (String(r['award_type']) !== 'GIFT') continue;
-          const buff = ACTIVITY_GIFTS[int(r['award_id'])];
-          if (buff !== undefined) expectBuff += buff;
-        }
-      }
       const send = await this.didibus.rankScoreOf(TOPIC_SEND, USER_A, LOCALE, this.ts());
       const recv = await this.didibus.rankScoreOf(TOPIC_RECV, USER_A, LOCALE, this.ts());
       return {
-        expect: `send=recv=${expectBuff}`,
+        expect: 'send=recv=0（不在榜）',
         real: `send=${send}，recv=${recv}`,
-        pass: (send ?? 0) === expectBuff && (recv ?? 0) === expectBuff,
+        pass: (send ?? 0) === 0 && (recv ?? 0) === 0,
+        message: (send ?? 0) > 0 ? '探索发奖导致榜单加分——与需求口径不符（见 CASES.md 问题#8）' : undefined,
       };
     });
 

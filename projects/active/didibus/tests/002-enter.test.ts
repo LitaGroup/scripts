@@ -7,7 +7,7 @@ import { DidibusTestBase } from './_lib/DidibusTestBase.ts';
 /**
  * 002-enter —— 每日进入发券
  * 模拟时间：首次/同日再次=T_D1（第 1 天），跨天=T_D2（第 2 天）。
- * 链路：/enter → task.update(daily-entry, REPEAT) → settle 发 ACTIVE_COIN → active_user_account 入账。
+ * 链路：/enter → task.update(daily-entry, REPEAT) → settle 发 ACCOUNT 奖励 → mod_account_user 入账（按 (biz, trans_no) 幂等）。
  */
 class Enter002 extends DidibusTestBase {
   private tickets = 0;

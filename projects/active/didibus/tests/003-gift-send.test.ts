@@ -16,11 +16,14 @@ import { int, pollUntil } from './_lib/helpers.ts';
 import { DidibusTestBase } from './_lib/DidibusTestBase.ts';
 
 const GIFT_COIN = 100;
+/** 高倍率验证用礼物（钻石礼物，buff=3.0）；取 ACTIVITY_GIFTS 中 buff 最大的 */
+const HIGH_BUFF_GIFT_ID = Object.entries(ACTIVITY_GIFTS).sort((a, b) => b[1] - a[1]).map(([g]) => Number(g))[0];
 
 /**
  * 003-gift-send —— 送礼消费（发券 + 榜单）
  * 模拟时间：正常消息 T_D1（活动第 1 天）；期外消息 T_OUT_BEFORE。
  * 链路：__consumer/funbit.gift_send → handleGiftSend → 白名单过滤 → 发券（sender×n / receiver×n/2）→ 送礼总榜+日榜、收礼总榜。
+ * 榜单计分口径（2026-09-09 需求确认）：score += 礼物金币数 × buff（gifts 白名单 value 为倍率）。
  */
 class GiftSend003 extends DidibusTestBase {
   private giftId = 0;
@@ -28,7 +31,7 @@ class GiftSend003 extends DidibusTestBase {
 
   constructor() {
     super();
-    this.total = 12;
+    this.total = 14;
   }
 
   protected async run(): Promise<void> {
@@ -100,17 +103,19 @@ class GiftSend003 extends DidibusTestBase {
       return { expect: `A=${expectA}，B=${expectB}`, real: `A=${aAmt}，B=${bAmt}` };
     });
 
-    await this.check('榜单接口：送礼总榜+当日日榜 A=100，收礼总榜 B=100', async (): Promise<CheckResult> => {
+    await this.check('榜单接口：送礼总榜+当日日榜 A=100×buff，收礼总榜 B=100×buff', async (): Promise<CheckResult> => {
       this.needActive();
       if (this.giftId === 0) this.skip('活动礼物 ID 待提供');
       const iso = localIso(LOCALE, T_D1);
+      const buff = ACTIVITY_GIFTS[this.giftId] ?? 1;
+      const expectScore = GIFT_COIN * buff;
       const sendTotal = await this.didibus.rankScoreOf(TOPIC_SEND, USER_A, LOCALE, iso);
       const sendDaily = await this.didibus.rankScoreOf(TOPIC_SEND, USER_A, LOCALE, iso, DAY1_KEY);
       const recvTotal = await this.didibus.rankScoreOf(TOPIC_RECV, USER_B, LOCALE, iso);
       return {
-        expect: `send=${GIFT_COIN}，send.${DAY1_KEY}=${GIFT_COIN}，recv=${GIFT_COIN}`,
+        expect: `send=${expectScore}，send.${DAY1_KEY}=${expectScore}，recv=${expectScore}（coin×buff=${GIFT_COIN}×${buff}）`,
         real: `send=${sendTotal}，send.${DAY1_KEY}=${sendDaily}，recv=${recvTotal}`,
-        pass: sendTotal === GIFT_COIN && sendDaily === GIFT_COIN && recvTotal === GIFT_COIN,
+        pass: sendTotal === expectScore && sendDaily === expectScore && recvTotal === expectScore,
       };
     });
 
@@ -127,6 +132,37 @@ class GiftSend003 extends DidibusTestBase {
         expect: `send key=['-','${DAY1_KEY}']，recv key=['-']，trans_no 一致，contributor=A`,
         real: `send key=${JSON.stringify(sendKeys)}，recv key=${JSON.stringify(recv.map((r) => String(r['key'])))}，trans_no=${transOk}，contributor=${contribOk}`,
         pass: keysOk && recv.length === 1 && transOk && contribOk,
+      };
+    });
+
+    await this.act(`A 送 B 高倍率活动礼物（giftId=${HIGH_BUFF_GIFT_ID}, buff=${ACTIVITY_GIFTS[HIGH_BUFF_GIFT_ID]}, totalCoin=${GIFT_COIN}，T_D1）`, async () => {
+      this.needActive();
+      if (this.giftId === 0) this.skip('活动礼物 ID 待提供');
+      await this.didibus.sendGift({
+        sender: USER_A,
+        receiver: USER_B,
+        giftId: HIGH_BUFF_GIFT_ID,
+        giftPrice: GIFT_COIN,
+        totalCoin: GIFT_COIN,
+        sendTimeMs: localTs(LOCALE, T_D1),
+        debugTs: localIso(LOCALE, T_D1),
+        locale: LOCALE,
+      });
+    });
+
+    await this.check('榜单倍率加成：送礼/收礼总榜 += coin×buff（高倍率礼物）', async (): Promise<CheckResult> => {
+      this.needActive();
+      if (this.giftId === 0) this.skip('活动礼物 ID 待提供');
+      const iso = localIso(LOCALE, T_D1);
+      const buff1 = ACTIVITY_GIFTS[this.giftId] ?? 1;
+      const buff2 = ACTIVITY_GIFTS[HIGH_BUFF_GIFT_ID];
+      const expectScore = GIFT_COIN * buff1 + GIFT_COIN * buff2;
+      const sendTotal = await this.didibus.rankScoreOf(TOPIC_SEND, USER_A, LOCALE, iso);
+      const recvTotal = await this.didibus.rankScoreOf(TOPIC_RECV, USER_B, LOCALE, iso);
+      return {
+        expect: `send=recv=${expectScore}（=${GIFT_COIN}×${buff1} + ${GIFT_COIN}×${buff2}）`,
+        real: `send=${sendTotal}，recv=${recvTotal}`,
+        pass: sendTotal === expectScore && recvTotal === expectScore,
       };
     });
 
@@ -147,19 +183,23 @@ class GiftSend003 extends DidibusTestBase {
       await new Promise((r) => setTimeout(r, 500));
     });
 
-    await this.check('幂等：券与榜单不重复累计', async (): Promise<CheckResult> => {
+    await this.check('幂等：券与榜单不重复累计（v1.5.0 mod_account 按 (biz, trans_no=send_/recv_+orderNo) 幂等）', async (): Promise<CheckResult> => {
       this.needActive();
       if (this.giftId === 0) this.skip('活动礼物 ID 待提供');
       const [a, b] = await Promise.all([this.didibus.queryAccount(USER_A), this.didibus.queryAccount(USER_B)]);
       const aAmt = a.length > 0 ? int(a[0]['amount']) : 0;
       const bAmt = b.length > 0 ? int(b[0]['amount']) : 0;
       const records = await this.didibus.queryRankRecords(TOPIC_SEND, { locale: LOCALE, player: USER_A });
-      const expectA = GIFT_COIN * EXPECT_TICKET_PER_COIN_SENDER;
-      const expectB = GIFT_COIN * EXPECT_TICKET_PER_COIN_RECEIVER;
+      // 两次有效送礼：券 A=2×100×2=400、B=2×100×0.5=100；rank_record=2 次 × (总榜+日榜) = 4 条
+      const expectA = 2 * GIFT_COIN * EXPECT_TICKET_PER_COIN_SENDER;
+      const expectB = 2 * GIFT_COIN * EXPECT_TICKET_PER_COIN_RECEIVER;
+      // 账户流水幂等键：A 侧 send_{orderNo}、B 侧 recv_{orderNo} 各恰好 1 条
+      const aLogs = (await this.didibus.queryAccountLogs(USER_A)).filter((r) => String(r['trans_no']) === `send_${this.orderNo}`);
+      const bLogs = (await this.didibus.queryAccountLogs(USER_B)).filter((r) => String(r['trans_no']) === `recv_${this.orderNo}`);
       return {
-        expect: `A=${expectA}，B=${expectB}，send rank_record=2 条`,
-        real: `A=${aAmt}，B=${bAmt}，send rank_record=${records.length} 条`,
-        pass: aAmt === expectA && bAmt === expectB && records.length === 2,
+        expect: `A=${expectA}，B=${expectB}，send rank_record=4 条，流水 send_/recv_+orderNo 各 1 条`,
+        real: `A=${aAmt}，B=${bAmt}，send rank_record=${records.length} 条，流水=${aLogs.length}+${bLogs.length} 条`,
+        pass: aAmt === expectA && bAmt === expectB && records.length === 4 && aLogs.length === 1 && bLogs.length === 1,
       };
     });
 
@@ -190,12 +230,13 @@ class GiftSend003 extends DidibusTestBase {
       const aAmt = a.length > 0 ? int(a[0]['amount']) : 0;
       const bAmt = b.length > 0 ? int(b[0]['amount']) : 0;
       const sendTotal = await this.didibus.rankScoreOf(TOPIC_SEND, USER_A, LOCALE, localIso(LOCALE, T_D1));
-      const expectA = GIFT_COIN * EXPECT_TICKET_PER_COIN_SENDER;
-      const expectB = GIFT_COIN * EXPECT_TICKET_PER_COIN_RECEIVER;
+      const expectA = 2 * GIFT_COIN * EXPECT_TICKET_PER_COIN_SENDER;
+      const expectB = 2 * GIFT_COIN * EXPECT_TICKET_PER_COIN_RECEIVER;
+      const expectScore = GIFT_COIN * (ACTIVITY_GIFTS[this.giftId] ?? 1) + GIFT_COIN * ACTIVITY_GIFTS[HIGH_BUFF_GIFT_ID];
       return {
-        expect: `A=${expectA}，B=${expectB}，send=${GIFT_COIN}（均不变）`,
+        expect: `A=${expectA}，B=${expectB}，send=${expectScore}（均不变）`,
         real: `A=${aAmt}，B=${bAmt}，send=${sendTotal}`,
-        pass: aAmt === expectA && bAmt === expectB && sendTotal === GIFT_COIN,
+        pass: aAmt === expectA && bAmt === expectB && sendTotal === expectScore,
       };
     });
   }

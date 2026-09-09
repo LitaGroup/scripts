@@ -3,7 +3,8 @@ import type { MySQLTestResource, MysqlRow } from '../resources/MySQLTestResource
 import type { RedisTestResource } from '../resources/RedisTestResource.ts';
 
 export const DIDIBUS_BIZ = 'didibus-v202609';
-export const DIDIBUS_TICKET_TYPE = 'N-A-DIDIBUS';
+/** 探险券账户标识（v1.5.0 mod_account 体系，对应 mod_account.name；旧 active_coin/N-A-DIDIBUS 已废弃） */
+export const DIDIBUS_ACCOUNT_NAME = 'DIDIBUS-MILEAGE';
 
 const DB_ACTIVE = 'lita_active';
 
@@ -39,8 +40,21 @@ export interface BusForwardResult {
   crossed: BusCrossedPoint[];
 }
 
+export interface LuckydrawDrawData {
+  id: number;
+  pool: string;
+  count: number;
+  results?: unknown[];
+}
+
+/**
+ * /draw 响应（v1.4.0 双 LuckydrawModule）：
+ * luckyGift = 礼物道具抽奖（topic=lucky-gift，扣券）；luckyMileage = 里程抽奖（topic=lucky-mileage，price=0 不扣费）。
+ * 两条 mod_luckydraw_record 通过 (biz, user_id, pool, create_time) 一一对应；bus.forward transNo = "bus_"+luckyGift.id。
+ */
 export interface DrawResult {
-  luckydraw: { id: number; pool: string; count: number; results?: unknown[] };
+  luckyGift: LuckydrawDrawData;
+  luckyMileage?: LuckydrawDrawData;
   totalMileage: number;
   bus: BusForwardResult;
 }
@@ -166,22 +180,33 @@ export class DidibusService {
     return (await this.moduleCall('account/detail', userId, locale, debugTs) ?? {}) as Record<string, unknown>;
   }
 
-  async accountRecords(userId: number | string, locale: string, debugTs: string, name = 'ticket'): Promise<unknown[]> {
+  async accountRecords(userId: number | string, locale: string, debugTs: string, name = DIDIBUS_ACCOUNT_NAME): Promise<unknown[]> {
     const data = await this.moduleCall('account/records', userId, locale, debugTs, { name, minId: 0, size: 50 });
     return Array.isArray(data) ? data : [];
   }
 
-  async luckydrawDetail(userId: number | string, locale: string, debugTs: string): Promise<Record<string, unknown>> {
-    return (await this.moduleCall('luckydraw/detail', userId, locale, debugTs) ?? {}) as Record<string, unknown>;
+  /** 礼物道具奖池详情（lucky-gift，含 pools 价格；里程奖池不单独展示） */
+  async luckyGiftDetail(userId: number | string, locale: string, debugTs: string): Promise<Record<string, unknown>> {
+    return (await this.moduleCall('lucky-gift/detail', userId, locale, debugTs) ?? {}) as Record<string, unknown>;
   }
 
-  async luckydrawRecords(userId: number | string, locale: string, debugTs: string): Promise<unknown[]> {
-    const data = await this.moduleCall('luckydraw/records', userId, locale, debugTs, { minId: 0, size: 50 });
+  async luckyGiftRecords(userId: number | string, locale: string, debugTs: string): Promise<unknown[]> {
+    const data = await this.moduleCall('lucky-gift/records', userId, locale, debugTs, { minId: 0, size: 50 });
     return Array.isArray(data) ? data : [];
   }
 
-  async luckydrawResult(userId: number | string, locale: string, debugTs: string, pool: string, id: number): Promise<unknown> {
-    return this.moduleCall('luckydraw/result', userId, locale, debugTs, { pool, id });
+  async luckyGiftResult(userId: number | string, locale: string, debugTs: string, pool: string, id: number): Promise<unknown> {
+    return this.moduleCall('lucky-gift/result', userId, locale, debugTs, { pool, id });
+  }
+
+  /** 里程抽奖记录（lucky-mileage，可反查每次抽中的里程值 item.award_count） */
+  async luckyMileageRecords(userId: number | string, locale: string, debugTs: string): Promise<unknown[]> {
+    const data = await this.moduleCall('lucky-mileage/records', userId, locale, debugTs, { minId: 0, size: 50 });
+    return Array.isArray(data) ? data : [];
+  }
+
+  async luckyMileageResult(userId: number | string, locale: string, debugTs: string, pool: string, id: number): Promise<unknown> {
+    return this.moduleCall('lucky-mileage/result', userId, locale, debugTs, { pool, id });
   }
 
   async busDetail(userId: number | string, locale: string, debugTs: string): Promise<Record<string, unknown>> {
@@ -286,9 +311,10 @@ export class DidibusService {
     return rows.map((r) => String(r['name']));
   }
 
-  async queryActiveCoin(): Promise<MysqlRow[]> {
+  /** 探险券账户定义（mod_account，id=901 / name=DIDIBUS-MILEAGE） */
+  async queryAccountDef(): Promise<MysqlRow[]> {
     return this.mysql.query(
-      `SELECT id, name, type, unit_type, locale_config FROM active_coin WHERE type=${quoteStr(DIDIBUS_TICKET_TYPE)}`,
+      `SELECT id, name, description, unit_type, locale_config FROM mod_account WHERE name=${quoteStr(DIDIBUS_ACCOUNT_NAME)}`,
       DB_ACTIVE,
     );
   }
@@ -297,16 +323,18 @@ export class DidibusService {
     return this.mysql.query(`SELECT id, name, description FROM mod_common_event WHERE name=${quoteStr(name)}`, DB_ACTIVE);
   }
 
+  /** 探险券余额（mod_account_user，按 biz+player+name 一行） */
   async queryAccount(userId: number | string): Promise<MysqlRow[]> {
     return this.mysql.query(
-      `SELECT id, active_name, user_id, locale, type, amount, total_amount FROM active_user_account WHERE active_name=${quoteStr(DIDIBUS_BIZ)} AND user_id=${quoteNum(userId)} AND type=${quoteStr(DIDIBUS_TICKET_TYPE)}`,
+      `SELECT id, biz, player, name, amount, create_time, update_time FROM mod_account_user WHERE biz=${quoteStr(DIDIBUS_BIZ)} AND player=${quoteNum(userId)} AND name=${quoteStr(DIDIBUS_ACCOUNT_NAME)}`,
       DB_ACTIVE,
     );
   }
 
+  /** 探险券变动记录（mod_account_user_record，amount 带符号，trans_no 幂等键） */
   async queryAccountLogs(userId: number | string): Promise<MysqlRow[]> {
     return this.mysql.query(
-      `SELECT id, user_id, type, amount, source, create_time FROM active_user_account_log WHERE active_name=${quoteStr(DIDIBUS_BIZ)} AND user_id=${quoteNum(userId)} ORDER BY id`,
+      `SELECT id, player, name, amount, total_amount, trans_no, extra, create_time FROM mod_account_user_record WHERE biz=${quoteStr(DIDIBUS_BIZ)} AND player=${quoteNum(userId)} ORDER BY id`,
       DB_ACTIVE,
     );
   }
@@ -403,15 +431,15 @@ export class DidibusService {
 
   // ==================== 造数 / 清理 ====================
 
-  /** 直写探险券余额（先删后插，幂等） */
-  async setTicketBalance(userId: number | string, locale: string, amount: number): Promise<void> {
+  /** 直写探险券余额（mod_account_user 先删后插，幂等；该表无 locale 列，参数保留兼容调用方） */
+  async setTicketBalance(userId: number | string, _locale: string, amount: number): Promise<void> {
     await this.mysql.execute(
-      `DELETE FROM active_user_account WHERE active_name=${quoteStr(DIDIBUS_BIZ)} AND user_id=${quoteNum(userId)} AND type=${quoteStr(DIDIBUS_TICKET_TYPE)}`,
+      `DELETE FROM mod_account_user WHERE biz=${quoteStr(DIDIBUS_BIZ)} AND player=${quoteNum(userId)} AND name=${quoteStr(DIDIBUS_ACCOUNT_NAME)}`,
       DB_ACTIVE,
     );
     const now = Date.now();
     await this.mysql.execute(
-      `INSERT INTO active_user_account (active_name, user_id, locale, type, amount, create_time, update_time, total_amount) VALUES (${quoteStr(DIDIBUS_BIZ)}, ${quoteNum(userId)}, ${quoteStr(locale)}, ${quoteStr(DIDIBUS_TICKET_TYPE)}, ${quoteNum(amount)}, ${quoteNum(now)}, ${quoteNum(now)}, ${quoteNum(amount)})`,
+      `INSERT INTO mod_account_user (biz, player, name, amount, create_time, update_time) VALUES (${quoteStr(DIDIBUS_BIZ)}, ${quoteNum(userId)}, ${quoteStr(DIDIBUS_ACCOUNT_NAME)}, ${quoteNum(amount)}, ${quoteNum(now)}, ${quoteNum(now)})`,
       DB_ACTIVE,
     );
   }
@@ -423,8 +451,8 @@ export class DidibusService {
     const strs = userIds.map((u) => quoteStr(String(u))).join(', ');
     const exec = (sql: string) => this.mysql.execute(sql, DB_ACTIVE);
 
-    await exec(`DELETE FROM active_user_account WHERE active_name=${quoteStr(DIDIBUS_BIZ)} AND user_id IN (${nums})`);
-    await exec(`DELETE FROM active_user_account_log WHERE active_name=${quoteStr(DIDIBUS_BIZ)} AND user_id IN (${nums})`);
+    await exec(`DELETE FROM mod_account_user WHERE biz=${quoteStr(DIDIBUS_BIZ)} AND player IN (${nums})`);
+    await exec(`DELETE FROM mod_account_user_record WHERE biz=${quoteStr(DIDIBUS_BIZ)} AND player IN (${nums})`);
     await exec(`DELETE FROM mod_task_user_round WHERE biz=${quoteStr(DIDIBUS_BIZ)} AND user_id IN (${nums})`);
     await exec(`DELETE FROM mod_task_user_round_log WHERE biz=${quoteStr(DIDIBUS_BIZ)} AND user_id IN (${nums})`);
     await exec(`DELETE FROM mod_task_user_round_step WHERE biz=${quoteStr(DIDIBUS_BIZ)} AND user_id IN (${nums})`);
@@ -453,6 +481,14 @@ export class DidibusService {
   ): Promise<void> {
     await this.mysql.execute(
       `INSERT INTO mod_common_rank_record (biz, topic, locale, \`key\`, player, trans_no, create_time, amount, total_amount, extra, contributor) VALUES (${quoteStr(DIDIBUS_BIZ)}, ${quoteStr(topic)}, ${quoteStr(locale)}, ${quoteStr(key)}, ${quoteStr(String(player))}, ${quoteStr(this.makeOrderNo('AI_DIDIBUS_SEED'))}, ${quoteNum(createTimeMs)}, ${amount}, ${amount}, '', ${quoteStr(String(contributor))})`,
+      DB_ACTIVE,
+    );
+  }
+
+  /** 清理本 biz 全部历史发奖记录（用例发放前调用，避免其他用户/历史数据干扰 biz+topic 计数） */
+  async cleanAwardRecords(): Promise<number> {
+    return this.mysql.execute(
+      `DELETE FROM mod_common_award_record WHERE biz=${quoteStr(DIDIBUS_BIZ)}`,
       DB_ACTIVE,
     );
   }

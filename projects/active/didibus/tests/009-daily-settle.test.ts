@@ -50,10 +50,11 @@ class DailySettle009 extends DidibusTestBase {
   protected async run(): Promise<void> {
     await this.probeActive();
 
-    await this.act('清理轮次、全部测试用户数据与 Redis', async () => {
+    await this.act('清理轮次、全部测试用户数据、历史发奖记录与 Redis', async () => {
       this.needActive();
       await this.didibus.cleanRounds();
       await this.didibus.cleanUsers(ALL_USERS);
+      await this.didibus.cleanAwardRecords();
       await this.didibus.cleanRedis();
     });
 

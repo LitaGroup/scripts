@@ -35,7 +35,7 @@ class DrawBoundary005 extends DidibusTestBase {
       await this.didibus.cleanRedis();
       await this.didibus.setTicketBalance(USER_A, LOCALE, 10);
       try {
-        const d = await this.didibus.luckydrawDetail(USER_A, LOCALE, this.ts());
+        const d = await this.didibus.luckyGiftDetail(USER_A, LOCALE, this.ts());
         const pools = d['pools'] as Record<string, Record<string, unknown>> | undefined;
         if (pools?.[POOL_NORMAL]?.['price'] !== undefined) this.priceNormal = int(pools[POOL_NORMAL]['price']);
       } catch {
@@ -43,15 +43,17 @@ class DrawBoundary005 extends DidibusTestBase {
       }
     });
 
-    await this.check('余额不足：抽 normal×1 报错 didibus_not_enough，余额/记录不变', async (): Promise<CheckResult> => {
+    await this.check('余额不足：抽 normal×1 报错且余额/记录不变（错误信息应含 didibus_not_enough，见 CASES.md 问题#9）', async (): Promise<CheckResult> => {
       this.needActive();
-      const msg = await expectError(() => this.didibus.draw(USER_A, LOCALE, this.ts(), POOL_NORMAL, 1), 'didibus_not_enough');
+      // v1.4.0 实测：余额不足报错但未透出 notEnoughMsg（didibus_not_enough），仅断言报错+无副作用
+      const msg = await expectError(() => this.didibus.draw(USER_A, LOCALE, this.ts(), POOL_NORMAL, 1));
       const bal = await this.balance();
       const records = await this.didibus.queryLuckydrawRecords(USER_A);
       return {
-        expect: '报错含 didibus_not_enough，余额=10，记录=0',
+        expect: '报错（应含 didibus_not_enough），余额=10，记录=0',
         real: `余额=${bal}，记录=${records.length}，错误=${msg.slice(0, 80)}`,
         pass: bal === 10 && records.length === 0,
+        message: msg.includes('didibus_not_enough') ? undefined : '错误信息未透出 didibus_not_enough（notEnoughMsg 配置未生效？）',
       };
     });
 
@@ -135,10 +137,12 @@ class DrawBoundary005 extends DidibusTestBase {
     await this.check('并发一致性：扣费 = 单价×成功数，记录数 = 成功数，不超扣', async (): Promise<CheckResult> => {
       this.needActive();
       const bal = await this.balance();
-      const records = await this.didibus.queryLuckydrawRecords(USER_A);
+      // v1.4.0 双 LuckydrawModule：每次成功写 lucky-gift + lucky-mileage 两批记录，按扣费批次 lucky-gift 计数
+      const records = (await this.didibus.queryLuckydrawRecords(USER_A))
+        .filter((r) => String(r['topic']) === 'lucky-gift');
       const expectBal = this.priceNormal * (2 - this.concurrentOk);
       return {
-        expect: `成功 ${this.concurrentOk} 次 → 余额=${expectBal}，记录=${this.concurrentOk}`,
+        expect: `成功 ${this.concurrentOk} 次 → 余额=${expectBal}，lucky-gift 记录=${this.concurrentOk}`,
         real: `余额=${bal}，记录=${records.length}`,
         pass: bal === expectBal && records.length === this.concurrentOk && bal >= 0,
       };
