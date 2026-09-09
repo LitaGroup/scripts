@@ -52,6 +52,23 @@ export class RedisTestResource {
     return this.getClient().get(key);
   }
 
+  async zscore(key: string, member: string): Promise<number | null> {
+    const v = await this.getClient().zscore(key, member);
+    return v === null ? null : Number(v);
+  }
+
+  async zadd(key: string, score: number, member: string): Promise<number> {
+    return this.getClient().zadd(key, score, member);
+  }
+
+  async zrevrange(key: string, start: number, stop: number): Promise<string[]> {
+    return this.getClient().zrevrange(key, start, stop);
+  }
+
+  async lrange(key: string, start: number, stop: number): Promise<string[]> {
+    return this.getClient().lrange(key, start, stop);
+  }
+
   async set(key: string, value: string, exSeconds?: number): Promise<boolean> {
     const client = this.getClient();
     if (exSeconds !== undefined) {
