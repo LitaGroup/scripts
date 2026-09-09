@@ -208,8 +208,8 @@ class Draw004 extends DidibusTestBase {
           if (buff !== undefined) expectBuff += buff;
         }
       }
-      const send = await this.didibus.rankScore(this.didibus.rankKey(LOCALE, TOPIC_SEND), USER_A);
-      const recv = await this.didibus.rankScore(this.didibus.rankKey(LOCALE, TOPIC_RECV), USER_A);
+      const send = await this.didibus.rankScoreOf(TOPIC_SEND, USER_A, LOCALE, this.ts());
+      const recv = await this.didibus.rankScoreOf(TOPIC_RECV, USER_A, LOCALE, this.ts());
       return {
         expect: `send=recv=${expectBuff}`,
         real: `send=${send}，recv=${recv}`,

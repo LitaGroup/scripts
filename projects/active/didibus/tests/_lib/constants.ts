@@ -14,22 +14,23 @@ export const RANK_USERS = [13128, 13129, 13130, 13131, 13132, 13133, 13134, 1313
 export const ALL_USERS = [USER_A, USER_B, USER_C, ...RANK_USERS];
 
 /**
- * 活动礼物白名单 + 榜单 buff（giftId → buff）。
- * TODO: 待提供真实活动礼物 ID 后填写；为空时 003/004 相关步骤 skip。
+ * 活动礼物白名单 + 榜单 buff（giftId → buff），来自 Nacos didibus-v202609.yaml gifts。
+ * 未配置的礼物不参与活动（不发券、不计榜）；buff 为探索获得该礼物时对总榜的加成分数。
  */
 export const ACTIVITY_GIFTS: Record<number, number> = {
-  // 1001: 1.0,
+  1001: 1.0, // 金币礼物1
+  1002: 1.5, // 金币礼物2
+  1003: 2.0, // 金币礼物3
+  1004: 2.5, // 金币礼物4
+  1005: 3.0, // 钻石礼物
 };
 
 /** 非活动礼物 ID（白名单之外，用于过滤验证；pk 活动礼物即可） */
 export const NON_ACTIVITY_GIFT_ID = 10561;
 
-/**
- * 探险券比率期望值（来自 Nacos didibus-v202609.yaml）。
- * TODO: 待提供真实配置后校正；当前为技术文档示例值。
- */
+/** 探险券比率（来自 Nacos didibus-v202609.yaml：金币 × 每金币券数，向下取整） */
 export const EXPECT_TICKET_PER_COIN_SENDER = 2;
-export const EXPECT_TICKET_PER_COIN_RECEIVER = 1;
+export const EXPECT_TICKET_PER_COIN_RECEIVER = 0.5;
 
 /** 里程 EVENT / award 名称（技术设计固定值） */
 export const MILEAGE_NAME = 'DIDIBUS_MILEAGE';

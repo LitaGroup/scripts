@@ -49,10 +49,13 @@ class Enter002 extends DidibusTestBase {
       this.needActive();
       const rows = await this.didibus.queryTaskRounds(USER_A);
       const day1 = rows.filter((r) => String(r['round']) === DAY1_KEY);
-      const ok = day1.length === 1 && Number(day1[0]['value']) >= 1;
+      const enter = day1.filter((r) => String(r['name']) === 'enter');
+      const ok = enter.length === 1 && Number(enter[0]['value']) >= 1;
       return {
-        expect: `round=${DAY1_KEY} 1 条且 value>=1`,
-        real: day1.length === 0 ? `无记录（全部轮次：${rows.map((r) => r['round']).join(',') || '空'}）` : `value=${day1[0]['value']}, value_step=${day1[0]['value_step']}, award_step=${day1[0]['award_step']}`,
+        expect: `round=${DAY1_KEY} name=enter 1 条且 value>=1`,
+        real: enter.length === 0
+          ? `无 enter 记录（${DAY1_KEY} 行：${day1.map((r) => r['name']).join(',') || '无'}；全部轮次：${rows.map((r) => String(r['round'])).join(',') || '空'}）`
+          : `value=${enter[0]['value']}, value_step=${enter[0]['value_step']}, award_step=${enter[0]['award_step']}`,
         pass: ok,
       };
     });

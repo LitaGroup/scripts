@@ -38,14 +38,13 @@ export class RedisTestResource {
   }
 
   async clearByPrefix(prefix: string, count = 1000): Promise<number> {
-    const client = this.getClient();
-    const keys: string[] = [];
-    const stream = client.scanStream({ match: `${prefix}*`, count });
-    for await (const chunk of stream) {
-      keys.push(...chunk);
-    }
+    return this.clearByPattern(`${prefix}*`, count);
+  }
+
+  async clearByPattern(pattern: string, count = 10000): Promise<number> {
+    const keys = await this.scan(pattern, count);
     if (keys.length === 0) return 0;
-    return await client.del(...keys);
+    return await this.getClient().del(...keys);
   }
 
   async get(key: string): Promise<string | null> {

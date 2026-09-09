@@ -426,6 +426,7 @@ export class DidibusService {
     await exec(`DELETE FROM active_user_account WHERE active_name=${quoteStr(DIDIBUS_BIZ)} AND user_id IN (${nums})`);
     await exec(`DELETE FROM active_user_account_log WHERE active_name=${quoteStr(DIDIBUS_BIZ)} AND user_id IN (${nums})`);
     await exec(`DELETE FROM mod_task_user_round WHERE biz=${quoteStr(DIDIBUS_BIZ)} AND user_id IN (${nums})`);
+    await exec(`DELETE FROM mod_task_user_round_log WHERE biz=${quoteStr(DIDIBUS_BIZ)} AND user_id IN (${nums})`);
     await exec(`DELETE FROM mod_task_user_round_step WHERE biz=${quoteStr(DIDIBUS_BIZ)} AND user_id IN (${nums})`);
     await exec(
       `DELETE i FROM mod_luckydraw_record_item i JOIN mod_luckydraw_record r ON i.record_id=r.id AND i.biz=r.biz WHERE r.biz=${quoteStr(DIDIBUS_BIZ)} AND r.user_id IN (${nums})`,
@@ -464,47 +465,42 @@ export class DidibusService {
     );
   }
 
-  /** 清理 Redis：榜单 ZSet / 日榜分片 / 时间 Hash / 轮播 List / 抽奖锁 / 库存 */
+  /** 清理 Redis：按业务名 glob 扫描删除（榜单 common:rank:* 及任何含 biz 的 key） */
   async cleanRedis(): Promise<void> {
-    const prefixes = [
-      'active:didibus:',
-      `luckydraw-draw-${DIDIBUS_BIZ}-`,
-      `mod-luckydraw:${DIDIBUS_BIZ}:`,
-    ];
-    for (const prefix of prefixes) {
+    for (const pattern of [`*${DIDIBUS_BIZ}*`, 'active:didibus:*']) {
       try {
-        await this.redis.clearByPrefix(prefix);
+        await this.redis.clearByPattern(pattern);
       } catch {
         // 清理失败不阻断用例
       }
     }
   }
 
-  /** 读取榜单 ZSet 分数（member=userId），不存在返回 null */
-  async rankScore(key: string, userId: number | string): Promise<number | null> {
-    return this.redis.zscore(key, String(userId));
+  /**
+   * 榜单分数验证走接口（/m/{topic}/rank），返回玩家 score（取整），不在榜返回 null。
+   * key 缺省 '-'（总榜），日榜传 yyyyMMdd。
+   */
+  async rankScoreOf(
+    topic: string,
+    userId: number | string,
+    locale: string,
+    debugTs: string,
+    key = '-',
+    count = 200,
+  ): Promise<number | null> {
+    const data = await this.rankQuery(topic, userId, locale, debugTs, { key, count });
+    const hit = this.parseRankList(data).find((e) => e.player === Number(userId));
+    return hit ? hit.amount : null;
   }
 
-  /** 直接写榜单 ZSet 分数（造数用，绕过 consumer） */
+  /** 直接写榜单 ZSet 分数（造数用，绕过 consumer；member 为 JSON 字符串编码） */
   async rankSeed(key: string, userId: number | string, score: number): Promise<void> {
-    await this.redis.zadd(key, score, String(userId));
+    await this.redis.zadd(key, score, JSON.stringify(String(userId)));
   }
 
-  /** 榜单 ZSet 按分降序取前 N 个 member */
-  async rankTop(key: string, count: number): Promise<string[]> {
-    return this.redis.zrevrange(key, 0, count - 1);
-  }
-
-  /** 读取轮播 List 原始内容 */
-  async marqueeRaw(locale: string): Promise<string[]> {
-    return this.redis.lrange(`active:didibus:${locale}:marquee`, 0, -1);
-  }
-
-  /** 送礼总榜/日榜/收礼榜的 Redis key */
+  /** 送礼总榜/日榜/收礼榜的 Redis key（仅造数/清理用；验证请走 rankScoreOf 接口） */
   rankKey(locale: string, topic: string, dayKey?: string): string {
-    return dayKey === undefined
-      ? `active:didibus:${locale}:rank:${topic}`
-      : `active:didibus:${locale}:rank:${topic}:${dayKey}`;
+    return `common:rank:${DIDIBUS_BIZ}:${topic}:${locale}:${dayKey ?? '-'}`;
   }
 
   /** 解析榜单查询返回的条目列表（兼容 list / rankResult 字段名与 player/amount 别名） */

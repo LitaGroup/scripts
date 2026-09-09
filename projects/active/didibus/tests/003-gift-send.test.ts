@@ -100,12 +100,13 @@ class GiftSend003 extends DidibusTestBase {
       return { expect: `A=${expectA}，B=${expectB}`, real: `A=${aAmt}，B=${bAmt}` };
     });
 
-    await this.check('榜单 Redis：送礼总榜+当日日榜 A=100，收礼总榜 B=100', async (): Promise<CheckResult> => {
+    await this.check('榜单接口：送礼总榜+当日日榜 A=100，收礼总榜 B=100', async (): Promise<CheckResult> => {
       this.needActive();
       if (this.giftId === 0) this.skip('活动礼物 ID 待提供');
-      const sendTotal = await this.didibus.rankScore(this.didibus.rankKey(LOCALE, TOPIC_SEND), USER_A);
-      const sendDaily = await this.didibus.rankScore(this.didibus.rankKey(LOCALE, TOPIC_SEND, DAY1_KEY), USER_A);
-      const recvTotal = await this.didibus.rankScore(this.didibus.rankKey(LOCALE, TOPIC_RECV), USER_B);
+      const iso = localIso(LOCALE, T_D1);
+      const sendTotal = await this.didibus.rankScoreOf(TOPIC_SEND, USER_A, LOCALE, iso);
+      const sendDaily = await this.didibus.rankScoreOf(TOPIC_SEND, USER_A, LOCALE, iso, DAY1_KEY);
+      const recvTotal = await this.didibus.rankScoreOf(TOPIC_RECV, USER_B, LOCALE, iso);
       return {
         expect: `send=${GIFT_COIN}，send.${DAY1_KEY}=${GIFT_COIN}，recv=${GIFT_COIN}`,
         real: `send=${sendTotal}，send.${DAY1_KEY}=${sendDaily}，recv=${recvTotal}`,
@@ -188,7 +189,7 @@ class GiftSend003 extends DidibusTestBase {
       const [a, b] = await Promise.all([this.didibus.queryAccount(USER_A), this.didibus.queryAccount(USER_B)]);
       const aAmt = a.length > 0 ? int(a[0]['amount']) : 0;
       const bAmt = b.length > 0 ? int(b[0]['amount']) : 0;
-      const sendTotal = await this.didibus.rankScore(this.didibus.rankKey(LOCALE, TOPIC_SEND), USER_A);
+      const sendTotal = await this.didibus.rankScoreOf(TOPIC_SEND, USER_A, LOCALE, localIso(LOCALE, T_D1));
       const expectA = GIFT_COIN * EXPECT_TICKET_PER_COIN_SENDER;
       const expectB = GIFT_COIN * EXPECT_TICKET_PER_COIN_RECEIVER;
       return {
