@@ -21,18 +21,27 @@
  *   —— 验证码为后端随机生成，非固定值，故必须查库。
  *
  * 前置：
- *   1. config.app.json 配置 accounts.game / accounts.friend（username=手机号 / password）。
- *   2. config.json 配置 userToken（登录短信验证码查库用；PROD API 代理）。
- *   3. 交友账号需 ≥10 金币（2.2.2/2.2.3 匹配前置，不足会跳充值页并 fail-fast）。
+ *   1. config.home.android.lite.json（已提交 git，不被 ignore）配置：
+ *      - userToken（登录短信验证码查库用；PROD API 代理）
+ *      - accounts.game / accounts.friend（username=手机号 / password）
+ *   2. 交友账号需 ≥10 金币（2.2.2/2.2.3 匹配前置，不足会跳充值页并 fail-fast）。
  *
- * 运行：
- *   node projects/app/core/home.android.lite.check.ts
- *   SCRIPT_APPIUM_URL=http://127.0.0.1:4723/ SCRIPT_ENV=TEST SCRIPT_CONFIG=config.app.json \
- *     node projects/app/core/home.android.lite.check.ts
+ * 运行（单一配置文件，账号与 userToken 均从 SCRIPT_CONFIG 读取）：
+ *   SCRIPT_APPIUM_URL=http://127.0.0.1:4723/ SCRIPT_ENV=TEST \
+ *     SCRIPT_CONFIG=config.home.android.lite.json \
+ *     node projects/app/android-lite/home.android.lite.test.ts
  */
 import { AppBaseClass, type AppAccount } from '../../../src/base/AppBaseClass.ts';
 import { by, sleep, type AppiumCapabilities, type Locator } from '../../../src/resources/AppiumResource.ts';
 import { MySQLProdResource } from '../../../src/resources/MySQLProdResource.ts';
+
+// 本脚本账号与 userToken 统一从 SCRIPT_CONFIG 指定的单一配置文件读取：
+//   - 账号：AppBaseClass.account() 读 SCRIPT_CONFIG 的 accounts.{game|friend}
+//   - userToken：短信验证码查库走 loadConfig()，默认读 config.json（或 LITA_CONFIG_PATH）
+// 这里把 LITA_CONFIG_PATH 对齐到 SCRIPT_CONFIG，使两者指向同一文件，避免维护两份配置。
+if (process.env.SCRIPT_CONFIG && !process.env.LITA_CONFIG_PATH) {
+  process.env.LITA_CONFIG_PATH = process.env.SCRIPT_CONFIG;
+}
 
 const APP_PACKAGE = 'com.litalite.android';
 const APP_ACTIVITY = '.ui.splash.SplashActivity';

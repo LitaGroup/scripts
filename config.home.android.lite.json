@@ -1,0 +1,15 @@
+{
+  "userToken": "ZwM5IJJ/QRAQYoiLDmmtSoKX4wt4Y/tMkEQVIk/g7fzwZDmATrqNxXTYmMXz1Z65",
+  "accounts": {
+    "game": {
+      "username": "17600805976",
+      "password": "123456",
+      "smsCode": "1234"
+    },
+    "friend": {
+      "username": "18700000194",
+      "password": "123456",
+      "smsCode": "1234"
+    }
+  }
+}
