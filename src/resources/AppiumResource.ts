@@ -190,6 +190,15 @@ export class AppiumResource {
     await this.request('DELETE', `session/${this.sid()}/actions`); // 释放输入状态
   }
 
+  /**
+   * 通过 /value 端点（UiAutomator2 setText）输入文本。
+   * 适用于 W3C Actions 无法生效的自定义/透明输入框（如验证码 CaptchaInputView 的 EditText）。
+   */
+  async sendKeys(locator: Locator, text: string): Promise<void> {
+    const id = await this.findElement(locator);
+    await this.request('POST', `session/${this.sid()}/element/${id}/value`, { text });
+  }
+
   async textOf(locator: Locator): Promise<string> {
     const id = await this.findElement(locator);
     const value = await this.request('GET', `session/${this.sid()}/element/${id}/text`);
@@ -290,15 +299,31 @@ export class AppiumResource {
   /** 在可滚动容器内滑动（优先于全屏滑动，避免误触系统手势） */
   async swipeInElement(locator: Locator, direction: 'up' | 'down', percent = 0.9): Promise<void> {
     const elementId = await this.findElement(locator);
-    await this.execute('mobile: swipeGesture', [{ elementId, direction, percent }]);
+    const scrollDirection = direction === 'up' ? 'down' : 'up';
+    await this.execute('mobile: scrollGesture', [{ elementId, direction: scrollDirection, percent }]);
   }
 
   private async swipe(direction: 'up' | 'down', percent: number): Promise<void> {
+    // 优先在可滚动容器内滚动（elementId 模式更可靠；坐标模式受 windowRect 高度与真实视口不一致影响）
+    const scrollDirection = direction === 'up' ? 'down' : 'up';
+    for (const cls of [
+      'android.widget.ScrollView',
+      'androidx.core.widget.NestedScrollView',
+      'android.widget.ListView',
+      'androidx.recyclerview.widget.RecyclerView',
+    ]) {
+      const ids = await this.findElements(['xpath', `//${cls}`]);
+      if (ids.length > 0) {
+        await this.execute('mobile: scrollGesture', [{ elementId: ids[0], direction: scrollDirection, percent }]);
+        return;
+      }
+    }
+    // 回退：坐标模式
     const { width, height } = await this.windowRect();
     const left = Math.round(width * 0.15);
     const top = Math.round(height * 0.25);
-    await this.execute('mobile: swipeGesture', [
-      { left, top, width: width - left * 2, height: Math.round(height * 0.5), direction, percent },
+    await this.execute('mobile: scrollGesture', [
+      { left, top, width: width - left * 2, height: Math.round(height * 0.5), direction: scrollDirection, percent },
     ]);
   }
 
