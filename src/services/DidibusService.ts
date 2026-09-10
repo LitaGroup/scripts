@@ -409,16 +409,11 @@ export class DidibusService {
     return this.mysql.query(sql, DB_ACTIVE);
   }
 
-  async queryRankResults(
-    topic: string,
-    opts: { locale?: string; keyPrefix?: string; player?: number | string } = {},
-  ): Promise<MysqlRow[]> {
-    let sql = `SELECT id, topic, locale, \`key\`, player, total_amount, contributors, update_time FROM mod_common_rank_result WHERE biz=${quoteStr(DIDIBUS_BIZ)} AND topic=${quoteStr(topic)}`;
-    if (opts.locale !== undefined) sql += ` AND locale=${quoteStr(opts.locale)}`;
-    if (opts.keyPrefix !== undefined) sql += ` AND \`key\` LIKE ${quoteStr(opts.keyPrefix + '%')}`;
-    if (opts.player !== undefined) sql += ` AND player=${quoteStr(String(opts.player))}`;
-    sql += ' ORDER BY id';
-    return this.mysql.query(sql, DB_ACTIVE);
+  /** 查询轮次结算状态（mod_common_round.status，200=已结算）；轮次不存在返回 -1 */
+  async roundStatus(topic: string, locale: string, key: string): Promise<number> {
+    const rows = await this.queryRounds(topic, locale);
+    const row = rows.find((r) => String(r['key']) === key);
+    return row ? Number(row['status']) : -1;
   }
 
   async queryAwardRecords(opts: { topic?: string; player?: number | string } = {}): Promise<MysqlRow[]> {
@@ -464,7 +459,6 @@ export class DidibusService {
     await exec(`DELETE FROM mod_bus_user_distance_record WHERE biz=${quoteStr(DIDIBUS_BIZ)} AND player IN (${nums})`);
     await exec(`DELETE FROM mod_bus_user_award WHERE biz=${quoteStr(DIDIBUS_BIZ)} AND player IN (${nums})`);
     await exec(`DELETE FROM mod_common_rank_record WHERE biz=${quoteStr(DIDIBUS_BIZ)} AND player IN (${strs})`);
-    await exec(`DELETE FROM mod_common_rank_result WHERE biz=${quoteStr(DIDIBUS_BIZ)} AND player IN (${strs})`);
     await exec(`DELETE FROM mod_common_award_record WHERE biz=${quoteStr(DIDIBUS_BIZ)} AND player IN (${nums})`);
     await exec(`DELETE FROM mod_common_event_record WHERE name='DIDIBUS_MILEAGE' AND player IN (${nums})`);
   }

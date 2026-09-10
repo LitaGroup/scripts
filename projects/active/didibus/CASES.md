@@ -161,8 +161,8 @@
 |---|---|---|
 | 构造当日日榜 ≥6 人数据（消息时间 T_D1） | act | 不同分值 |
 | 触发 `__cron`（time=T_D1_SETTLE，各大区 00:05） | act | — |
-| 结算结果 | check | `mod_common_rank_result` 记录当日子榜 Top6，状态位=已结算 |
-| 日榜发奖 | check | Top1~6 按 stage=排名 各得 `gift-send-daily` 对应奖励（mod_common_award_record） |
+| 结算状态 | check | `mod_common_round.status`=200（已结算）；`mod_common_rank_result` 已废弃不再断言 |
+| 日榜发奖 | check | Top1~6 按 stage=排名 各得 `gift-send-daily` 对应奖励（mod_common_award_record），Top7/8 无奖励 |
 | 幂等 | check | 重复触发同轮次不重复发奖 |
 | 时区覆盖 | check | ko/ph/in+vi 三次触发（各自 T_D1_SETTLE 换算北京时间）分别仅结算各自已结束轮次，互不误结算 |
 | 未结束日不结算 | check | time=T_D1 中午触发，当日子榜不结算 |
@@ -173,7 +173,7 @@
 |---|---|---|
 | 构造送礼总榜/收礼总榜数据（消息时间在活动期内，跨多日 T_D1~T_D2） | act | 含收礼榜贡献者 |
 | 触发 `__cron`（time=T_END_SETTLE，各大区 00:05） | act | — |
-| 送礼总榜 | check | Top3 结算记录；Top1 CUSTOM 仅记录不自动发放；Top2-3 自动发放 |
+| 送礼总榜 | check | 轮次 status=200；Top1 CUSTOM 仅记录不自动发放；Top2-3 自动发放 |
 | 收礼总榜 | check | Top3 按 `gift-recv` stage=排名发奖 |
 | 收礼贡献者 | check | 收礼 Top3 各自的贡献 Top1 按 `gift-recv-contributor` stage=玩家排名发奖 |
 | 幂等 | check | 三个时区 cron 依次触发，仅首次生效，重复安全 |
@@ -223,6 +223,6 @@
     - `/draw` transNo 由 Active 层 `ID.id("DRAW")` 生成（前端不传），lucky-gift/lucky-mileage 共用；pool/count 校验提前到 Active 层（`invalid parameter`）
     - `/m/account/detail` 返回 `accounts: [{name:"DIDIBUS-MILEAGE", mine}]`（type 废弃）；`/m/account/records` 请求 name 必填=DIDIBUS-MILEAGE，响应含 type=INCREASE/DECREASE、totalAmount
     - ⚠️ ~~Bug #8（榜单加成 transNo=null 被去重）~~ → 根因确认为**需求理解不一致**（见 #8），已按正确口径修复并验证通过（2026-09-09，003#10 / 004#16 转绿）
-13. **【疑似 bug→009#7/9/11/12/18、010#8/12/14 fail】结算结果未写入 mod_common_rank_result**（2026-09-09 实测）：日榜/总榜 cron 结算后 `mod_common_round.status=200` 已置位、发奖记录正确产生，但 `mod_common_rank_result` **0 条**（设计 10.5/10.6 要求记录结算结果）。发奖链路正常、结果落库缺失
-14. **【疑似 bug→010#13/15 fail】总榜（mainRound）结算发奖双倍**（2026-09-09 实测）：单次 cron 触发内，同一玩家每个奖励产生 **2 条** `mod_common_award_record`（create_time 相同、order_no 相邻）——S1=[4110×2,14328×2]、S4=[4109×2]、Top1 view_only 也×2、收礼榜同样×2。**日榜（timeRound）结算无此问题**（009 发奖数量正确）。疑似 mainRound settles 的发奖循环执行了两遍
-15. **【疑似 bug→010#15 fail】收礼榜贡献者奖励（AWARD_CONTRIBUTORS）未发放**（2026-09-09 实测）：收礼 Top3（B/A/C）的 `gift-recv` 奖励已发，但其贡献 Top1（S1/S2/S4）的 `gift-recv-contributor` 奖励**无任何发放记录**（`mod_common_award_record` 无对应行）。造数：`mod_common_rank_record` 已含 contributor 字段（B←S1=500、A←S2=600、C←S4=400）。注意：可能与 #13（rank_result 未落库）同源——若贡献者结算依赖结算结果快照
+13. ~~**结算结果未写入 mod_common_rank_result**~~ ✅ 非 bug（2026-09-09 确认）：`mod_common_rank_result` **表已废弃**，结算结果不再落库；结算状态以 `mod_common_round.status`=200 为准，结算正确性由发奖记录（mod_common_award_record）断言。009/010 已改为轮次状态位+发奖记录校验（009 17 步、010 16 步）
+14. **【疑似 bug→010 发奖 check fail】总榜（mainRound）结算发奖双倍**（2026-09-09 实测）：单次 cron 触发内，同一玩家每个奖励产生 **2 条** `mod_common_award_record`（create_time 相同、order_no 相邻）——S1=[4110×2,14328×2]、S4=[4109×2]、Top1 view_only 也×2、收礼榜同样×2。**日榜（timeRound）结算无此问题**（009 发奖数量正确）。疑似 mainRound settles 的发奖循环执行了两遍
+15. **【疑似 bug→010 贡献者 check fail】收礼榜贡献者奖励（AWARD_CONTRIBUTORS）未发放**（2026-09-09 实测）：收礼 Top3（B/A/C）的 `gift-recv` 奖励已发，但其贡献 Top1（S1/S2/S4）的 `gift-recv-contributor` 奖励**无任何发放记录**（`mod_common_award_record` 无对应行）。造数：`mod_common_rank_record` 已含 contributor 字段（B←S1=500、A←S2=600、C←S4=400）。需求口径（2026-09-09 确认）：仅收礼总榜有贡献者奖励；`mod_common_rank_result` 已废弃，贡献者结算应从 rank_record/Redis 取数

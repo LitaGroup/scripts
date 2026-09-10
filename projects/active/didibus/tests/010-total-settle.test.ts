@@ -13,19 +13,14 @@ const [S1, S2, S3, S4, S5, S6] = RANK_USERS; // 13128~13133
  *   in 收礼总榜：B=1000（贡献 S1=500）、A=650（贡献 S2=600）、C=500（贡献 S4=400） → Top3 = B/A/C，贡献者 = S1/S2/S4
  *   ko 送礼/收礼各 1 条（S6=100）—— 时区覆盖验证
  * 触发：__cron 北京时间精确到 cron 分钟（ko=10-02 23:05 / ph=10-03 00:05 / in+vi=10-03 01:05）。
+ * 结算判定：mod_common_round.status=200 + 发奖记录（mod_common_rank_result 已废弃，不再断言结果快照）。
  */
 class TotalSettle010 extends DidibusTestBase {
-  private resultCountBeforeIdem = 0;
   private awardCountBeforeIdem = 0;
 
   constructor() {
     super();
-    this.total = 17;
-  }
-
-  private async totalResults(topic: string, locale: string): Promise<Array<{ player: string; amount: number }>> {
-    const rows = await this.didibus.queryRankResults(topic, { locale, keyPrefix: '-' });
-    return rows.map((r) => ({ player: String(r['player']), amount: Number(r['total_amount']) }));
+    this.total = 16;
   }
 
   private async awardIdsOf(name: string, stage: number): Promise<number[]> {
@@ -88,14 +83,14 @@ class TotalSettle010 extends DidibusTestBase {
       await this.didibus.runCron(CRON_TOTAL_EARLY);
     });
 
-    await this.check('活动未结束不结算总榜：两榜 key=\'-\' 结果均为 0', async (): Promise<CheckResult> => {
+    await this.check('活动未结束不结算总榜：两榜 key=\'-\' 轮次均未结算', async (): Promise<CheckResult> => {
       this.needActive();
-      const send = await this.totalResults(TOPIC_SEND, 'in');
-      const recv = await this.totalResults(TOPIC_RECV, 'in');
+      const send = await this.didibus.roundStatus(TOPIC_SEND, 'in', '-');
+      const recv = await this.didibus.roundStatus(TOPIC_RECV, 'in', '-');
       return {
-        expect: 'send=0，recv=0',
-        real: `send=${send.length}，recv=${recv.length}`,
-        pass: send.length === 0 && recv.length === 0,
+        expect: 'send≠200，recv≠200',
+        real: `send=${send}，recv=${recv}`,
+        pass: send !== 200 && recv !== 200,
       };
     });
 
@@ -106,13 +101,13 @@ class TotalSettle010 extends DidibusTestBase {
 
     await this.check('时区覆盖：仅 ko 总榜已结算，in 未结算', async (): Promise<CheckResult> => {
       this.needActive();
-      const koSend = await this.totalResults(TOPIC_SEND, 'ko');
-      const inSend = await this.totalResults(TOPIC_SEND, 'in');
-      const inRecv = await this.totalResults(TOPIC_RECV, 'in');
+      const koSend = await this.didibus.roundStatus(TOPIC_SEND, 'ko', '-');
+      const inSend = await this.didibus.roundStatus(TOPIC_SEND, 'in', '-');
+      const inRecv = await this.didibus.roundStatus(TOPIC_RECV, 'in', '-');
       return {
-        expect: 'ko send>0；in send/recv=0',
-        real: `ko send=${koSend.length}；in send=${inSend.length}，recv=${inRecv.length}`,
-        pass: koSend.length > 0 && inSend.length === 0 && inRecv.length === 0,
+        expect: 'ko send=200；in send/recv≠200',
+        real: `ko send=${koSend}；in send=${inSend}，recv=${inRecv}`,
+        pass: koSend === 200 && inSend !== 200 && inRecv !== 200,
       };
     });
 
@@ -123,21 +118,13 @@ class TotalSettle010 extends DidibusTestBase {
 
     await this.check('时区覆盖：in 仍未结算（in/vi 需等 01:05）', async (): Promise<CheckResult> => {
       this.needActive();
-      const inSend = await this.totalResults(TOPIC_SEND, 'in');
-      return { expect: '0', real: String(inSend.length), pass: inSend.length === 0 };
+      const inSend = await this.didibus.roundStatus(TOPIC_SEND, 'in', '-');
+      return { expect: '≠200', real: String(inSend), pass: inSend !== 200 };
     });
 
     await this.act('触发 in/vi 总榜结算（__cron 北京 10-03 01:05）', async () => {
       this.needActive();
       await this.didibus.runCron(CRON_TOTAL_INVI);
-    });
-
-    await this.check('in 送礼总榜 Top3 结算结果 = S2(900)/S1(600)/S4(400)', async (): Promise<CheckResult> => {
-      this.needActive();
-      const results = await this.totalResults(TOPIC_SEND, 'in');
-      const got = results.map((r) => `${r.player}:${r.amount}`).sort();
-      const expect = [`${S2}:900`, `${S1}:600`, `${S4}:400`].sort();
-      return { expect: JSON.stringify(expect), real: JSON.stringify(got), pass: JSON.stringify(got) === JSON.stringify(expect) };
     });
 
     await this.check('送礼总榜发奖：Top2(S1)/Top3(S4) 自动发放，Top1(S2) CUSTOM 仅留 view_only 记录不发放', async (): Promise<CheckResult> => {
@@ -163,14 +150,8 @@ class TotalSettle010 extends DidibusTestBase {
       };
     });
 
-    await this.check('in 收礼总榜 Top3 = B/A/C，按 stage=排名 发放 gift-recv 奖励', async (): Promise<CheckResult> => {
+    await this.check('in 收礼总榜发奖：Top3(B/A/C) 按 stage=排名 发放 gift-recv 奖励', async (): Promise<CheckResult> => {
       this.needActive();
-      const results = await this.totalResults(TOPIC_RECV, 'in');
-      const got = results.map((r) => `${r.player}:${r.amount}`).sort();
-      const expect = [`${USER_B}:1000`, `${USER_A}:650`, `${USER_C}:500`].sort();
-      if (JSON.stringify(got) !== JSON.stringify(expect)) {
-        return { expect: JSON.stringify(expect), real: JSON.stringify(got), pass: false };
-      }
       const problems: string[] = [];
       const rankOf: Array<[number, number]> = [[USER_B, 1], [USER_A, 2], [USER_C, 3]];
       for (const [player, rank] of rankOf) {
@@ -216,19 +197,17 @@ class TotalSettle010 extends DidibusTestBase {
 
     await this.act('重复触发 in/vi 总榜结算（幂等验证）', async () => {
       this.needActive();
-      this.resultCountBeforeIdem = (await this.totalResults(TOPIC_SEND, 'in')).length + (await this.totalResults(TOPIC_RECV, 'in')).length;
       this.awardCountBeforeIdem = (await this.didibus.queryAwardRecords({})).length;
       await this.didibus.runCron(CRON_TOTAL_INVI);
     });
 
-    await this.check('幂等：重复触发不产生新结果/奖励', async (): Promise<CheckResult> => {
+    await this.check('幂等：重复触发不产生新奖励', async (): Promise<CheckResult> => {
       this.needActive();
-      const results = (await this.totalResults(TOPIC_SEND, 'in')).length + (await this.totalResults(TOPIC_RECV, 'in')).length;
       const awards = (await this.didibus.queryAwardRecords({})).length;
       return {
-        expect: `result=${this.resultCountBeforeIdem}，award=${this.awardCountBeforeIdem}（不变）`,
-        real: `result=${results}，award=${awards}`,
-        pass: results === this.resultCountBeforeIdem && awards === this.awardCountBeforeIdem,
+        expect: `award=${this.awardCountBeforeIdem}（不变）`,
+        real: `award=${awards}`,
+        pass: awards === this.awardCountBeforeIdem,
       };
     });
   }

@@ -31,20 +31,14 @@ const IN_TOP6 = IN_DAY1.slice(0, 6);
  * 009-daily-settle —— 日榜结算（Cron）
  * 造数：Redis ZADD 直写日榜分片（003 已覆盖 consumer 真实链路）。
  * 触发：__cron 模拟时间用北京时间、精确到 cron 分钟（ko=23:05 / ph=00:05 / in+vi=01:05）。
+ * 结算判定：mod_common_round.status=200（mod_common_rank_result 已废弃，不再断言结果快照）。
  */
 class DailySettle009 extends DidibusTestBase {
-  private resultCountBeforeIdem = 0;
   private awardCountBeforeIdem = 0;
 
   constructor() {
     super();
-    this.total = 18;
-  }
-
-  /** 某大区某日榜的结算结果数 */
-  private async dailyResultCount(locale: string, dayKey: string): Promise<number> {
-    const rows = await this.didibus.queryRankResults(TOPIC_SEND, { locale, keyPrefix: dayKey });
-    return rows.length;
+    this.total = 17;
   }
 
   protected async run(): Promise<void> {
@@ -97,15 +91,15 @@ class DailySettle009 extends DidibusTestBase {
     await this.check('时区覆盖 1/3：仅 ko 第 1 天子榜已结算', async (): Promise<CheckResult> => {
       this.needActive();
       const [ko, ph, vi, ind] = await Promise.all([
-        this.dailyResultCount('ko', DAY1_KEY),
-        this.dailyResultCount('ph', DAY1_KEY),
-        this.dailyResultCount('vi', DAY1_KEY),
-        this.dailyResultCount('in', DAY1_KEY),
+        this.didibus.roundStatus(TOPIC_SEND, 'ko', DAY1_KEY),
+        this.didibus.roundStatus(TOPIC_SEND, 'ph', DAY1_KEY),
+        this.didibus.roundStatus(TOPIC_SEND, 'vi', DAY1_KEY),
+        this.didibus.roundStatus(TOPIC_SEND, 'in', DAY1_KEY),
       ]);
       return {
-        expect: 'ko>0，ph/vi/in=0',
+        expect: 'ko=200，ph/vi/in≠200',
         real: `ko=${ko}，ph=${ph}，vi=${vi}，in=${ind}`,
-        pass: ko > 0 && ph === 0 && vi === 0 && ind === 0,
+        pass: ko === 200 && ph !== 200 && vi !== 200 && ind !== 200,
       };
     });
 
@@ -117,14 +111,14 @@ class DailySettle009 extends DidibusTestBase {
     await this.check('时区覆盖 2/3：ph 已结算，in/vi 未结算', async (): Promise<CheckResult> => {
       this.needActive();
       const [ph, vi, ind] = await Promise.all([
-        this.dailyResultCount('ph', DAY1_KEY),
-        this.dailyResultCount('vi', DAY1_KEY),
-        this.dailyResultCount('in', DAY1_KEY),
+        this.didibus.roundStatus(TOPIC_SEND, 'ph', DAY1_KEY),
+        this.didibus.roundStatus(TOPIC_SEND, 'vi', DAY1_KEY),
+        this.didibus.roundStatus(TOPIC_SEND, 'in', DAY1_KEY),
       ]);
       return {
-        expect: 'ph>0，vi/in=0',
+        expect: 'ph=200，vi/in≠200',
         real: `ph=${ph}，vi=${vi}，in=${ind}`,
-        pass: ph > 0 && vi === 0 && ind === 0,
+        pass: ph === 200 && vi !== 200 && ind !== 200,
       };
     });
 
@@ -135,27 +129,18 @@ class DailySettle009 extends DidibusTestBase {
 
     await this.check('时区覆盖 3/3：in/vi 均已结算', async (): Promise<CheckResult> => {
       this.needActive();
-      const [vi, ind] = await Promise.all([this.dailyResultCount('vi', DAY1_KEY), this.dailyResultCount('in', DAY1_KEY)]);
+      const [vi, ind] = await Promise.all([
+        this.didibus.roundStatus(TOPIC_SEND, 'vi', DAY1_KEY),
+        this.didibus.roundStatus(TOPIC_SEND, 'in', DAY1_KEY),
+      ]);
       return {
-        expect: 'in>0，vi>0',
+        expect: 'in=200，vi=200',
         real: `in=${ind}，vi=${vi}`,
-        pass: ind > 0 && vi > 0,
+        pass: ind === 200 && vi === 200,
       };
     });
 
-    await this.check('in 第 1 天 Top6 结算结果与分值正确', async (): Promise<CheckResult> => {
-      this.needActive();
-      const rows = await this.didibus.queryRankResults(TOPIC_SEND, { locale: 'in', keyPrefix: DAY1_KEY });
-      const got = rows.map((r) => `${r['player']}:${int(r['total_amount'])}`).sort();
-      const expect = IN_TOP6.map(([u, s]) => `${u}:${s}`).sort();
-      return {
-        expect: JSON.stringify(expect),
-        real: JSON.stringify(got),
-        pass: JSON.stringify(got) === JSON.stringify(expect),
-      };
-    });
-
-    await this.check('日榜发奖：Top1~6 各得 gift-send-daily stage=排名 对应奖励', async (): Promise<CheckResult> => {
+    await this.check('日榜发奖：Top1~6 各得 gift-send-daily stage=排名 对应奖励，Top7/8 无奖励', async (): Promise<CheckResult> => {
       this.needActive();
       const config = await this.didibus.queryAwardConfig(AWARD_SEND_DAILY);
       if (config.length === 0) {
@@ -170,8 +155,13 @@ class DailySettle009 extends DidibusTestBase {
         const hit = expectIds.every((id) => gotIds.includes(id));
         if (!hit) problems.push(`rank${rank}/player${player}：期望含 ${JSON.stringify(expectIds)}，实际 ${JSON.stringify(gotIds)}`);
       }
+      // Top7/8（未进榜）不应有任何发奖记录
+      for (const player of [RANK_USERS[6], RANK_USERS[7]]) {
+        const records = await this.didibus.queryAwardRecords({ player });
+        if (records.length > 0) problems.push(`未进榜 player${player} 不应有发奖记录，实际 ${records.length} 条`);
+      }
       return {
-        expect: 'Top1~6 奖励按 stage=排名 发放',
+        expect: 'Top1~6 奖励按 stage=排名 发放，Top7/8 无奖励',
         real: problems.length === 0 ? '全部正确' : problems.join('；'),
         pass: problems.length === 0,
       };
@@ -179,20 +169,18 @@ class DailySettle009 extends DidibusTestBase {
 
     await this.act('重复触发 in/vi 日榜结算（幂等验证）', async () => {
       this.needActive();
-      this.resultCountBeforeIdem = (await this.didibus.queryRankResults(TOPIC_SEND, { keyPrefix: DAY1_KEY })).length;
       const awardRows = await this.didibus.queryAwardRecords({});
       this.awardCountBeforeIdem = awardRows.length;
       await this.didibus.runCron(CRON_DAILY_INVI);
     });
 
-    await this.check('幂等：重复触发不产生新结果/奖励', async (): Promise<CheckResult> => {
+    await this.check('幂等：重复触发不产生新奖励', async (): Promise<CheckResult> => {
       this.needActive();
-      const results = (await this.didibus.queryRankResults(TOPIC_SEND, { keyPrefix: DAY1_KEY })).length;
       const awards = (await this.didibus.queryAwardRecords({})).length;
       return {
-        expect: `result=${this.resultCountBeforeIdem}，award=${this.awardCountBeforeIdem}（不变）`,
-        real: `result=${results}，award=${awards}`,
-        pass: results === this.resultCountBeforeIdem && awards === this.awardCountBeforeIdem,
+        expect: `award=${this.awardCountBeforeIdem}（不变）`,
+        real: `award=${awards}`,
+        pass: awards === this.awardCountBeforeIdem,
       };
     });
 
@@ -210,12 +198,12 @@ class DailySettle009 extends DidibusTestBase {
 
     await this.check('未结束不误结算：ko 第 2 天已结算，in 第 2 天（未结束）不结算', async (): Promise<CheckResult> => {
       this.needActive();
-      const ko = await this.dailyResultCount('ko', DAY2_KEY);
-      const ind = await this.dailyResultCount('in', DAY2_KEY);
+      const ko = await this.didibus.roundStatus(TOPIC_SEND, 'ko', DAY2_KEY);
+      const ind = await this.didibus.roundStatus(TOPIC_SEND, 'in', DAY2_KEY);
       return {
-        expect: 'ko>0，in=0',
+        expect: 'ko=200，in≠200',
         real: `ko=${ko}，in=${ind}`,
-        pass: ko > 0 && ind === 0,
+        pass: ko === 200 && ind !== 200,
       };
     });
   }

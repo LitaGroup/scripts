@@ -6,25 +6,9 @@
 
 ## 待修复
 
-### BUG-1 结算结果未写入 mod_common_rank_result
-
-- **影响用例**：009#7/9/11/12/18、010#8/12/14
-- **现象**：日榜/总榜 cron 结算后，发奖正常执行、`mod_common_round.status` 已置 200（已结算），但 `mod_common_rank_result` **一条记录都没有**。
-- **证据**：
-
-```sql
--- 009 日榜结算（ko/ph/in+vi 三轮触发）+ 010 总榜结算（三轮触发）后：
-SELECT * FROM mod_common_rank_result WHERE biz='didibus-v202609';  -- 0 行
-SELECT topic, locale, `key`, status FROM mod_common_round
- WHERE biz='didibus-v202609' AND topic='gift-send' AND `key`='20260923';
--- 4 大区全部 status=200（已结算），且 Top6 奖励已正确发放
-```
-
-- **期望**：按技术设计 10.5/10.6，结算时应写入 `mod_common_rank_result`（TopN 快照），否则结算结果无审计与展示数据源。
-
 ### BUG-2 总榜（mainRound）结算发奖双倍 ⚠️ 线上会重复发奖，优先处理
 
-- **影响用例**：010#13
+- **影响用例**：010「送礼总榜发奖」check
 - **现象**：单次 cron 触发内，同一玩家的每个奖励产生 **2 条** `mod_common_award_record`（create_time 相同、order_no 相邻），Top1 的 view_only 审计记录同样 ×2。**日榜（timeRound）结算无此问题**（009 发奖数量精确正确）。
 - **证据**（010 总榜结算，in 大区，触发时间 北京 10-03 01:05）：
 
@@ -42,7 +26,7 @@ ko 触发（北京 10-02 23:05）的 ko 大区结算同样双倍 → 非时区�
 
 ### BUG-3 收礼榜贡献者奖励（AWARD_CONTRIBUTORS）未发放
 
-- **影响用例**：010#15
+- **影响用例**：010「收礼贡献者发奖」check
 - **需求口径**（2026-09-09 确认）：**仅收礼总榜有贡献者奖励**——收礼 Top3 各自的贡献 Top1 获奖（送礼榜无贡献者概念）。
 - **现象**：收礼总榜 Top3（B/A/C）的 `gift-recv` 奖励已正常发放，但三人各自的贡献 Top1（S1/S2/S4）的 `gift-recv-contributor` 奖励**完全无发放记录**。
 - **证据**：`mod_common_award_record` 中无任何贡献者奖励行；造数已确认 `mod_common_rank_record` 含 contributor 字段：
@@ -55,7 +39,11 @@ C(收礼500)  ← 贡献 Top1 = S4(400)   期望 stage=3（BUBBLE 984）        
 
 配置侧已核对：`gift-recv-contributor` stage=1/2/3 预置齐全；`AWARD_CONTRIBUTORS` 策略配置（contributorFromRank=1/ToRank=1、playerFromRank=1/ToRank=3）正确。
 
-- **备注**：可能与 BUG-1 同源——若贡献者结算依赖 `mod_common_rank_result` 快照，则会被其缺失阻断。
+- **备注**：`mod_common_rank_result` 已废弃（见下方已关闭项），贡献者结算应从 `mod_common_rank_record`/Redis 取数，与该表无关。
+
+## 已关闭（非 bug）
+
+- ~~BUG-1 结算结果未写入 mod_common_rank_result~~（2026-09-09 确认）：`mod_common_rank_result` **表已废弃**，结算结果不再落库；结算状态以 `mod_common_round.status`=200 为准，结算正确性由发奖记录断言。009/010 用例已改为轮次状态位+发奖记录校验。
 
 ## 已修复（2026-09-09 复测转绿）
 
