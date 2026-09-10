@@ -4,7 +4,7 @@ import { T_D1, CRON_TOTAL_KO, CRON_TOTAL_PH, CRON_TOTAL_INVI, CRON_TOTAL_EARLY, 
 import { int } from './_lib/helpers.ts';
 import { DidibusTestBase } from './_lib/DidibusTestBase.ts';
 
-const [S1, S2, S3, S4, S5, S6] = RANK_USERS; // 13128~13133
+const [S1, S2, S3, S4, S5, S6, S7] = RANK_USERS; // 13128~13134
 
 /**
  * 010-total-settle —— 总榜结算（Cron）
@@ -12,7 +12,7 @@ const [S1, S2, S3, S4, S5, S6] = RANK_USERS; // 13128~13133
  *   in 送礼总榜：S2=900、S1=600、S4=400、S3=200、S5=50 → Top3 = S2/S1/S4
  *   in 收礼总榜：B=1000（贡献 S1=500/S2=300/S3=200）、A=650（贡献 S2=600/S5=50）、C=500（贡献 S4=400/S1=100）
  *     → Top3 = B/A/C，贡献 Top1 = S1/S2/S4
- *   ko：S6→B 100 —— 时区覆盖验证
+ *   ko：S6→S7 100（ko 专属用户，不与 in 数据串 uid）—— 时区覆盖 + 大区隔离验证
  * 触发：__cron 北京时间精确到 cron 分钟（ko=10-02 23:05 / ph=10-03 00:05 / in+vi=10-03 01:05）。
  * 结算判定：mod_common_round.status=200 + 发奖记录（mod_common_rank_result 已废弃，不再断言结果快照）。
  */
@@ -75,10 +75,11 @@ class TotalSettle010 extends DidibusTestBase {
       await send('in', S5, USER_A, 50);
       await send('in', S4, USER_C, 400);
       await send('in', S1, USER_C, 100);
-      // ko：S6→B 100（时区覆盖验证）
-      await send('ko', S6, USER_B, 100);
-      // 造数自检（走 /rank 接口）：送礼总榜 S2=900/S1=600/S4=400/S3=200/S5=50；收礼总榜 B=1000/A=650/C=500
+      // ko：S6→S7 100（时区覆盖 + 大区隔离验证；ko 用专属用户，不与 in 串 uid）
+      await send('ko', S6, S7, 100);
+      // 造数自检（走 /rank 接口）：送礼总榜 S2=900/S1=600/S4=400/S3=200/S5=50；收礼总榜 B=1000/A=650/C=500；ko send S6=100/recv S7=100
       const iso = localIso(LOCALE, T_D1);
+      const koIso = localIso('ko', T_D1);
       const expectSend: Array<[number, number]> = [[S1, 600], [S2, 900], [S3, 200], [S4, 400], [S5, 50]];
       const expectRecv: Array<[number, number]> = [[USER_B, 1000], [USER_A, 650], [USER_C, 500]];
       const problems: string[] = [];
@@ -90,6 +91,10 @@ class TotalSettle010 extends DidibusTestBase {
         const real = await this.didibus.rankScoreOf(TOPIC_RECV, u, LOCALE, iso);
         if (real !== s) problems.push(`recv ${u}=${real}（期望 ${s}）`);
       }
+      const koSend = await this.didibus.rankScoreOf(TOPIC_SEND, S6, 'ko', koIso);
+      const koRecv = await this.didibus.rankScoreOf(TOPIC_RECV, S7, 'ko', koIso);
+      if (koSend !== 100) problems.push(`ko send ${S6}=${koSend}（期望 100）`);
+      if (koRecv !== 100) problems.push(`ko recv ${S7}=${koRecv}（期望 100）`);
       if (problems.length > 0) throw new Error(`造数自检失败：${problems.join('；')}`);
     });
 
