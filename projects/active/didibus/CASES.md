@@ -171,11 +171,11 @@
 
 | 步骤 | 类型 | 校验点 |
 |---|---|---|
-| 构造送礼总榜/收礼总榜数据（消息时间在活动期内，跨多日 T_D1~T_D2） | act | 含收礼榜贡献者 |
+| 构造送礼总榜/收礼总榜数据（真实 gift_send 消息，T_D1；禁直写 DB/Redis） | act | 含收礼榜贡献者；造数后走 /rank 接口自检分值 |
 | 触发 `__cron`（time=T_END_SETTLE，各大区 00:05） | act | — |
 | 送礼总榜 | check | 轮次 status=200；Top1 CUSTOM 仅记录不自动发放；Top2-3 自动发放 |
 | 收礼总榜 | check | Top3 按 `gift-recv` stage=排名发奖 |
-| 收礼贡献者 | check | 收礼 Top3 各自的贡献 Top1 按 `gift-recv-contributor` stage=玩家排名发奖 |
+| 收礼贡献者 | check | 收礼 Top3 各自的贡献 Top1 按 `gift-recv-contributor` stage=玩家排名发奖；大区隔离（ko 贡献者奖励只发 ko 本地贡献 Top1，不跨大区、不重复） |
 | 幂等 | check | 三个时区 cron 依次触发，仅首次生效，重复安全 |
 | 活动外触发 | check | time=T_D1（活动未结束）触发不结算总榜 |
 
@@ -225,4 +225,5 @@
     - ⚠️ ~~Bug #8（榜单加成 transNo=null 被去重）~~ → 根因确认为**需求理解不一致**（见 #8），已按正确口径修复并验证通过（2026-09-09，003#10 / 004#16 转绿）
 13. ~~**结算结果未写入 mod_common_rank_result**~~ ✅ 非 bug（2026-09-09 确认）：`mod_common_rank_result` **表已废弃**，结算结果不再落库；结算状态以 `mod_common_round.status`=200 为准，结算正确性由发奖记录（mod_common_award_record）断言。009/010 已改为轮次状态位+发奖记录校验（009 17 步、010 16 步）
 14. ~~**总榜（mainRound）结算发奖双倍**~~ ✅ 已修复（2026-09-10 复测，010 送礼发奖 check 转绿：S1=[4110,14328]、S4=[4109]、Top1 view_only 恰好 1 条、收礼榜同样单份，全场 9 条无重复）。原现象：单次 cron 触发内同一玩家每个奖励产生 2 条 `mod_common_award_record`（create_time 相同、order_no 相邻）；日榜（timeRound）无此问题
-15. **【疑似 bug→010 贡献者 check fail】收礼榜贡献者奖励（AWARD_CONTRIBUTORS）未发放**（2026-09-09 实测）：收礼 Top3（B/A/C）的 `gift-recv` 奖励已发，但其贡献 Top1（S1/S2/S4）的 `gift-recv-contributor` 奖励**无任何发放记录**（`mod_common_award_record` 无对应行）。造数：`mod_common_rank_record` 已含 contributor 字段（B←S1=500、A←S2=600、C←S4=400）。需求口径（2026-09-09 确认）：仅收礼总榜有贡献者奖励；`mod_common_rank_result` 已废弃，贡献者结算应从 rank_record/Redis 取数
+15. ~~**收礼榜贡献者奖励（AWARD_CONTRIBUTORS）未发放**~~ ✅ 造数问题（2026-09-10 确认）：直写 `mod_common_rank_record` 不驱动贡献者结算；010 造数改为**真实 gift_send 消息链路**后贡献者奖励正常发放（010#14 转绿：S1/S2/S4 按 stage=1/2/3 得 14328/14327/984）。需求口径（2026-09-09 确认）：仅收礼总榜有贡献者奖励
+16. **【疑似 bug→010#15 fail】收礼贡献者结算跨大区串数据**（2026-09-10 真实链路实测）：ko 收礼 Top1 B（ko 本地贡献 Top1=S6/100），但 ko 结算把贡献者 stage1（14328）发给了 **in 大区**的贡献 Top1 S1（在 ko 无送礼）；in 结算又给 S1 发一次 → S1 重复得 2 次、S6 一次未得。推断：贡献者聚合未按 locale 隔离（按收礼玩家全局取 Top1），且无大区级幂等

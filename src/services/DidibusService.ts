@@ -463,22 +463,6 @@ export class DidibusService {
     await exec(`DELETE FROM mod_common_event_record WHERE name='DIDIBUS_MILEAGE' AND player IN (${nums})`);
   }
 
-  /** 直写榜单变更记录（造贡献者数据用，010 总榜结算） */
-  async seedRankRecord(
-    topic: string,
-    locale: string,
-    key: string,
-    player: number | string,
-    contributor: number | string,
-    amount: number,
-    createTimeMs: number,
-  ): Promise<void> {
-    await this.mysql.execute(
-      `INSERT INTO mod_common_rank_record (biz, topic, locale, \`key\`, player, trans_no, create_time, amount, total_amount, extra, contributor) VALUES (${quoteStr(DIDIBUS_BIZ)}, ${quoteStr(topic)}, ${quoteStr(locale)}, ${quoteStr(key)}, ${quoteStr(String(player))}, ${quoteStr(this.makeOrderNo('AI_DIDIBUS_SEED'))}, ${quoteNum(createTimeMs)}, ${amount}, ${amount}, '', ${quoteStr(String(contributor))})`,
-      DB_ACTIVE,
-    );
-  }
-
   /** 清理本 biz 全部历史发奖记录（用例发放前调用，避免其他用户/历史数据干扰 biz+topic 计数） */
   async cleanAwardRecords(): Promise<number> {
     return this.mysql.execute(

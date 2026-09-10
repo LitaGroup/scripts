@@ -6,26 +6,28 @@
 
 ## 待修复
 
-### BUG-3 收礼榜贡献者奖励（AWARD_CONTRIBUTORS）未发放
+### BUG-4 收礼贡献者结算跨大区串数据（贡献 Top1 发错人 + 同一人重复发奖）
 
-- **影响用例**：010「收礼贡献者发奖」check
-- **需求口径**（2026-09-09 确认）：**仅收礼总榜有贡献者奖励**——收礼 Top3 各自的贡献 Top1 获奖（送礼榜无贡献者概念）。
-- **现象**：收礼总榜 Top3（B/A/C）的 `gift-recv` 奖励已正常发放，但三人各自的贡献 Top1（S1/S2/S4）的 `gift-recv-contributor` 奖励**完全无发放记录**。
-- **证据**：`mod_common_award_record` 中无任何贡献者奖励行；造数已确认 `mod_common_rank_record` 含 contributor 字段：
+- **影响用例**：010「大区隔离：ko 收礼贡献 Top1 奖励发给 ko 本地贡献者」check
+- **现象**：ko 大区收礼总榜 Top1 是 B（ko 本地仅 S6 贡献 100），但 ko 结算时贡献者奖励（gift-recv-contributor stage1=14328）发给了 **S1**——S1 是 **in 大区** B 的贡献 Top1（500），在 ko 无任何送礼。随后 in 结算又给 S1 正常发了一次 → **S1 累计得 2 次 stage1 贡献奖励，ko 本地贡献者 S6 一次未得**。
+- **证据**（010 真实 gift_send 造数：in `S1→B 500 / S2→B 300 / S3→B 200`，ko `S6→B 100`）：
 
 ```
-B(收礼1000) ← 贡献 Top1 = S1(500)   期望 gift-recv-contributor stage=1（MICBOX 14328）  实际无
-A(收礼650)  ← 贡献 Top1 = S2(600)   期望 stage=2（MICBOX 14327）                        实际无
-C(收礼500)  ← 贡献 Top1 = S4(400)   期望 stage=3（BUBBLE 984）                          实际无
+-- ko 结算批（北京 10-02 23:05 触发）：
+player=13128(S1) topic=gift-recv award_id=14328  ← 错！应为 ko 本地贡献 Top1 S6(13133)
+-- in 结算批（北京 10-03 01:05 触发）：
+player=13128(S1) topic=gift-recv award_id=14328  ← in 的正确发放（第 2 次，重复）
+player=13129(S2) topic=gift-recv award_id=14327  ← stage2 ✓
+player=13131(S4) topic=gift-recv award_id=984    ← stage3 ✓
+-- S6 的 gift-recv 记录：0 条
 ```
 
-配置侧已核对：`gift-recv-contributor` stage=1/2/3 预置齐全；`AWARD_CONTRIBUTORS` 策略配置（contributorFromRank=1/ToRank=1、playerFromRank=1/ToRank=3）正确。
-
-- **备注**：`mod_common_rank_result` 已废弃（见下方已关闭项），贡献者结算应从 `mod_common_rank_record`/Redis 取数，与该表无关。
+- **推断**：贡献者聚合未按 locale 隔离——按收礼玩家 B 全局取贡献 Top1（S1 总分 500 > S6 的 100），导致 ko 发错人；且贡献者奖励无 (玩家×stage) 级幂等，同一贡献者被多个大区重复发放。
 
 ## 已关闭（非 bug）
 
 - ~~BUG-1 结算结果未写入 mod_common_rank_result~~（2026-09-09 确认）：`mod_common_rank_result` **表已废弃**，结算结果不再落库；结算状态以 `mod_common_round.status`=200 为准，结算正确性由发奖记录断言。009/010 用例已改为轮次状态位+发奖记录校验。
+- ~~BUG-3 收礼榜贡献者奖励未发放~~（2026-09-10 确认为**造数问题**）：直写 `mod_common_rank_record` 不驱动贡献者结算；010 造数改为**真实 gift_send 消息链路**后贡献者奖励正常发放（S1/S2/S4 按 stage=1/2/3 各得 14328/14327/984 ✓）。真实链路下暴露出新的跨大区问题，见 BUG-4。
 
 ## 已修复（2026-09-10 复测转绿）
 
