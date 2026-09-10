@@ -6,24 +6,6 @@
 
 ## 待修复
 
-### BUG-2 总榜（mainRound）结算发奖双倍 ⚠️ 线上会重复发奖，优先处理
-
-- **影响用例**：010「送礼总榜发奖」check
-- **现象**：单次 cron 触发内，同一玩家的每个奖励产生 **2 条** `mod_common_award_record`（create_time 相同、order_no 相邻），Top1 的 view_only 审计记录同样 ×2。**日榜（timeRound）结算无此问题**（009 发奖数量精确正确）。
-- **证据**（010 总榜结算，in 大区，触发时间 北京 10-03 01:05）：
-
-```
-topic=gift-send  player=13129(Top1)  award_id=-1     mod=view_only  ×2  ← 审计记录双倍
-topic=gift-send  player=13128(Top2)  award_id=4110   mod=add        ×2  ← 头像框发 2 个
-topic=gift-send  player=13128(Top2)  award_id=14328  mod=add        ×2  ← 麦位框发 2 个
-topic=gift-send  player=13131(Top3)  award_id=4109   mod=add        ×2
-topic=gift-recv  player=13125(Top1)  award_id=-1     mod=view_only  ×2
-topic=gift-recv  player=13126(Top2)  award_id=4110   mod=add        ×2
-topic=gift-recv  player=13127(Top3)  award_id=4109   mod=add        ×2
-```
-
-ko 触发（北京 10-02 23:05）的 ko 大区结算同样双倍 → 非时区问题，疑似 mainRound settles 的发奖循环执行了两遍（timeRound 日榜结算路径正常）。
-
 ### BUG-3 收礼榜贡献者奖励（AWARD_CONTRIBUTORS）未发放
 
 - **影响用例**：010「收礼贡献者发奖」check
@@ -44,6 +26,12 @@ C(收礼500)  ← 贡献 Top1 = S4(400)   期望 stage=3（BUBBLE 984）        
 ## 已关闭（非 bug）
 
 - ~~BUG-1 结算结果未写入 mod_common_rank_result~~（2026-09-09 确认）：`mod_common_rank_result` **表已废弃**，结算结果不再落库；结算状态以 `mod_common_round.status`=200 为准，结算正确性由发奖记录断言。009/010 用例已改为轮次状态位+发奖记录校验。
+
+## 已修复（2026-09-10 复测转绿）
+
+| 问题 | 说明 | 验证 |
+|---|---|---|
+| BUG-2 总榜（mainRound）结算发奖双倍 | 单次 cron 触发内同一玩家每个奖励产生 2 条 `mod_common_award_record`（日榜无此问题）→ 已修 | 010 送礼/收礼发奖 check ✅：S1=[4110,14328]、S4=[4109]、S2 view_only 恰好 1 条、收礼 Top3 各 1 条，全场 9 条无重复 |
 
 ## 已修复（2026-09-09 复测转绿）
 
