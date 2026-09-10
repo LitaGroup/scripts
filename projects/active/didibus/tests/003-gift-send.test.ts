@@ -63,11 +63,13 @@ class GiftSend003 extends DidibusTestBase {
       const [a, b] = await Promise.all([this.didibus.queryAccount(USER_A), this.didibus.queryAccount(USER_B)]);
       const aAmt = a.length > 0 ? int(a[0]['amount']) : 0;
       const bAmt = b.length > 0 ? int(b[0]['amount']) : 0;
-      const records = await this.didibus.queryRankRecords(TOPIC_SEND, { locale: LOCALE });
+      // 按玩家过滤，避免其他用例残留的 rank_record 干扰
+      const sendRecords = await this.didibus.queryRankRecords(TOPIC_SEND, { locale: LOCALE, player: USER_A });
+      const recvRecords = await this.didibus.queryRankRecords(TOPIC_RECV, { locale: LOCALE, player: USER_B });
       return {
-        expect: 'A=0，B=0，rank_record=0 条',
-        real: `A=${aAmt}，B=${bAmt}，rank_record=${records.length} 条`,
-        pass: aAmt === 0 && bAmt === 0 && records.length === 0,
+        expect: 'A=0，B=0，A/B rank_record=0 条',
+        real: `A=${aAmt}，B=${bAmt}，A send=${sendRecords.length} 条，B recv=${recvRecords.length} 条`,
+        pass: aAmt === 0 && bAmt === 0 && sendRecords.length === 0 && recvRecords.length === 0,
       };
     });
 
