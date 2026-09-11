@@ -1,8 +1,9 @@
 /**
  * Appium 资源：基于 W3C WebDriver 协议的 Appium HTTP 客户端（零三方依赖，使用全局 fetch）。
  *
- * - 服务地址来自环境变量 SCRIPT_APPIUM_URL，默认 http://127.0.0.1:4723/
- *   （本地无 Appium 环境时，可使用内部服务器 http://172.20.1.79:4723/）
+ * - 服务地址：SCRIPT_APPIUM_URL 或 APPIUM_HOST，默认 http://127.0.0.1:4723/
+ *   localhost 会规范成 127.0.0.1（避免 Node 走 IPv6 ::1 导致 fetch failed）
+ *   本机连不上时回退内部服务器 http://172.20.1.79:4723/
  * - 仅实现脚本所需的最小指令集：会话管理、元素查找/点击/输入、页面源码、截图等。
  */
 
@@ -24,6 +25,32 @@ export interface AppiumCapabilities {
 export type Locator = [using: string, value: string];
 
 const ELEMENT_KEY = 'element-6066-11e4-a52e-4f735466cecf';
+
+const DEFAULT_APPIUM_URL = 'http://127.0.0.1:4723/';
+const INTERNAL_APPIUM_URL = 'http://172.20.1.79:4723/';
+
+/** localhost → 127.0.0.1，避免 Node fetch 解析到 ::1 而 Appium 只监听 IPv4 */
+export function normalizeAppiumUrl(raw: string): string {
+  let u = raw.trim();
+  if (!u) return DEFAULT_APPIUM_URL;
+  if (!/^https?:\/\//i.test(u)) u = `http://${u}`;
+  u = u.replace(/^(https?:\/\/)localhost(?=[:/]|$)/i, '$1127.0.0.1');
+  if (!u.endsWith('/')) u += '/';
+  return u;
+}
+
+export function resolveAppiumUrl(): string {
+  return normalizeAppiumUrl(process.env.SCRIPT_APPIUM_URL || process.env.APPIUM_HOST || DEFAULT_APPIUM_URL);
+}
+
+function isLoopbackAppium(url: string): boolean {
+  try {
+    const host = new URL(url).hostname;
+    return host === '127.0.0.1' || host === 'localhost' || host === '::1';
+  } catch {
+    return false;
+  }
+}
 
 function xpathLiteral(s: string): string {
   if (!s.includes("'")) return `'${s}'`;
@@ -55,11 +82,11 @@ export function sleep(ms: number): Promise<void> {
 }
 
 export class AppiumResource {
-  private readonly baseUrl: string;
+  private baseUrl: string;
   private sessionId: string | null = null;
 
-  constructor(baseUrl: string = process.env.SCRIPT_APPIUM_URL ?? 'http://127.0.0.1:4723/') {
-    this.baseUrl = baseUrl;
+  constructor(baseUrl: string = resolveAppiumUrl()) {
+    this.baseUrl = normalizeAppiumUrl(baseUrl);
   }
 
   get isActive(): boolean {
@@ -69,6 +96,21 @@ export class AppiumResource {
   /** 创建会话，返回 sessionId */
   async createSession(capabilities: AppiumCapabilities): Promise<string> {
     if (this.sessionId) throw new Error('Appium 会话已存在，请先 deleteSession()');
+    try {
+      return await this.createSessionOnce(capabilities);
+    } catch (e) {
+      const msg = (e as Error).message;
+      const canFallback =
+        isLoopbackAppium(this.baseUrl) &&
+        this.baseUrl !== INTERNAL_APPIUM_URL &&
+        /请求失败|fetch failed|ECONNREFUSED|AbortError/i.test(msg);
+      if (!canFallback) throw e;
+      this.baseUrl = INTERNAL_APPIUM_URL;
+      return await this.createSessionOnce(capabilities);
+    }
+  }
+
+  private async createSessionOnce(capabilities: AppiumCapabilities): Promise<string> {
     const value = (await this.request(
       'POST',
       'session',

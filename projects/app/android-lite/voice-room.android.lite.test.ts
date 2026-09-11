@@ -179,11 +179,9 @@ abstract class VoiceRoomSampleBase extends AppBaseClass {
   }
 
   protected capabilities(): AppiumCapabilities {
-    const udid = process.env.SCRIPT_DEVICE_UDID?.trim() || '1A091FDEE0026Y';
-    return {
+    const caps: AppiumCapabilities = {
       platformName: 'Android',
       'appium:automationName': 'UiAutomator2',
-      'appium:udid': udid,
       'appium:appPackage': APP_PACKAGE,
       'appium:appActivity': ACT.splash,
       'appium:noReset': true,
@@ -197,6 +195,11 @@ abstract class VoiceRoomSampleBase extends AppBaseClass {
       'appium:settings[waitForIdleTimeout]': 0,
       'appium:settings[waitForSelectorTimeout]': 0,
     };
+    const udid = (process.env.SCRIPT_DEVICE_UDID || process.env.SCRIPT_ANDROID_UDID || '').trim();
+    if (udid) caps['appium:udid'] = udid;
+    const deviceName = (process.env.SCRIPT_ANDROID_DEVICE || '').trim();
+    if (deviceName) caps['appium:deviceName'] = deviceName;
+    return caps;
   }
 
   /** 弹窗 → 登录态 → Party/搜索/房内（权限弹窗必须最先处理） */

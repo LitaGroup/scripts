@@ -111,8 +111,13 @@ export abstract class AppBaseClass extends CheckBaseClass {
 
   protected async run(): Promise<void> {
     await this.act(`创建 Appium 会话 (${this.platform}/${this.flavor}/${this.env})`, async () => {
-      await this.driver.createSession(this.capabilities());
-      await this.activateApp(); // 确保 APP 在前台（异常退出/会话复用后可能在后台）
+      try {
+        await this.driver.createSession(this.capabilities());
+        await this.activateApp(); // 确保 APP 在前台（异常退出/会话复用后可能在后台）
+      } catch (e) {
+        this.failFastReason = (e as Error).message;
+        throw e;
+      }
     });
     try {
       await this.runCase();
