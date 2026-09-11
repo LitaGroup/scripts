@@ -1,13 +1,17 @@
 /**
- * Android Lite 短信 OTP：从 stats 库 sms_record_{yyyyMM} 查真实验证码。
- * 默认经 MySQLProdResource（PROD API + config userToken）只读查询（与 home.android.lite 一致）。
- * SCRIPT_ENV=test 且已安装 mysql2 时，可尝试直连 lita_stats，失败则回退 PROD API。
+ * Android Lite 短信 OTP。
+ * - SCRIPT_ENV=PROD（默认）：经 MySQLProdResource（PROD API + config userToken）查 stats.sms_record_*。
+ * - SCRIPT_ENV=TEST：优先 SCRIPT_OTP / accounts.smsCode，否则固定 1234（不查库）。
+ * - querySmsCode 在 env=test 且已装 mysql2 时可直连 lita_stats，失败回退 PROD API（仅显式查库时）。
  *
- * 用法：确保 SCRIPT_CONFIG / LITA_CONFIG_PATH 指向含 userToken 的配置。
+ * 用法：确保 SCRIPT_CONFIG / LITA_CONFIG_PATH 指向含 userToken 的配置（PROD 查码需要）。
  */
 import { MySQLProdResource } from '../../../../src/resources/MySQLProdResource.ts';
 import { sleep } from '../../../../src/resources/AppiumResource.ts';
 
+function scriptEnv(): 'test' | 'prod' {
+  return (process.env.SCRIPT_ENV ?? 'PROD').toUpperCase() === 'TEST' ? 'test' : 'prod';
+}
 /** 把 SCRIPT_CONFIG 对齐到 LITA_CONFIG_PATH，便于 loadConfig() 读到同一份 userToken */
 export function alignLiteConfigPath(): void {
   if (process.env.SCRIPT_CONFIG && !process.env.LITA_CONFIG_PATH) {
@@ -60,8 +64,7 @@ export async function querySmsCode(opts: QuerySmsCodeOptions): Promise<string> {
     throw new Error(`querySmsCode: 无效 phone/countryCode（phone=${opts.phone}, countryCode=${opts.countryCode}）`);
   }
   const timeoutMs = opts.timeoutMs ?? 30_000;
-  const env =
-    opts.env ?? ((process.env.SCRIPT_ENV ?? 'TEST').toUpperCase() === 'PROD' ? 'prod' : 'test');
+  const env = opts.env ?? scriptEnv();
   const ym = `${opts.since.getFullYear()}${String(opts.since.getMonth() + 1).padStart(2, '0')}`;
   const sql =
     `select code from sms_record_${ym} ` +
@@ -84,8 +87,8 @@ export async function querySmsCode(opts: QuerySmsCodeOptions): Promise<string> {
 }
 
 /**
- * 解析 OTP：SCRIPT_OTP > account.smsCode > 查库。
- * 查库需 phone + countryCode + since；默认走 PROD API（与 home 一致）。
+ * 解析 OTP：SCRIPT_OTP > account.smsCode >（TEST 固定 1234）> PROD 查库。
+ * 查库需 phone + countryCode + since；走 PROD API（与 home 一致）。
  */
 export async function resolveAndroidOtp(opts: {
   phone?: string;
@@ -103,6 +106,10 @@ export async function resolveAndroidOtp(opts: {
   if (fromAccount) {
     opts.log?.(`使用 accounts.smsCode=${fromAccount}`);
     return fromAccount;
+  }
+  if (scriptEnv() === 'test') {
+    opts.log?.('TEST 环境默认 OTP=1234');
+    return '1234';
   }
   const phone = String(opts.phone ?? '').replace(/\D/g, '');
   const countryCode = String(opts.countryCode ?? '86').replace(/^\+/, '').replace(/\D/g, '') || '86';

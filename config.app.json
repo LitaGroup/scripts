@@ -1,5 +1,5 @@
 {
-  "userToken": "your-l-user-token-here",
+  "userToken": "ZwM5IJJ/QRAQYoiLDmmtSoKX4wt4Y/tMkEQVIk/g7fzwZDmATrqNxXTYmMXz1Z65",
   "accounts": {
     "prod": {
       "username": "18810242906",
@@ -37,5 +37,5 @@
     "groupId": "",
     "groupNameContains": ""
   },
-  "_comment": "与 config.app.json 结构一致。SCRIPT_ENV 默认 PROD → accounts.prod|default；TEST → accounts.test + OTP 1234。提交仓库的实号见 config.app.json。"
+  "_comment": "SCRIPT_ENV 默认 PROD → accounts.prod|default（+86，OTP 查库）；TEST → accounts.test（62 号 + smsCode 1234）。game/friend 供 home.android.lite 分段账号。Google / im 字段见 LOGIN_SMOKE / IM_SMOKE。"
 }

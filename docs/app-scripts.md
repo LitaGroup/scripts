@@ -8,7 +8,7 @@
 | 环境变量 | 说明 | 默认 |
 |---|---|---|
 | `SCRIPT_APPIUM_URL` | Appium 服务地址 | `http://127.0.0.1:4723/`（内部备用 `http://172.20.1.79:4723/`） |
-| `SCRIPT_ENV` | `TEST` / `PROD` | `TEST` |
+| `SCRIPT_ENV` | `PROD` / `TEST` | `PROD` |
 | `SCRIPT_CONFIG` | 数据配置文件（JSON，提供账号密码，见 `config.app.example.json`） | 空 |
 
 ## 二、状态驱动模型

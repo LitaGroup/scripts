@@ -37,15 +37,16 @@ export interface AppAccount {
  * - 会话生命周期由基类托管：run() 内先创建会话，再执行子类 runCase()，最后销毁会话。
  * - 环境变量：
  *   - SCRIPT_APPIUM_URL  Appium 服务地址，默认 http://127.0.0.1:4723/
- *   - SCRIPT_ENV         TEST（默认）/ PROD
+ *   - SCRIPT_ENV         PROD（默认，线上 release）/ TEST（测网 debug）
  *   - SCRIPT_CONFIG      数据配置文件地址（JSON，提供账号密码等），默认为空
  * - 写法约定：通过 addState() 注册状态（登录态、弹窗、关键页面），
  *   用 closePopups() / ensureState() / ensureLoggedIn() 保证前置状态，再 act/check。
  */
 export abstract class AppBaseClass extends CheckBaseClass {
   protected readonly driver = new AppiumResource();
-  /** 运行环境：SCRIPT_ENV，默认 TEST */
-  protected readonly env: ScriptEnv = (process.env.SCRIPT_ENV ?? 'TEST').toUpperCase() === 'PROD' ? 'prod' : 'test';
+  /** 运行环境：SCRIPT_ENV，默认 PROD；仅显式 TEST 走测网 */
+  protected readonly env: ScriptEnv =
+    (process.env.SCRIPT_ENV ?? 'PROD').toUpperCase() === 'TEST' ? 'test' : 'prod';
 
   private _states: AppState[] = [];
   private _scriptConfig: Record<string, unknown> | null = null;
@@ -141,13 +142,46 @@ export abstract class AppBaseClass extends CheckBaseClass {
     return this._scriptConfig;
   }
 
-  /** 读取账号：SCRIPT_CONFIG 文件中的 accounts.{name} = { username, password, ... } */
-  protected account(name = 'default'): AppAccount {
+  /**
+   * 读取账号：SCRIPT_CONFIG → accounts.{name}。
+   * 未显式传 name 时按环境优选：PROD → prod → default；TEST → test → default。
+   * TEST 且未配 smsCode / SCRIPT_OTP 时，自动补 smsCode=1234，countryCode 缺省 62。
+   */
+  protected account(name?: string): AppAccount {
     const accounts = (this.scriptConfig.accounts ?? {}) as Record<string, AppAccount>;
-    const acc = accounts[name];
-    if (!acc?.username || !acc?.password) {
-      throw new Error(`未配置账号 accounts.${name}（username/password），请通过 SCRIPT_CONFIG 指定数据配置文件`);
+    const keys = name
+      ? [name]
+      : this.env === 'prod'
+        ? ['prod', 'default']
+        : ['test', 'default'];
+    let acc: AppAccount | undefined;
+    let used = '';
+    for (const key of keys) {
+      const candidate = accounts[key];
+      if (candidate?.username && candidate?.password) {
+        acc = candidate;
+        used = key;
+        break;
+      }
     }
+    if (!acc) {
+      throw new Error(
+        `未配置账号（尝试 ${keys.map((k) => `accounts.${k}`).join(' / ')}；username/password），` +
+          `请通过 SCRIPT_CONFIG 指定；PROD 用 accounts.prod，TEST 用 accounts.test`,
+      );
+    }
+    if (this.env === 'test') {
+      const next: AppAccount = { ...acc };
+      if (next.countryCode == null || String(next.countryCode).trim() === '') {
+        next.countryCode = '62';
+      }
+      if (next.smsCode == null || String(next.smsCode).trim() === '') {
+        next.smsCode = '1234';
+      }
+      this.log(`使用账号 accounts.${used}（env=test, +${next.countryCode} ${next.username}）`);
+      return next;
+    }
+    this.log(`使用账号 accounts.${used}（env=prod, +${acc.countryCode ?? '86'} ${acc.username}）`);
     return acc;
   }
 

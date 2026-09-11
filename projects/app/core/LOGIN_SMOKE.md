@@ -2,8 +2,9 @@
 
 > **iOS**：`lita-ios-v2`，bundleId `but.lita.ios`，flavor=`lita`  
 > **Android**：`lita-lite-android`，package `com.litalite.android`，flavor=`lite`  
-> 共用账号：`config.app.json` → `accounts.default`  
-> 定位与流程：`projects/app/core/_lib/`
+> 账号：`config.app.json` → `SCRIPT_ENV=PROD`（默认）用 `accounts.prod`；`SCRIPT_ENV=TEST` 用 `accounts.test`  
+> 定位与流程：`projects/app/core/_lib/`  
+> Android 包：PROD 装 **release**，TEST 装 **debug**（同 applicationId，需覆盖安装）
 
 ---
 
@@ -63,7 +64,7 @@
 
 ### SM-LOGIN-02 要点
 
-- **前置**：`config.app.json` 密码号；`countryCode` 与号段一致（默认 `86` / `18810242906`）
+- **前置**：`config.app.json`；PROD：`86` / `18810242906`（OTP 查库）；TEST：`62` 开头号 + OTP `1234`
 - **步骤**：入口 → 选区号 → 手机号 → Next/下一步 → 密码 → 登录 →（可选）OTP
 - **期望**：进入主页 / 我的页已登录标记
 - **OTP**：默认经 `userToken` 查 `stats.sms_record_*`；可用 `SCRIPT_OTP` / `accounts.smsCode` 覆盖
@@ -78,8 +79,9 @@
 cd /path/to/lita-script
 export SCRIPT_CONFIG=config.app.json
 export SCRIPT_APPIUM_URL=http://127.0.0.1:4723/
-# 可选：固定 OTP；不设则 Android 从 stats 库查真实验证码（需 userToken）
-# export SCRIPT_OTP=1234
+# 默认 SCRIPT_ENV=PROD（线上 release + accounts.prod + 查库 OTP）
+# 测网：export SCRIPT_ENV=TEST（debug 包 + accounts.test + OTP 1234）
+# 可选覆盖：export SCRIPT_OTP=xxxx
 
 # iOS（模拟器名按本机修改；iOS 仍常用 SCRIPT_OTP）
 SCRIPT_IOS_DEVICE="iPhone 17" SCRIPT_OTP=1234 \
@@ -98,8 +100,9 @@ node --experimental-strip-types projects/app/core/login-google.android.lite.test
 
 | 变量 | 用途 |
 |------|------|
-| `SCRIPT_CONFIG` | 账号 JSON（需含 `userToken` 供 Android 查短信） |
-| `SCRIPT_OTP` | 覆盖验证码；不设时 Android 查 `sms_record_*` |
+| `SCRIPT_CONFIG` | 账号 JSON（PROD 查短信需 `userToken`） |
+| `SCRIPT_ENV` | `PROD`（默认）/ `TEST` |
+| `SCRIPT_OTP` | 覆盖验证码；PROD 不设则查 `sms_record_*`；TEST 默认 `1234` |
 | `SCRIPT_GOOGLE_EMAIL` | Google 账号页优先点选的邮箱；也可用 `google.email` / `accounts.google.email` |
 | `SCRIPT_IOS_DEVICE` / `UDID` / `VERSION` | iOS 设备 |
 | `SCRIPT_ANDROID_UDID` / `SCRIPT_ANDROID_DEVICE` | Android 设备 |

@@ -4,11 +4,16 @@
  * 用例：SM-LOGIN-02 / SM-LOGIN-03 / SM-LOGIN-11（见 LOGIN_SMOKE.md）
  * 工程：lita-lite-android，package com.litalite.android
  *
- * 账号：config.app.json → accounts.default（默认 +86 18810242906）
- * OTP：默认经 userToken 查 stats.sms_record_*；可用 SCRIPT_OTP 覆盖
+ * 账号：config.app.json → PROD 用 accounts.prod（+86 18810242906，OTP 查库）；
+ *       TEST 用 accounts.test（62 开头号，OTP 1234）。默认 SCRIPT_ENV=PROD。
  *
- * 运行：
+ * 运行（线上 / release）：
  *   SCRIPT_CONFIG=config.app.json \
+ *   SCRIPT_APPIUM_URL=http://127.0.0.1:4723/ \
+ *   node --experimental-strip-types projects/app/android-lite/login-phone-password.android.lite.test.ts
+ *
+ * 运行（测网 / debug）：
+ *   SCRIPT_ENV=TEST SCRIPT_CONFIG=config.app.json \
  *   SCRIPT_APPIUM_URL=http://127.0.0.1:4723/ \
  *   node --experimental-strip-types projects/app/android-lite/login-phone-password.android.lite.test.ts
  */

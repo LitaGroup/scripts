@@ -1,9 +1,10 @@
 /**
  * Android Lite 登录共用：capabilities / 状态 / 手机号密码（+OTP）流程。
- * 对照工程：lita-lite-android（package com.litalite.android）
+ * 对照工程：lita-lite-android（package com.litalite.android；debug/release 同包名，需按环境装对应包）
  *
- * OTP：默认从 stats 库 sms_record_* 查真实验证码（需 config userToken）；
- * 可用 SCRIPT_OTP / accounts.smsCode 覆盖。
+ * 环境：SCRIPT_ENV=PROD（默认，release）/ TEST（debug）
+ * 账号：PROD → accounts.prod|default（+86 查库 OTP）；TEST → accounts.test|default（+62，OTP 1234）
+ * OTP：SCRIPT_OTP > accounts.smsCode > TEST 固定 1234 > PROD 查 stats.sms_record_*
  */
 import type { AppBaseClass, AppAccount } from '../../../../src/base/AppBaseClass.ts';
 import { by, sleep, type AppiumCapabilities, type Locator } from '../../../../src/resources/AppiumResource.ts';

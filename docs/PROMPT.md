@@ -25,7 +25,7 @@
 环境变量：
 
 - `SCRIPT_APPIUM_URL` 默认为 `http://127.0.0.1:4723/`
-- `SCRIPT_ENV` 默认为  `TEST`，可选：`PROD`
+- `SCRIPT_ENV` 默认为 `PROD`，可选：`TEST`（测网 debug 包 + accounts.test + OTP 1234）
 - `SCRIPT_CONFIG` 数据的配置文件，默认为空，表示没有，可选，配置为文件地址，提供脚本所需的 账号、密码 等
 
 
