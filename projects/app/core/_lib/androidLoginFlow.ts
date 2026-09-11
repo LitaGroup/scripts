@@ -92,7 +92,16 @@ export async function enterAndroidOtp(app: AppBaseClass): Promise<void> {
   const otp = (process.env.SCRIPT_OTP ?? '1234').trim();
   app['log'](`使用验证码 ${otp}（可用 SCRIPT_OTP 覆盖）`);
   await app['assertExists'](LOC.otpInput, 'OTP 输入框 input_captcha_et');
-  await app['driver'].input(LOC.otpInput, otp);
+  const driver = app['driver'];
+  // OTP 为透明 EditText + 覆盖 TextView，W3C Actions 常写不进；改用 AppiumIME + mobile:type
+  try {
+    await driver.execute('mobile: shell', [{ command: 'ime', args: ['set', 'io.appium.settings/.AppiumIME'] }]);
+  } catch {
+    /* ignore */
+  }
+  await driver.click(LOC.otpInput);
+  await sleep(300);
+  await driver.execute('mobile: type', [{ text: otp }]);
   await sleep(3_000);
 }
 
