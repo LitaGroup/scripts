@@ -36,13 +36,13 @@ adb devices
 cd /path/to/scripts
 
 SCRIPT_APPIUM_URL=http://127.0.0.1:4723/ SCRIPT_ENV=TEST \
-  node projects/app/lita-lite/voice-room.android.lite.test.ts --room-no=2000
+  node projects/app/android-lite/voice-room.android.lite.test.ts
 ```
 
 可选参数：
 
 ```bash
---room-no=2000              # 或 SCRIPT_ROOM_NO（默认 2000）
+--room-no=2000              # 或 SCRIPT_ROOM_NO（默认 2000）；搜不到则 Party 列表随机
 --message=hello             # 公屏文案
 --skip-enter                # 已在房内时跳过 3.1
 SCRIPT_CONFIG=config.app.json
@@ -51,7 +51,7 @@ SCRIPT_DEVICE_UDID=<adb-serial>
 
 ### 注意
 
-- 搜索结果仅能进入**在线**房间；`--room-no` 须为当前在线展示号。
+- 3.1 先按号搜索（默认 2000）；无在线结果时自动从 Party 列表随机进房。
 - 上麦可能排队（`ll_bottom_remind`），「已上麦或排队」视为通过。
 - 送礼需账号有足够金币；麦上无其他用户时 3.4 可能 skip。
 

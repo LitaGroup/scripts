@@ -7,7 +7,8 @@
  * 入口：voice-room.android.lite.test.ts（3.1～3.4 串联）
  *
  * 参数：
- *   --room-no=<房间展示号> 或环境变量 SCRIPT_ROOM_NO（默认 2000，测试环境常用房）
+ *   --room-no=<房间展示号> 或 SCRIPT_ROOM_NO（显式指定则始终按号搜索进房）
+ *   未指定时：SCRIPT_ENV=TEST 默认进 2000；SCRIPT_ENV=PROD 从 Party 列表随机点一个在线房
  *   SCRIPT_CONFIG 可选（accounts.default.username/password）；未配置时回退示例账号
  */
 import { AppBaseClass, type AppAccount } from '../../../src/base/AppBaseClass.ts';
@@ -53,6 +54,10 @@ export const ID = {
   searchEmptyView: `${APP_PACKAGE}:id/searchEmptyView`,
   resultRoomId: `${APP_PACKAGE}:id/tv_room_id`,
   resultBody: `${APP_PACKAGE}:id/ctl_body_view`,
+  partyRoomList: `${APP_PACKAGE}:id/roomListRecyclerView`,
+  partyRoomItem: `${APP_PACKAGE}:id/roomListDRootLayout`,
+  partyRoomCover: `${APP_PACKAGE}:id/img_cover`,
+  partyRoomName: `${APP_PACKAGE}:id/tv_room_name`,
 
   // 房内
   roomIdText: `${APP_PACKAGE}:id/roomIdTextView`,
@@ -123,11 +128,19 @@ const RUNTIME_PERMISSIONS = [
   'android.permission.READ_PHONE_STATE',
 ];
 
+/**
+ * 解析优先进房房间号：`--room-no` / `SCRIPT_ROOM_NO`，默认 2000。
+ * 搜不到时由 enterVoiceRoom 回退到 Party 列表随机进房。
+ */
 export function parseRoomNo(): string {
   for (const a of process.argv.slice(2)) {
-    if (a.startsWith('--room-no=')) return a.slice('--room-no='.length).trim();
+    if (a.startsWith('--room-no=')) {
+      const v = a.slice('--room-no='.length).trim();
+      if (v) return v;
+    }
   }
-  return (process.env.SCRIPT_ROOM_NO ?? DEFAULT_ROOM_NO).trim();
+  const fromEnv = (process.env.SCRIPT_ROOM_NO ?? '').trim();
+  return fromEnv || DEFAULT_ROOM_NO;
 }
 
 /** --skip-enter：已在语音房内时跳过搜索进房，直接测发消息/上麦/送礼 */
@@ -147,7 +160,8 @@ export function parseMessage(fallback = `auto-msg-${Date.now()}`): string {
  * 子类实现 runCase()；构造时传入 total（不含创建会话那一步）。
  */
 export abstract class VoiceRoomSampleBase extends AppBaseClass {
-  protected readonly roomNo: string;
+  /** 优先进房房间号（默认 2000）；搜不到改走列表随机后会回填实际房号 */
+  protected roomNo: string;
 
   constructor(caseTotal: number) {
     super('android', 'lite');
@@ -401,6 +415,7 @@ export abstract class VoiceRoomSampleBase extends AppBaseClass {
         if (await this.driver.exists(by.id(ID.roomIdText))) {
           const text = (await this.driver.textOf(by.id(ID.roomIdText))).trim();
           if (text.includes(this.roomNo)) {
+            this.rememberRoomNoFromText(text);
             this.log(`已在目标语音房（${text}）`);
             return;
           }
@@ -438,6 +453,7 @@ export abstract class VoiceRoomSampleBase extends AppBaseClass {
     if ((await this.currentState()) === 'in-room') {
       const text = await this.readRoomIdText(3_000);
       if (text && text.includes(this.roomNo)) {
+        this.rememberRoomNoFromText(text);
         this.log(`已在目标语音房（${text}），跳过重新进房`);
         return;
       }
@@ -690,19 +706,113 @@ export abstract class VoiceRoomSampleBase extends AppBaseClass {
     await this.waitForElement(by.id(ID.searchEntry), '语音房搜索入口', 10_000);
   }
 
-  /** 搜索房间号并进入（仅点击在线结果）；已在目标房则直接复用 */
-  protected async searchAndEnterRoom(roomNo = this.roomNo): Promise<void> {
+  /** 从房内展示文案回填房间号（如 "ID 12345" / "12345"） */
+  protected rememberRoomNoFromText(text: string): void {
+    const digits = text.replace(/[^\d]/g, '').trim();
+    if (digits) this.roomNo = digits;
+  }
+
+  /**
+   * 3.1 进房：优先搜索 roomNo（默认 2000）；搜不到则从 Party 列表随机进一个在线房。
+   */
+  protected async enterVoiceRoom(): Promise<void> {
+    const preferred = this.roomNo || DEFAULT_ROOM_NO;
+    const found = await this.trySearchAndEnterRoom(preferred);
+    if (found) return;
+
+    this.log(`未找到在线房间 ${preferred}，改为从 Party 列表随机进入`);
+    if (await this.isActivity(ACT.search)) {
+      await this.driver.back();
+      await sleep(800);
+    }
+    await this.pickRandomOnlineRoomAndEnter();
+  }
+
+  /** Party 列表随机点一个在线房间进入（搜不到指定房时的兜底） */
+  protected async pickRandomOnlineRoomAndEnter(): Promise<void> {
+    if (await this.isActivity(ROOM_ACTIVITY)) {
+      try {
+        await this.prepareRoomUi(6_000);
+        if (
+          (await this.driver.exists(by.id(ID.chatEntry))) ||
+          (await this.driver.exists(by.id(ID.onMicMute))) ||
+          (await this.driver.exists(by.id(ID.applyMic)))
+        ) {
+          const text = await this.readRoomIdText(3_000);
+          if (text) this.rememberRoomNoFromText(text);
+          this.log(text ? `已在语音房（${text}），无需重进` : '已在语音房且底部栏可见，无需重进');
+          return;
+        }
+      } catch {
+        // fall through
+      }
+      await this.leaveRoomToMain();
+    }
+
+    await this.openPartyTab();
+    await this.closePopups(2);
+
+    const itemLocator = by.id(ID.partyRoomItem);
+    const deadline = Date.now() + 20_000;
+    let count = 0;
+    while (Date.now() < deadline) {
+      if (await this.driver.exists(by.id(ID.partyRoomList)) || (await this.driver.exists(itemLocator))) {
+        count = (await this.driver.findElements(itemLocator)).length;
+        if (count > 0) break;
+        count = (await this.driver.findElements(by.id(ID.partyRoomCover))).length;
+        if (count > 0) break;
+      }
+      await sleep(500);
+    }
+    if (count <= 0) {
+      throw new Error('Party 语音房列表为空，无法随机进入在线房间');
+    }
+
+    const useCover = !(await this.driver.exists(itemLocator));
+    const pickId = useCover ? ID.partyRoomCover : ID.partyRoomItem;
+    const visible = (await this.driver.findElements(by.id(pickId))).length;
+    const pick = Math.floor(Math.random() * visible) + 1;
+    this.log(`从 Party 列表 ${visible} 个在线房中随机选择第 ${pick} 个`);
+
+    try {
+      const nameLoc = by.xpath(`(//*[@resource-id='${ID.partyRoomName}'])[${pick}]`);
+      if (await this.driver.exists(nameLoc)) {
+        this.log(`选中房间名: ${(await this.driver.textOf(nameLoc)).trim()}`);
+      }
+    } catch {
+      // ignore
+    }
+
+    await this.driver.click(by.xpath(`(//*[@resource-id='${pickId}'])[${pick}]`));
+    await this.waitForActivity(ROOM_ACTIVITY, 15_000);
+    await this.grantAppRuntimePermissions();
+    await this.prepareRoomUi(10_000);
+    if (!(await this.driver.exists(by.id(ID.chatEntry))) && !(await this.driver.exists(by.id(ID.roomIdText)))) {
+      await this.waitRoomInteractive(10_000);
+    }
+    const entered = await this.readRoomIdText(4_000);
+    if (entered) {
+      this.rememberRoomNoFromText(entered);
+      this.log(`已进入语音房：${entered}`);
+    } else {
+      this.log('已进入语音房（房间号暂未读到，底部控件已可见）');
+    }
+  }
+
+  /** 搜索房间号并进入；找不到在线结果时返回 false（不抛错） */
+  protected async trySearchAndEnterRoom(roomNo = this.roomNo): Promise<boolean> {
     if (await this.isActivity(ROOM_ACTIVITY)) {
       try {
         if (await this.driver.exists(by.id(ID.roomIdText))) {
           const text = (await this.driver.textOf(by.id(ID.roomIdText))).trim();
           if (text.includes(roomNo)) {
+            this.rememberRoomNoFromText(text);
             this.log(`已在目标房 ${text}，无需搜索`);
-            return;
+            return true;
           }
         } else if (await this.driver.exists(by.id(ID.chatEntry))) {
           this.log('已在语音房且底部栏可见，无需搜索');
-          return;
+          return true;
         }
       } catch {
         // fall through
@@ -716,7 +826,7 @@ export abstract class VoiceRoomSampleBase extends AppBaseClass {
     await this.waitForElement(by.id(ID.searchEt), '搜索输入框', 5_000);
     await this.driver.input(by.id(ID.searchEt), roomNo);
     await this.driver.performEditorAction('search');
-    // 等待结果列表
+
     const deadline = Date.now() + 15_000;
     let hit: Locator | null = null;
     while (Date.now() < deadline) {
@@ -736,19 +846,32 @@ export abstract class VoiceRoomSampleBase extends AppBaseClass {
           break;
         }
       }
+      // 明确空结果可提前结束
+      if (await this.driver.exists(by.id(ID.searchEmptyView))) break;
       await sleep(500);
     }
-    if (!hit) throw new Error(`搜索无在线结果或不含房间号 ${roomNo}（请确认房间在线）`);
+    if (!hit) {
+      this.log(`搜索无在线结果或不含房间号 ${roomNo}`);
+      return false;
+    }
+
     await this.driver.click(hit);
     await this.waitForActivity(ROOM_ACTIVITY, 15_000);
     await this.grantAppRuntimePermissions();
-    // prepareRoomUi 已等到底部栏；无需再叠一层长 wait
     await this.prepareRoomUi(10_000);
     if (!(await this.driver.exists(by.id(ID.chatEntry))) && !(await this.driver.exists(by.id(ID.roomIdText)))) {
       await this.waitRoomInteractive(10_000);
     }
     const entered = await this.readRoomIdText(4_000);
+    if (entered) this.rememberRoomNoFromText(entered);
     this.log(entered ? `已进入语音房：${entered}` : '已进入语音房（房间号暂未读到，底部控件已可见）');
+    return true;
+  }
+
+  /** 搜索房间号并进入（仅点击在线结果）；找不到则抛错 */
+  protected async searchAndEnterRoom(roomNo = this.roomNo): Promise<void> {
+    const ok = await this.trySearchAndEnterRoom(roomNo);
+    if (!ok) throw new Error(`搜索无在线结果或不含房间号 ${roomNo}（请确认房间在线）`);
   }
 
   /** 关遮罩并读取房内房间号文本；超时返回空串 */
@@ -819,9 +942,18 @@ export abstract class VoiceRoomSampleBase extends AppBaseClass {
     if (!text) {
       // 进房后房间号偶发晚出：底部栏可见也算进房成功的弱断言
       if (await this.driver.exists(by.id(ID.chatEntry)) || await this.driver.exists(by.id(ID.onMicMute))) {
-        return { expect: `房间号含 ${roomNo}`, real: '底部栏可见(房间号暂未读到)', pass: true };
+        const expectLabel = roomNo ? `房间号含 ${roomNo}` : '已进入在线语音房';
+        return { expect: expectLabel, real: '底部栏可见(房间号暂未读到)', pass: true };
       }
-      return { expect: `房间号含 ${roomNo}`, real: '未找到 roomIdTextView', pass: false };
+      return {
+        expect: roomNo ? `房间号含 ${roomNo}` : '已进入在线语音房',
+        real: '未找到 roomIdTextView',
+        pass: false,
+      };
+    }
+    this.rememberRoomNoFromText(text);
+    if (!roomNo) {
+      return { expect: '已进入在线语音房', real: text, pass: true };
     }
     return { expect: `房间号含 ${roomNo}`, real: text, pass: text.includes(roomNo) };
   }

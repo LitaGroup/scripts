@@ -1,18 +1,19 @@
 /**
  * 语音房功能测试（Android / Lite）— 串联 3.1～3.4
  *
- *   3.1 语音房搜索并进入
+ *   3.1 进入语音房：优先搜索 2000（可用 --room-no 覆盖）；找不到则 Party 列表随机进房
  *   3.2 进入语音房发送消息
  *   3.4 语音房送礼（在上麦前：需麦上有其他用户）
  *   3.3 语音房上麦
  *
  * 运行：
  *   SCRIPT_APPIUM_URL=http://127.0.0.1:4723/ SCRIPT_ENV=TEST \
- *     node projects/app/lita-lite/voice-room.android.lite.test.ts --room-no=2000
+ *     node projects/app/android-lite/voice-room.android.lite.test.ts
  *
  * 可选：
+ *   --room-no=2000           优先进房号（默认 2000；搜不到则列表随机）
  *   --message=hello          公屏文案（默认 vr-<timestamp>）
- *   --skip-enter             已在目标房内时跳过 3.1 搜索进房
+ *   --skip-enter             已在目标房内时跳过 3.1 进房
  *   SCRIPT_CONFIG=config.app.json
  *   SCRIPT_DEVICE_UDID=<adb-serial>
  */
@@ -37,22 +38,26 @@ class VoiceRoomTest extends VoiceRoomSampleBase {
       await this.ensureAppLoggedIn();
     });
 
-    // ---------- 3.1 语音房搜索并进入 ----------
+    // ---------- 3.1 进入语音房 ----------
     if (this.skipEnter) {
-      await this.act('3.1 跳过搜索（--skip-enter），确认已在语音房', async () => {
+      await this.act('3.1 跳过进房（--skip-enter），确认已在语音房', async () => {
         if (!(await this.isActivity(ROOM_ACTIVITY))) {
           throw new Error('当前不在语音房 Activity，请先手动进入目标房或去掉 --skip-enter');
         }
         await this.prepareRoomUi(8_000);
+        const text = await this.readRoomIdText(3_000);
+        if (text) this.rememberRoomNoFromText(text);
       });
     } else {
-      await this.act(`3.1 搜索并进入语音房 ${this.roomNo}`, async () => {
-        // 已在目标房则复用（searchAndEnterRoom 内部判断）；勿强制退房
-        await this.searchAndEnterRoom();
+      await this.act(`3.1 优先进入房间 ${this.roomNo}（找不到则列表随机）`, async () => {
+        await this.enterVoiceRoom();
       });
     }
 
-    await this.check('3.1 已进入目标语音房', async () => this.assertInTargetRoom());
+    await this.check(
+      this.roomNo ? `3.1 已进入语音房 ${this.roomNo}` : '3.1 已进入在线语音房',
+      async () => this.assertInTargetRoom(),
+    );
 
     // ---------- 3.2 进入语音房发送消息 ----------
     await this.act(`3.2 发送公屏消息：${this.message}`, async () => {
