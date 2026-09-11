@@ -94,16 +94,72 @@ export async function enterAndroidOtp(app: AppBaseClass): Promise<void> {
   app['log'](`使用验证码 ${otp}（可用 SCRIPT_OTP 覆盖）`);
   await app['assertExists'](LOC.otpInput, 'OTP 输入框 input_captcha_et');
   const driver = app['driver'];
-  // OTP 为透明 EditText + 覆盖 TextView，W3C Actions 常写不进；改用 AppiumIME + mobile:type
+
   try {
     await driver.execute('mobile: shell', [{ command: 'ime', args: ['set', 'io.appium.settings/.AppiumIME'] }]);
   } catch {
     /* ignore */
   }
-  await driver.click(LOC.otpInput);
-  await sleep(300);
-  await driver.execute('mobile: type', [{ text: otp }]);
-  await sleep(3_000);
+
+  const digitCount = async (): Promise<number> => {
+    let n = 0;
+    for (let i = 1; i <= 4; i++) {
+      const loc = by.id(`${ANDROID_LITE_PACKAGE}:id/input_captcha_tv${i}`);
+      if (!(await driver.exists(loc))) continue;
+      const t = (await driver.textOf(loc)).trim();
+      if (t) n += 1;
+    }
+    return n;
+  };
+
+  const clearOtp = async (): Promise<void> => {
+    await driver.click(LOC.otpInput);
+    await sleep(200);
+    for (let i = 0; i < 8; i++) {
+      try {
+        await driver.execute('mobile: pressKey', [{ keycode: 67 }]); // DEL
+      } catch {
+        try {
+          await driver.execute('mobile: shell', [{ command: 'input', args: ['keyevent', '67'] }]);
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+  };
+
+  /** 最稳：KEYCODE_0=7 … KEYCODE_9=16 逐位注入 */
+  const typeByKeycode = async (): Promise<void> => {
+    await driver.click(LOC.otpInput);
+    await sleep(200);
+    for (const ch of otp) {
+      if (ch < '0' || ch > '9') continue;
+      const keycode = 7 + (ch.charCodeAt(0) - '0'.charCodeAt(0));
+      await driver.execute('mobile: pressKey', [{ keycode }]);
+      await sleep(120);
+    }
+  };
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await clearOtp();
+    await typeByKeycode();
+    let filled = await digitCount();
+    if (filled < otp.length) {
+      // 回退：AppiumIME mobile:type 整串
+      await clearOtp();
+      await driver.click(LOC.otpInput);
+      await sleep(200);
+      await driver.execute('mobile: type', [{ text: otp }]);
+      await sleep(400);
+      filled = await digitCount();
+    }
+    app['log'](`OTP 已填入 ${filled}/${otp.length} 位（第 ${attempt + 1} 次）`);
+    if (filled >= otp.length) {
+      await sleep(2_500);
+      return;
+    }
+  }
+  throw new Error(`OTP 未能完整填入（期望 ${otp.length} 位）`);
 }
 
 async function tapPhoneLoginEntry(app: AppBaseClass): Promise<void> {
