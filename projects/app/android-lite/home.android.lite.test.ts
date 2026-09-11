@@ -33,22 +33,18 @@
  */
 import { AppBaseClass, type AppAccount } from '../../../src/base/AppBaseClass.ts';
 import { by, sleep, type AppiumCapabilities, type Locator } from '../../../src/resources/AppiumResource.ts';
-import { MySQLProdResource } from '../../../src/resources/MySQLProdResource.ts';
+import { alignLiteConfigPath, querySmsCode as querySmsCodeFromDb } from '../core/_lib/androidSmsOtp.ts';
 
 // 本脚本账号与 userToken 统一从 SCRIPT_CONFIG 指定的单一配置文件读取：
 //   - 账号：AppBaseClass.account() 读 SCRIPT_CONFIG 的 accounts.{game|friend}
 //   - userToken：短信验证码查库走 loadConfig()，默认读 config.json（或 LITA_CONFIG_PATH）
-// 这里把 LITA_CONFIG_PATH 对齐到 SCRIPT_CONFIG，使两者指向同一文件，避免维护两份配置。
-if (process.env.SCRIPT_CONFIG && !process.env.LITA_CONFIG_PATH) {
-  process.env.LITA_CONFIG_PATH = process.env.SCRIPT_CONFIG;
-}
+alignLiteConfigPath();
 
 const APP_PACKAGE = 'com.litalite.android';
 const APP_ACTIVITY = '.ui.splash.SplashActivity';
 
 /** 手机号国家前缀（用于拼接 DB 里 sms_record 的 phone_number = 前缀 + 手机号） */
 const PHONE_PREFIX = '86';
-
 // 系统权限弹窗（相机/麦克风）允许按钮
 const ID_PERMISSION_ALLOW = 'com.android.packageinstaller:id/permission_allow_button';
 
@@ -149,12 +145,6 @@ function xid(raw: string): string {
 /** 在指定容器（RecyclerView/GridView）内定位其首个匹配子元素；容器/子元素均传 raw id */
 function inContainer(containerRaw: string, childRaw: string): Locator {
   return by.xpath(`//*[@resource-id='${xid(containerRaw)}']//*[@resource-id='${xid(childRaw)}']`);
-}
-
-/** 格式化为 DB 比较用的本地时间字符串（yyyy-MM-dd HH:mm:ss） */
-function formatDateTime(d: Date): string {
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
 class HomeCheck extends AppBaseClass {
@@ -334,27 +324,15 @@ class HomeCheck extends AppBaseClass {
     throw new Error('登录超时：既未进入主页面也未出现验证码页');
   }
 
-  /**
-   * 轮询查询最新短信验证码（短信 OTP）。
-   * 表：sms_record_{yyyyMM}（lita_stats/stats 库）；经 MySQLProdResource（PROD API 代理 + userToken）只读查询。
-   * phone_number = '86' + 手机号。
-   */
+  /** 轮询查询最新短信验证码（见 androidSmsOtp.querySmsCode） */
   private async querySmsCode(since: Date, phone: string, timeoutMs = 30_000): Promise<string> {
-    const ym = `${since.getFullYear()}${String(since.getMonth() + 1).padStart(2, '0')}`;
-    const sql =
-      `select code from sms_record_${ym} ` +
-      `where phone_prefix='${PHONE_PREFIX}' and phone_number='${PHONE_PREFIX}${phone}' and type=1 ` +
-      `and created_at > '${formatDateTime(since)}' order by created_at desc limit 1`;
-    const deadline = Date.now() + timeoutMs;
-    do {
-      const r = await MySQLProdResource.query('stats', sql);
-      if (r.data.length > 0) {
-        const code = String(r.data[0][0] ?? '').trim();
-        if (code) return code;
-      }
-      await sleep(3_000);
-    } while (Date.now() < deadline);
-    throw new Error(`查询短信验证码超时（${timeoutMs}ms）: phone=${PHONE_PREFIX}${phone}`);
+    return querySmsCodeFromDb({
+      since,
+      phone,
+      countryCode: PHONE_PREFIX,
+      timeoutMs,
+      env: 'prod',
+    });
   }
 
   protected async runCase(): Promise<void> {

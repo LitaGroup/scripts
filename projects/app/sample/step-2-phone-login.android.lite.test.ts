@@ -2,10 +2,10 @@
  * Step 2：手机号 + 密码登录（Android / Lite）
  *
  * 前置：未登录状态（已登录会导致"拉起登录页"断言失败并跳过后续步骤）。
- * 流程：打开APP → 我的 tab（未登录则拉起登录页，已登录先退出）→ 手机号登录 → 选区号+62 → 输入手机号
+ * 流程：打开APP → 我的 tab（未登录则拉起登录页，已登录先退出）→ 手机号登录 → 选区号+86 → 输入手机号
  *       → Next → 输入密码 → 关闭软键盘 → 点击登录 → 校验登录成功
  * 约定：输入前先断言输入框存在，不存在则当前步骤直接失败。
- * 账号：优先 SCRIPT_CONFIG → accounts.default（含 countryCode，默认 62）；未配置则回退下方示例号。
+ * 账号：优先 SCRIPT_CONFIG → accounts.default（含 countryCode，默认 86）；未配置则回退下方示例号。
  *
  * 运行：
  *   SCRIPT_CONFIG=config.app.json node --experimental-strip-types projects/app/sample/step-2-phone-login.android.lite.test.ts
@@ -15,11 +15,11 @@ import { by, sleep, type AppiumCapabilities } from '../../../src/resources/Appiu
 
 const APP_PACKAGE = 'com.litalite.android';
 
-/** 未配 SCRIPT_CONFIG 时的回退（区号默认 +62，号段需与区号一致） */
+/** 未配 SCRIPT_CONFIG 时的回退（区号默认 +86，号段需与区号一致） */
 const FALLBACK_ACCOUNT: AppAccount = {
-  username: '18611755224',
+  username: '18810242906',
   password: '123456',
-  countryCode: '62',
+  countryCode: '86',
 };
 
 const ID = {
@@ -97,7 +97,7 @@ class Step2PhoneLogin extends AppBaseClass {
 
   protected async runCase(): Promise<void> {
     const acc = this.resolveAccount();
-    const countryCode = String(acc.countryCode ?? '62').replace(/^\+/, '').trim() || '62';
+    const countryCode = String(acc.countryCode ?? '86').replace(/^\+/, '').trim() || '86';
 
     await this.act(
       '打开APP，等待就绪（关弹窗）',

@@ -8,6 +8,7 @@ export const ANDROID_LITE_PACKAGE = 'com.litalite.android';
 
 export const ANDROID_ACT = {
   splash: '.ui.splash.SplashActivity',
+  onboarding: '.ui.onboarding.OnboardingNewActivity',
   login: '.ui.login.LoginActivity',
   main: '.MainActivity',
 } as const;
@@ -74,4 +75,16 @@ export const ANDROID_LOC = {
 
   popupActivity: id('vp_banner'),
   popupActivityClose: id('img_close'),
+
+  /** 首启引导 Skip */
+  onboardingSkip: id('skipTv'),
+  /** 系统权限弹窗 Allow（不同 API 文案/id 不一） */
+  permissionAllowIds: [
+    by.id('com.android.permissioncontroller:id/permission_allow_button'),
+    by.id('com.android.permissioncontroller:id/permission_allow_foreground_only_button'),
+    by.id('com.android.packageinstaller:id/permission_allow_button'),
+    by.text('Allow'),
+    by.text('ALLOW'),
+    by.text('允许'),
+  ],
 };

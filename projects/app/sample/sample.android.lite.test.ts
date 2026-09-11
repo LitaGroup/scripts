@@ -5,8 +5,8 @@
  *
  * 步骤：
  *   1. 处理登录状态为未登录：打开 APP 进入首页，若已登录则退出登录，彻底关闭 APP
- *   2. 验证手机号+密码登录：再次打开 APP，进入"我的" tab，使用 SCRIPT_CONFIG 账号登录（默认区号 +62）；
- *      如触发短信验证码，则查询 stats 库短信记录（按 SCRIPT_ENV 区分测试/生产库）
+ *   2. 验证手机号+密码登录：再次打开 APP，进入"我的" tab，使用 SCRIPT_CONFIG 账号登录（默认区号 +86）；
+ *      如触发短信验证码，则查询 stats 库短信记录（经 userToken / MySQLProdResource）
  *   3. 判断登录成功：我的页可抓取到用户 ID
  *
  * 运行：
@@ -14,18 +14,19 @@
  */
 import { AppBaseClass, type AppAccount } from '../../../src/base/AppBaseClass.ts';
 import { by, sleep, type AppiumCapabilities, type Locator } from '../../../src/resources/AppiumResource.ts';
-import { MySQLTestResource } from '../../../src/resources/MySQLTestResource.ts';
-import { MySQLProdResource } from '../../../src/resources/MySQLProdResource.ts';
+import { alignLiteConfigPath, querySmsCode as querySmsCodeFromDb } from '../core/_lib/androidSmsOtp.ts';
+
+alignLiteConfigPath();
 
 // 模拟器实测应用信息
 const APP_PACKAGE = 'com.litalite.android';
 const APP_ACTIVITY = '.ui.splash.SplashActivity';
 
-/** 未配 SCRIPT_CONFIG 时的回退（区号默认 +62） */
+/** 未配 SCRIPT_CONFIG 时的回退（区号默认 +86） */
 const FALLBACK_ACCOUNT: AppAccount = {
-  username: '18611755224',
+  username: '18810242906',
   password: '123456',
-  countryCode: '62',
+  countryCode: '86',
 };
 
 // 元素定位符（基于 com.litalite.android 1.324 实测）
@@ -48,14 +49,7 @@ const ID = {
   popupActivityClose: `${APP_PACKAGE}:id/img_close`, // 启动活动弹窗 - 关闭按钮
 };
 
-function formatDateTime(d: Date): string {
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
-}
-
 class SampleTest extends AppBaseClass {
-  private _mysql: MySQLTestResource | null = null;
-
   constructor() {
     super('android', 'lite');
     this.total = 6;
@@ -113,7 +107,7 @@ class SampleTest extends AppBaseClass {
 
   protected async runCase(): Promise<void> {
     const acc = this.resolveAccount();
-    const countryCode = String(acc.countryCode ?? '62').replace(/^\+/, '').trim() || '62';
+    const countryCode = String(acc.countryCode ?? '86').replace(/^\+/, '').trim() || '86';
 
     // ---------- 1. 处理登录状态为未登录 ----------
     await this.act('打开APP进入首页，处理弹窗', async () => {
@@ -262,36 +256,8 @@ class SampleTest extends AppBaseClass {
 
   // ---------- 短信验证码查询（stats 库） ----------
 
-  private get mysqlTest(): MySQLTestResource {
-    return (this._mysql ??= new MySQLTestResource());
-  }
-
-  /**
-   * 轮询查询最新短信验证码。
-   * 表：sms_record_{yyyyMM}（stats 库），按 SCRIPT_ENV 区分：
-   *   - test: MySQLTestResource 直连 lita_stats 库
-   *   - prod: MySQLProdResource 经 API 代理查询 stats 库（只读）
-   */
   private async querySmsCode(since: Date, phonePrefix: string, phone: string, timeoutMs = 30_000): Promise<string> {
-    const ym = `${since.getFullYear()}${String(since.getMonth() + 1).padStart(2, '0')}`;
-    const sql =
-      `select code from sms_record_${ym} ` +
-      `where phone_prefix='${phonePrefix}' and phone_number='${phonePrefix}${phone}' and type=1 ` +
-      `and created_at > '${formatDateTime(since)}' order by created_at desc limit 1`;
-    const deadline = Date.now() + timeoutMs;
-    do {
-      let code: string | null = null;
-      if (this.env === 'prod') {
-        const r = await MySQLProdResource.query('stats', sql);
-        code = r.data.length ? String(r.data[0][0] ?? '') || null : null;
-      } else {
-        const rows = await this.mysqlTest.query(sql, 'lita_stats');
-        code = rows.length ? String(rows[0].code ?? '') || null : null;
-      }
-      if (code) return code;
-      await sleep(3_000);
-    } while (Date.now() < deadline);
-    throw new Error(`查询短信验证码超时（${timeoutMs}ms）: phone=${phonePrefix}${phone}`);
+    return querySmsCodeFromDb({ since, phone, countryCode: phonePrefix, timeoutMs });
   }
 }
 

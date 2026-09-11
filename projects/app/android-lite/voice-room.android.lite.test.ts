@@ -27,6 +27,7 @@ import {
   type AppiumCapabilities,
   type Locator,
 } from '../../../src/resources/AppiumResource.ts';
+import { loginWithPhonePassword } from '../core/_lib/androidLoginFlow.ts';
 
 /** 平台常注入 localhost；Node 26 fetch 会走 IPv6 导致 fetch failed。探测可达地址后再建会话。 */
 function normalizeAppiumBase(raw: string): string {
@@ -78,10 +79,10 @@ process.env.SCRIPT_APPIUM_URL = await resolveReachableAppiumUrl();
 
 const APP_PACKAGE = 'com.litalite.android';
 
-/** 测试账号回退（正式环境请走 SCRIPT_CONFIG；区号默认 +62） */
-const FALLBACK_PHONE = '18611755224';
+/** 测试账号回退（正式环境请走 SCRIPT_CONFIG；区号默认 +86） */
+const FALLBACK_PHONE = '18810242906';
 const FALLBACK_PASSWORD = '123456';
-const FALLBACK_COUNTRY_CODE = '62';
+const FALLBACK_COUNTRY_CODE = '86';
 
 /** 测试环境默认语音房展示号 */
 const DEFAULT_ROOM_NO = '2000';
@@ -292,6 +293,23 @@ abstract class VoiceRoomSampleBase extends AppBaseClass {
         await this.clickPermissionAllow();
       },
     });
+    // 登录 WhatsApp 引导：loginWithPhonePassword / closePopups 会用到
+    this.addState({
+      name: 'popup-whatsapp',
+      kind: 'popup',
+      detect: async () =>
+        (await this.driver.exists(by.id(`${APP_PACKAGE}:id/tv_not_have_whatsapp`))) ||
+        ((await this.driver.exists(by.id(`${APP_PACKAGE}:id/iv_close`))) &&
+          (await this.driver.exists(by.id(`${APP_PACKAGE}:id/tv_continue`)))),
+      handle: async () => {
+        if (await this.driver.exists(by.id(`${APP_PACKAGE}:id/tv_not_have_whatsapp`))) {
+          await this.driver.click(by.id(`${APP_PACKAGE}:id/tv_not_have_whatsapp`));
+        } else if (await this.driver.exists(by.id(`${APP_PACKAGE}:id/iv_close`))) {
+          await this.driver.click(by.id(`${APP_PACKAGE}:id/iv_close`));
+        }
+        await sleep(500);
+      },
+    });
     this.addState({
       name: 'popup-activity',
       kind: 'popup',
@@ -429,44 +447,7 @@ abstract class VoiceRoomSampleBase extends AppBaseClass {
   }
 
   protected async login(account: AppAccount): Promise<void> {
-    const countryCode = String(account.countryCode ?? FALLBACK_COUNTRY_CODE).replace(/^\+/, '').trim() || '62';
-
-    // 可能已在登录主页 / 手机号页 / 密码页
-    if (await this.driver.exists(by.id(ID.passwordInput))) {
-      // 已在密码页
-    } else if (await this.driver.exists(by.id(ID.phoneInput))) {
-      // 已在手机号页
-    } else {
-      await this.waitForElement(by.id(ID.phoneLoginEntry), '手机号登录入口', 8_000);
-      await this.driver.click(by.id(ID.phoneLoginEntry));
-      await this.waitForElement(by.id(ID.phoneInput), '手机号输入框', 8_000);
-    }
-
-    if (!(await this.driver.exists(by.id(ID.passwordInput)))) {
-      const current = (await this.driver.textOf(by.id(ID.countryCode))).replace(/\D/g, '');
-      if (current !== countryCode) {
-        await this.driver.click(by.id(ID.countryCode));
-        if (await this.driver.waitFor(by.id(ID.countryList), 5_000)) {
-          const row = by.xpath(`//*[@text='(+${countryCode})']/ancestor::*[@clickable='true'][1]`);
-          for (let i = 0; i < 16 && !(await this.driver.exists(row)); i++) {
-            await this.driver.swipeInElement(by.id(ID.countryList), i % 2 === 0 ? 'up' : 'down');
-            await sleep(400);
-          }
-          if (await this.driver.exists(row)) await this.driver.click(row);
-          else this.log(`国家列表未找到 (+${countryCode})，继续使用当前区号`);
-          await sleep(400);
-        }
-      }
-      await this.driver.input(by.id(ID.phoneInput), account.username);
-      await this.driver.hideKeyboard();
-      await this.driver.click(by.id(ID.phoneNext));
-      await this.waitForElement(by.id(ID.passwordInput), '密码输入框', 10_000);
-    }
-
-    await this.driver.input(by.id(ID.passwordInput), account.password);
-    await this.driver.hideKeyboard();
-    await this.driver.click(by.id(ID.passwordSubmit));
-    await this.waitForActivity(/\.MainActivity$/, 15_000);
+    await loginWithPhonePassword(this, account);
   }
 
   /** 启动就绪并确保已登录（未登录则走 login） */

@@ -40,7 +40,12 @@ export function normalizeAppiumUrl(raw: string): string {
 }
 
 export function resolveAppiumUrl(): string {
-  return normalizeAppiumUrl(process.env.SCRIPT_APPIUM_URL || process.env.APPIUM_HOST || DEFAULT_APPIUM_URL);
+  return normalizeAppiumUrl(
+    process.env.SCRIPT_APPIUM_URL ||
+      process.env.APPIUM_URL ||
+      process.env.APPIUM_HOST ||
+      DEFAULT_APPIUM_URL,
+  );
 }
 
 function isLoopbackAppium(url: string): boolean {

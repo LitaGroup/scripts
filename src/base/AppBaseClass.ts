@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { CheckBaseClass, type CheckResult } from './CheckBaseClass.ts';
 import { AppiumResource, sleep, type AppiumCapabilities, type Locator } from '../resources/AppiumResource.ts';
 
@@ -134,7 +134,8 @@ export abstract class AppBaseClass extends CheckBaseClass {
 
   protected get scriptConfig(): Record<string, unknown> {
     if (this._scriptConfig === null) {
-      const path = process.env.SCRIPT_CONFIG;
+      // 优先 SCRIPT_CONFIG；未设置时回退 cwd 下的 config.app.json（远端 agent 常用）
+      const path = process.env.SCRIPT_CONFIG || (existsSync('config.app.json') ? 'config.app.json' : '');
       this._scriptConfig = path ? (JSON.parse(readFileSync(path, 'utf-8')) as Record<string, unknown>) : {};
     }
     return this._scriptConfig;

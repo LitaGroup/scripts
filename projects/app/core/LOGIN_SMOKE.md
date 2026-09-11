@@ -37,7 +37,7 @@
 |----|------|---|----------|--------------|
 | SM-LOGIN-01 | 登录页入口可见 | P0 | `login-entries.ios.lita.test.ts` | `login-entries.android.lite.test.ts` |
 | SM-LOGIN-02 | 手机号+密码进首页 | P0 | `login-phone-password.ios.lita.test.ts` | `login-phone-password.android.lite.test.ts` |
-| SM-LOGIN-03 | 新设备 OTP | P0 | 含在 02（`SCRIPT_OTP`） | 含在 02 |
+| SM-LOGIN-03 | 新设备 OTP | P0 | 含在 02（`SCRIPT_OTP`） | 含在 02（查库 / `SCRIPT_OTP`） |
 | SM-LOGIN-04 | WhatsApp 可关闭 | P1 | 状态机 | 状态机 |
 | SM-LOGIN-05 | 无密码仅 OTP | P1 | 半自动 | 半自动 |
 | SM-LOGIN-06 | Facebook 完整登录 | P2 | 手工 | 手工 |
@@ -56,9 +56,10 @@
 
 ### SM-LOGIN-02 要点
 
-- **前置**：`config.app.json` 密码号；`countryCode` 与号段一致（如 `62`）
+- **前置**：`config.app.json` 密码号；`countryCode` 与号段一致（默认 `86` / `18810242906`）
 - **步骤**：入口 → 选区号 → 手机号 → Next/下一步 → 密码 → 登录 →（可选）OTP
 - **期望**：进入主页 / 我的页已登录标记
+- **OTP**：默认经 `userToken` 查 `stats.sms_record_*`；可用 `SCRIPT_OTP` / `accounts.smsCode` 覆盖
 
 ---
 
@@ -70,10 +71,11 @@
 cd /path/to/lita-script
 export SCRIPT_CONFIG=config.app.json
 export SCRIPT_APPIUM_URL=http://127.0.0.1:4723/
-export SCRIPT_OTP=1234
+# 可选：固定 OTP；不设则 Android 从 stats 库查真实验证码（需 userToken）
+# export SCRIPT_OTP=1234
 
-# iOS（模拟器名按本机修改）
-SCRIPT_IOS_DEVICE="iPhone 17" \
+# iOS（模拟器名按本机修改；iOS 仍常用 SCRIPT_OTP）
+SCRIPT_IOS_DEVICE="iPhone 17" SCRIPT_OTP=1234 \
   node --experimental-strip-types projects/app/core/login-phone-password.ios.lita.test.ts
 SCRIPT_IOS_DEVICE="iPhone 17" \
   node --experimental-strip-types projects/app/core/login-entries.ios.lita.test.ts
@@ -85,8 +87,8 @@ node --experimental-strip-types projects/app/core/login-entries.android.lite.tes
 
 | 变量 | 用途 |
 |------|------|
-| `SCRIPT_CONFIG` | 账号 JSON |
-| `SCRIPT_OTP` | 测试环境验证码，默认 `1234` |
+| `SCRIPT_CONFIG` | 账号 JSON（需含 `userToken` 供 Android 查短信） |
+| `SCRIPT_OTP` | 覆盖验证码；不设时 Android 查 `sms_record_*` |
 | `SCRIPT_IOS_DEVICE` / `UDID` / `VERSION` | iOS 设备 |
 | `SCRIPT_ANDROID_UDID` / `SCRIPT_ANDROID_DEVICE` | Android 设备 |
 

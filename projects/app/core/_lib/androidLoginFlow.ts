@@ -1,10 +1,16 @@
 /**
  * Android Lite 登录共用：capabilities / 状态 / 手机号密码（+OTP）流程。
  * 对照工程：lita-lite-android（package com.litalite.android）
+ *
+ * OTP：默认从 stats 库 sms_record_* 查真实验证码（需 config userToken）；
+ * 可用 SCRIPT_OTP / accounts.smsCode 覆盖。
  */
 import type { AppBaseClass, AppAccount } from '../../../../src/base/AppBaseClass.ts';
 import { by, sleep, type AppiumCapabilities } from '../../../../src/resources/AppiumResource.ts';
 import { ANDROID_ACT, ANDROID_LITE_PACKAGE, ANDROID_LOC as LOC } from './androidLocators.ts';
+import { alignLiteConfigPath, resolveAndroidOtp } from './androidSmsOtp.ts';
+
+alignLiteConfigPath();
 
 export function androidLiteCapabilities(): AppiumCapabilities {
   const caps: AppiumCapabilities = {
@@ -24,6 +30,35 @@ export function androidLiteCapabilities(): AppiumCapabilities {
 }
 
 export function registerAndroidLoginStates(app: AppBaseClass): void {
+  // 系统权限弹窗需最先处理（Release 首启常挡主界面）
+  app['addState']({
+    name: 'popup-permission',
+    kind: 'popup',
+    detect: async () => {
+      for (const loc of LOC.permissionAllowIds) {
+        if (await app['driver'].exists(loc)) return true;
+      }
+      return false;
+    },
+    handle: async () => {
+      for (const loc of LOC.permissionAllowIds) {
+        if (await app['driver'].exists(loc)) {
+          await app['driver'].click(loc);
+          await sleep(400);
+          return;
+        }
+      }
+    },
+  });
+  app['addState']({
+    name: 'popup-onboarding',
+    kind: 'popup',
+    detect: () => app['driver'].exists(LOC.onboardingSkip),
+    handle: async () => {
+      await app['driver'].click(LOC.onboardingSkip);
+      await sleep(600);
+    },
+  });
   app['addState']({
     name: 'popup-activity',
     kind: 'popup',
@@ -57,7 +92,10 @@ export function registerAndroidLoginStates(app: AppBaseClass): void {
     name: 'logged-in',
     activity: ANDROID_ACT.main,
     detect: async () =>
-      (await app['driver'].exists(LOC.mePage)) || (await app['driver'].exists(LOC.meUid)),
+      (await app['driver'].exists(LOC.mePage)) ||
+      (await app['driver'].exists(LOC.meUid)) ||
+      // 登录成功先进首页；me 页需再点「我的」才出现
+      (await app['driver'].exists(by.id(`${ANDROID_LITE_PACKAGE}:id/homeRootLayout`))),
   });
   app['addState']({
     name: 'home',
@@ -89,11 +127,36 @@ export async function enterAndroidMeGate(
   throw new Error(`进入「我的」超时，当前状态: ${last}`);
 }
 
-export async function enterAndroidOtp(app: AppBaseClass): Promise<void> {
-  const otp = (process.env.SCRIPT_OTP ?? '1234').trim();
-  app['log'](`使用验证码 ${otp}（可用 SCRIPT_OTP 覆盖）`);
-  await app['assertExists'](LOC.otpInput, 'OTP 输入框 input_captcha_et');
+export type AndroidOtpContext = {
+  phone?: string;
+  countryCode?: string;
+  since?: Date;
+  smsCode?: string;
+};
+
+export async function enterAndroidOtp(app: AppBaseClass, ctx: AndroidOtpContext = {}): Promise<void> {
+  const otp = await resolveAndroidOtp({
+    phone: ctx.phone,
+    countryCode: ctx.countryCode,
+    since: ctx.since,
+    smsCode: ctx.smsCode,
+    log: (m) => app['log'](m),
+  });
   const driver = app['driver'];
+
+  const leftOtpPage = async (): Promise<boolean> => {
+    if (await driver.exists(LOC.otpInput)) return false;
+    // 验证码提交后常直接进主页
+    if (/\.MainActivity$/i.test(app['activity'] ?? '')) return true;
+    if (await driver.exists(LOC.tabMe) || (await driver.exists(LOC.mePage))) return true;
+    return false;
+  };
+
+  if (await leftOtpPage()) {
+    app['log']('已不在 OTP 页，跳过填码');
+    return;
+  }
+  await app['assertExists'](LOC.otpInput, 'OTP 输入框 input_captcha_et');
 
   try {
     await driver.execute('mobile: shell', [{ command: 'ime', args: ['set', 'io.appium.settings/.AppiumIME'] }]);
@@ -105,14 +168,19 @@ export async function enterAndroidOtp(app: AppBaseClass): Promise<void> {
     let n = 0;
     for (let i = 1; i <= 4; i++) {
       const loc = by.id(`${ANDROID_LITE_PACKAGE}:id/input_captcha_tv${i}`);
-      if (!(await driver.exists(loc))) continue;
-      const t = (await driver.textOf(loc)).trim();
-      if (t) n += 1;
+      try {
+        if (!(await driver.exists(loc))) continue;
+        const t = (await driver.textOf(loc)).trim();
+        if (t) n += 1;
+      } catch {
+        /* 页面已跳走 */
+      }
     }
     return n;
   };
 
   const clearOtp = async (): Promise<void> => {
+    if (!(await driver.exists(LOC.otpInput))) return;
     await driver.click(LOC.otpInput);
     await sleep(200);
     for (let i = 0; i < 8; i++) {
@@ -130,6 +198,7 @@ export async function enterAndroidOtp(app: AppBaseClass): Promise<void> {
 
   /** 最稳：KEYCODE_0=7 … KEYCODE_9=16 逐位注入 */
   const typeByKeycode = async (): Promise<void> => {
+    if (!(await driver.exists(LOC.otpInput))) return;
     await driver.click(LOC.otpInput);
     await sleep(200);
     for (const ch of otp) {
@@ -141,24 +210,41 @@ export async function enterAndroidOtp(app: AppBaseClass): Promise<void> {
   };
 
   for (let attempt = 0; attempt < 3; attempt++) {
-    await clearOtp();
-    await typeByKeycode();
-    let filled = await digitCount();
-    if (filled < otp.length) {
-      // 回退：AppiumIME mobile:type 整串
-      await clearOtp();
-      await driver.click(LOC.otpInput);
-      await sleep(200);
-      await driver.execute('mobile: type', [{ text: otp }]);
-      await sleep(400);
-      filled = await digitCount();
-    }
-    app['log'](`OTP 已填入 ${filled}/${otp.length} 位（第 ${attempt + 1} 次）`);
-    if (filled >= otp.length) {
-      await sleep(2_500);
+    if (await leftOtpPage()) {
+      app['log']('OTP 提交后已离开验证码页');
       return;
     }
+    try {
+      await clearOtp();
+      await typeByKeycode();
+      let filled = await digitCount();
+      if (filled < otp.length && (await driver.exists(LOC.otpInput))) {
+        // 回退：AppiumIME mobile:type / sendKeys
+        await clearOtp();
+        await driver.click(LOC.otpInput);
+        await sleep(200);
+        try {
+          await driver.execute('mobile: type', [{ text: otp }]);
+        } catch {
+          await driver.sendKeys(LOC.otpInput, otp);
+        }
+        await sleep(400);
+        filled = await digitCount();
+      }
+      app['log'](`OTP 已填入 ${filled}/${otp.length} 位（第 ${attempt + 1} 次）`);
+      if (filled >= otp.length || (await leftOtpPage())) {
+        await sleep(2_500);
+        return;
+      }
+    } catch (e) {
+      if (await leftOtpPage()) {
+        app['log'](`OTP 页已跳走（${e instanceof Error ? e.message : e}），视为填码完成`);
+        return;
+      }
+      throw e;
+    }
   }
+  if (await leftOtpPage()) return;
   throw new Error(`OTP 未能完整填入（期望 ${otp.length} 位）`);
 }
 
@@ -186,15 +272,35 @@ function countryCodeRow(code: string) {
   return by.xpath(`//*[@text=${JSON.stringify(label)}]/ancestor::*[@clickable='true'][1]`);
 }
 
-/** 印尼等常用区号：语言无关兜底（与 iOS loginFlow 对齐） */
+/** 常用区号：语言无关兜底 */
 function countryNameFallbacks(code: string) {
-  if (code !== '62') return [];
-  return [
-    by.textContains('Indonesia'),
-    by.textContains('印度尼西亚'),
-    by.textContains('인도네시아'),
-  ];
+  if (code === '62') {
+    return [
+      by.textContains('Indonesia'),
+      by.textContains('印度尼西亚'),
+      by.textContains('인도네시아'),
+    ];
+  }
+  if (code === '86') {
+    return [
+      by.textContains('China'),
+      by.textContains('中国'),
+      by.textContains('中国大陆'),
+      by.textContains('중국'),
+    ];
+  }
+  return [];
 }
+
+function otpCtxFromAccount(account: AppAccount, since?: Date): AndroidOtpContext {
+  return {
+    phone: account.username,
+    countryCode: String(account.countryCode ?? '86').replace(/^\+/, '').trim() || '86',
+    since,
+    smsCode: account.smsCode != null ? String(account.smsCode) : undefined,
+  };
+}
+
 
 async function readSelectedCountryCode(app: AppBaseClass): Promise<string> {
   const raw = await app['driver'].textOf(LOC.countryCode);
@@ -268,9 +374,10 @@ async function selectCountryCode(app: AppBaseClass, countryCode: string): Promis
 export async function loginWithPhonePassword(app: AppBaseClass, account: AppAccount): Promise<void> {
   const driver = app['driver'];
   await app['closePopups']();
+  let smsSince = new Date(Date.now() - 5 * 60_000);
 
   if (await driver.exists(LOC.otpInput)) {
-    await enterAndroidOtp(app);
+    await enterAndroidOtp(app, otpCtxFromAccount(account, smsSince));
     await finishOnMeTab(app);
     return;
   }
@@ -279,10 +386,13 @@ export async function loginWithPhonePassword(app: AppBaseClass, account: AppAcco
     await driver.input(LOC.passwordInput, account.password);
     await driver.hideKeyboard();
     await app['assertExists'](LOC.passwordSubmit, 'Login');
+    smsSince = new Date();
     await driver.click(LOC.passwordSubmit);
     await sleep(2_000);
     await app['closePopups']();
-    if (await driver.exists(LOC.otpInput)) await enterAndroidOtp(app);
+    if (await driver.exists(LOC.otpInput)) {
+      await enterAndroidOtp(app, otpCtxFromAccount(account, smsSince));
+    }
     await finishOnMeTab(app);
     return;
   }
@@ -301,33 +411,67 @@ export async function loginWithPhonePassword(app: AppBaseClass, account: AppAcco
 
   await app['waitForElement'](LOC.phoneInput, '手机号输入框', 10_000);
 
-  const countryCode = String(account.countryCode ?? '').trim();
-  if (countryCode) await selectCountryCode(app, countryCode);
+  const countryCode = String(account.countryCode ?? '86').replace(/^\+/, '').trim() || '86';
+  await selectCountryCode(app, countryCode);
 
   await driver.input(LOC.phoneInput, account.username);
   await driver.hideKeyboard();
   await app['assertExists'](LOC.phoneNext, 'Next');
-  await driver.click(LOC.phoneNext);
-  await sleep(800);
-  await app['closePopups']();
 
-  const pwdOk = await driver.waitFor(LOC.passwordInput, 10_000);
-  if (!pwdOk) {
-    if (await driver.exists(LOC.otpInput)) {
-      await enterAndroidOtp(app);
-      await finishOnMeTab(app);
-      return;
+  // Next 后可能先出 WhatsApp 引导；关闭后偶发仍停在手机号页，需再点一次
+  const afterPhoneNext = async (): Promise<'password' | 'otp' | 'phone' | 'unknown'> => {
+    await app['closePopups']();
+    if (await driver.exists(LOC.passwordInput)) return 'password';
+    if (await driver.exists(LOC.otpInput)) return 'otp';
+    if (await driver.exists(LOC.phoneInput) && (await driver.exists(LOC.phoneNext))) return 'phone';
+    return 'unknown';
+  };
+
+  smsSince = new Date();
+  let stage: 'password' | 'otp' | 'phone' | 'unknown' = 'unknown';
+  for (let attempt = 0; attempt < 3 && stage !== 'password' && stage !== 'otp'; attempt++) {
+    await driver.click(LOC.phoneNext);
+    await sleep(1_200);
+    // 最多等 12s：密码 / OTP / WhatsApp 弹窗
+    for (let i = 0; i < 24; i++) {
+      stage = await afterPhoneNext();
+      if (stage === 'password' || stage === 'otp') break;
+      // WhatsApp 可能刚弹出：优先点「没有 WhatsApp」发短信，不依赖是否已 register 弹窗状态
+      if (await driver.exists(LOC.noWhatsApp)) {
+        await driver.click(LOC.noWhatsApp);
+        await sleep(800);
+        continue;
+      }
+      if (await driver.exists(LOC.whatsAppClose)) {
+        await driver.click(LOC.whatsAppClose);
+        await sleep(800);
+        continue;
+      }
+      await app['closePopups']();
+      await sleep(500);
     }
-    throw new Error('密码页与 OTP 页均未出现（检查 hspw / 发码）');
+    if (stage === 'phone') app['log'](`点 Next 后仍在手机号页，重试 (${attempt + 1}/3)`);
+  }
+
+  if (stage === 'otp') {
+    await enterAndroidOtp(app, otpCtxFromAccount(account, smsSince));
+    await finishOnMeTab(app);
+    return;
+  }
+  if (stage !== 'password') {
+    throw new Error('密码页与 OTP 页均未出现（检查 hspw / 发码 / WhatsApp 弹窗）');
   }
 
   await driver.input(LOC.passwordInput, account.password);
   await driver.hideKeyboard();
   await app['assertExists'](LOC.passwordSubmit, 'Login');
+  smsSince = new Date();
   await driver.click(LOC.passwordSubmit);
   await sleep(2_000);
   await app['closePopups']();
-  if (await driver.exists(LOC.otpInput)) await enterAndroidOtp(app);
+  if (await driver.exists(LOC.otpInput)) {
+    await enterAndroidOtp(app, otpCtxFromAccount(account, smsSince));
+  }
   await finishOnMeTab(app);
 }
 
@@ -338,6 +482,12 @@ async function finishOnMeTab(app: AppBaseClass): Promise<void> {
   const gate = await enterAndroidMeGate(app, 20_000);
   if (gate !== 'logged-in') {
     throw new Error(`登录后未进入已登录「我的」页，状态=${gate}`);
+  }
+  // 尽量点到「我的」以便抓 user_no（首页也被视为 logged-in）
+  if (!(await app['driver'].exists(LOC.mePage)) && (await app['driver'].exists(LOC.tabMe))) {
+    await app['driver'].click(LOC.tabMe);
+    await sleep(1_000);
+    await app['closePopups']();
   }
 }
 
