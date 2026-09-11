@@ -29,8 +29,7 @@ adb devices
 | 3.4 | 语音房送礼（在上麦前执行） |
 | 3.3 | 语音房上麦 |
 
-入口脚本：`voice-room.android.lite.test.ts`  
-公共逻辑：`voiceRoom.helpers.ts`
+入口脚本（正式环境唯一识别）：`voice-room.android.lite.test.ts`（公共能力已内联，单文件）
 
 ```bash
 cd /path/to/scripts
