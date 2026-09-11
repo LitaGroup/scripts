@@ -114,33 +114,85 @@ async function tapPhoneLoginEntry(app: AppBaseClass): Promise<void> {
   throw new Error('未找到手机号登录入口（iv_low_phone_login / rl_phone_login）');
 }
 
+/** 区号行：精确匹配 (+62)，点可点击父节点（纯 TextView 往往不可点） */
+function countryCodeRow(code: string) {
+  const label = `(+${code})`;
+  return by.xpath(`//*[@text=${JSON.stringify(label)}]/ancestor::*[@clickable='true'][1]`);
+}
+
+/** 印尼等常用区号：语言无关兜底（与 iOS loginFlow 对齐） */
+function countryNameFallbacks(code: string) {
+  if (code !== '62') return [];
+  return [
+    by.textContains('Indonesia'),
+    by.textContains('印度尼西亚'),
+    by.textContains('인도네시아'),
+  ];
+}
+
+async function readSelectedCountryCode(app: AppBaseClass): Promise<string> {
+  const raw = await app['driver'].textOf(LOC.countryCode);
+  return raw.replace(/\D/g, '');
+}
+
 async function selectCountryCode(app: AppBaseClass, countryCode: string): Promise<void> {
   const code = countryCode.replace(/^\+/, '').trim();
   if (!code) return;
   const driver = app['driver'];
   await app['assertExists'](LOC.countryCode, '区号选择器');
-  const current = (await driver.textOf(LOC.countryCode)).replace(/\D/g, '');
-  if (current === code) {
+  if ((await readSelectedCountryCode(app)) === code) {
     app['log'](`当前区号已是 +${code}，跳过选择`);
     return;
   }
-  await driver.click(LOC.countryCode);
-  await sleep(600);
-  // 列表展示为 (+62)
-  const target = by.textContains(`(+${code})`);
-  for (let i = 0; i < 16 && !(await driver.exists(target)); i++) {
-    if (await driver.exists(LOC.countryList)) {
-      await driver.swipeInElement(LOC.countryList, 'up');
-    } else {
-      await driver.swipeUp(0.55);
+
+  const trySelectOnce = async (): Promise<boolean> => {
+    await driver.click(LOC.countryCode);
+    await sleep(600);
+    if (!(await driver.waitFor(LOC.countryList, 5_000))) {
+      app['log']('国家列表未出现');
+      return false;
     }
-    await sleep(350);
+
+    const candidates = [countryCodeRow(code), ...countryNameFallbacks(code)];
+    const findVisible = async () => {
+      for (const loc of candidates) {
+        if (await driver.exists(loc)) return loc;
+      }
+      return null;
+    };
+
+    let target = await findVisible();
+    // 先向下再向上扫，避免只 swipe up 漏掉列表上方的热门区号
+    const directions: Array<'up' | 'down'> = ['up', 'down', 'up', 'down'];
+    for (let i = 0; i < 20 && !target; i++) {
+      const dir = directions[i % directions.length]!;
+      if (await driver.exists(LOC.countryList)) {
+        await driver.swipeInElement(LOC.countryList, dir);
+      } else {
+        if (dir === 'up') await driver.swipeUp(0.55);
+        else await driver.swipeDown(0.55);
+      }
+      await sleep(350);
+      target = await findVisible();
+    }
+    if (!target) {
+      app['log'](`国家列表未找到 (+${code})`);
+      await driver.back();
+      await sleep(400);
+      return false;
+    }
+    await driver.click(target);
+    await sleep(500);
+    return (await readSelectedCountryCode(app)) === code;
+  };
+
+  let ok = await trySelectOnce();
+  if (!ok) {
+    app['log'](`选区号 +${code} 未确认，重试一次`);
+    ok = await trySelectOnce();
   }
-  if (!(await driver.exists(target))) {
-    throw new Error(`国家列表未找到 (+${code})`);
-  }
-  await driver.click(target);
-  await sleep(400);
+  if (!ok) throw new Error(`未能确认区号 +${code}（tv_country_code 仍为 +${await readSelectedCountryCode(app)}）`);
+  app['log'](`已选择区号 +${code}`);
 }
 
 /**
