@@ -8,5 +8,11 @@
       "smsCode": "optional-fixed-otp-if-not-querying-db"
     }
   },
-  "_comment": "Android Lite 登录冒烟默认 accounts.default（+86）；OTP 默认经 userToken 查 stats.sms_record_*，也可用 SCRIPT_OTP / smsCode 覆盖。iOS 若共用请确认号段与环境。"
+  "im": {
+    "seedCount": 3,
+    "peerNameContains": "",
+    "groupId": "",
+    "groupNameContains": ""
+  },
+  "_comment": "Android Lite 登录冒烟默认 accounts.default（+86）；OTP 默认经 userToken 查 stats.sms_record_*，也可用 SCRIPT_OTP / smsCode 覆盖。im.seedCount 控制 IM 会话造数下限（也可用 SCRIPT_IM_SEED_COUNT）。iOS 若共用请确认号段与环境。"
 }

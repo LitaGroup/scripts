@@ -319,6 +319,12 @@ export class AppiumResource {
     await this.execute('mobile: pressKey', [{ keycode }]);
   }
 
+  /** 长按元素（UiAutomator2 mobile: longClickGesture） */
+  async longClick(locator: Locator, durationMs = 1_000): Promise<void> {
+    const elementId = await this.findElement(locator);
+    await this.execute('mobile: longClickGesture', [{ elementId, duration: durationMs }]);
+  }
+
   /** 执行 Appium mobile: 扩展命令（如 mobile: activateApp / mobile: terminateApp） */
   async execute(script: string, args: unknown[] = []): Promise<unknown> {
     return this.request('POST', `session/${this.sid()}/execute/sync`, { script, args });

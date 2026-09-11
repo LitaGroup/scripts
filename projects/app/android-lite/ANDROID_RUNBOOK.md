@@ -65,3 +65,25 @@ SCRIPT_CONFIG=config.app.json \
 SCRIPT_APPIUM_URL=http://127.0.0.1:4723/ \
 node projects/app/core/login-phone-password.android.lite.test.ts
 ```
+
+同级目录也可跑：`projects/app/android-lite/login-phone-password.android.lite.test.ts`。
+
+---
+
+## IM 冒烟（会话列表 / 私聊 / 群聊）
+
+用例说明见同目录 `IM_SMOKE.md`。共用 helper：`projects/app/core/_lib/androidImFlow.ts`。
+
+```bash
+SCRIPT_CONFIG=config.app.json \
+SCRIPT_APPIUM_URL=http://127.0.0.1:4723/ \
+node --experimental-strip-types projects/app/android-lite/im-conversation-list.android.lite.test.ts
+
+# 私聊收发
+node --experimental-strip-types projects/app/android-lite/im-private-chat.android.lite.test.ts
+
+# 群聊（无 family 会话会 skip）
+node --experimental-strip-types projects/app/android-lite/im-group-chat.android.lite.test.ts
+```
+
+可选：`SCRIPT_IM_SEED_COUNT=3` 或 `config.app.json` → `im.seedCount`（默认 3）。列表为空时会从首页 `recommendPlayers` 造私聊。
