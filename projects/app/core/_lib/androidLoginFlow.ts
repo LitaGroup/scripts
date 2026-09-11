@@ -6,8 +6,14 @@
  * 可用 SCRIPT_OTP / accounts.smsCode 覆盖。
  */
 import type { AppBaseClass, AppAccount } from '../../../../src/base/AppBaseClass.ts';
-import { by, sleep, type AppiumCapabilities } from '../../../../src/resources/AppiumResource.ts';
-import { ANDROID_ACT, ANDROID_LITE_PACKAGE, ANDROID_LOC as LOC } from './androidLocators.ts';
+import { by, sleep, type AppiumCapabilities, type Locator } from '../../../../src/resources/AppiumResource.ts';
+import {
+  ANDROID_ACT,
+  ANDROID_GOOGLE_PICKER as GGL,
+  ANDROID_LITE_PACKAGE,
+  ANDROID_LOC as LOC,
+  ANDROID_LOGIN_ENTRY,
+} from './androidLocators.ts';
 import { alignLiteConfigPath, resolveAndroidOtp } from './androidSmsOtp.ts';
 
 alignLiteConfigPath();
@@ -502,3 +508,235 @@ export async function ensureAndroidLoggedIn(app: AppBaseClass, account: AppAccou
   app['log'](`当前未登录，使用账号 ${account.username} 执行登录`);
   await loginWithPhonePassword(app, account);
 }
+
+async function scrollUntilExists(app: AppBaseClass, locator: Locator, maxSwipes = 8): Promise<boolean> {
+  for (let i = 0; i <= maxSwipes; i++) {
+    if (await app['driver'].exists(locator)) return true;
+    await app['driver'].swipeUp(0.5);
+    await sleep(400);
+  }
+  return false;
+}
+
+/** 已登录则退出，并打开登录主页（三方入口可见） */
+export async function ensureAndroidLoginHome(app: AppBaseClass): Promise<void> {
+  await app['closePopups']();
+  let gate = await enterAndroidMeGate(app);
+  if (gate === 'logged-in') {
+    app['log']('已登录，先退出以便 Google 登录');
+    if (!(await scrollUntilExists(app, LOC.settingEntry))) {
+      throw new Error('我的页未找到设置入口 setting_layout');
+    }
+    await app['driver'].click(LOC.settingEntry);
+    await sleep(800);
+    if (!(await scrollUntilExists(app, LOC.logout))) {
+      throw new Error('设置页未找到退出登录 logout_tv');
+    }
+    await app['driver'].click(LOC.logout);
+    await app['waitForActivity'](/\.MainActivity$/, 15_000);
+    await sleep(800);
+    await app['closePopups']();
+    gate = await enterAndroidMeGate(app);
+  }
+  if (gate !== 'logged-out') {
+    throw new Error(`未能打开登录页，状态=${gate}`);
+  }
+  // 若落在手机号/密码中间页则 back 到登录主页
+  for (let i = 0; i < 3; i++) {
+    if (await app['driver'].exists(LOC.passwordInput) || (await app['driver'].exists(LOC.phoneInput))) {
+      await app['driver'].back();
+      await sleep(600);
+      continue;
+    }
+    break;
+  }
+}
+
+export async function tapGoogleLoginEntry(app: AppBaseClass): Promise<void> {
+  const driver = app['driver'];
+  const e = ANDROID_LOGIN_ENTRY.google;
+  if (await driver.exists(e.low)) {
+    await driver.click(e.low);
+    return;
+  }
+  if (await driver.exists(e.high)) {
+    await driver.click(e.high);
+    return;
+  }
+  if (await driver.exists(e.text)) {
+    await driver.click(e.text);
+    return;
+  }
+  // 低优入口可能在底部，轻滑一次再试
+  await driver.swipeUp(0.35);
+  await sleep(500);
+  if (await driver.exists(e.low)) {
+    await driver.click(e.low);
+    return;
+  }
+  if (await driver.exists(e.high)) {
+    await driver.click(e.high);
+    return;
+  }
+  throw new Error('未找到 Google 登录入口（iv_low_google_login / rl_google_login）');
+}
+
+function resolveGoogleEmail(app: AppBaseClass, account?: AppAccount): string {
+  const fromEnv = (process.env.SCRIPT_GOOGLE_EMAIL ?? '').trim();
+  if (fromEnv) return fromEnv;
+  const root = (app['scriptConfig'].google ?? {}) as { email?: string };
+  if (root.email?.trim()) return root.email.trim();
+  const accounts = (app['scriptConfig'].accounts ?? {}) as Record<string, AppAccount | undefined>;
+  const fromAccounts = accounts.google;
+  if (fromAccounts) {
+    const email = String(fromAccounts.email ?? fromAccounts.username ?? '').trim();
+    if (email.includes('@')) return email;
+  }
+  if (account) {
+    const email = String(account.email ?? account.username ?? '').trim();
+    if (email.includes('@')) return email;
+  }
+  return '';
+}
+
+async function googlePickerVisible(app: AppBaseClass): Promise<boolean> {
+  const driver = app['driver'];
+  if (await driver.exists(GGL.accountName)) return true;
+  if (await driver.exists(GGL.accountDisplayName)) return true;
+  if (await driver.exists(GGL.accountParticle)) return true;
+  if (await driver.exists(GGL.emailLikeClickable)) return true;
+  // 文案启发式：Choose an account / 选择账号
+  if (await driver.exists(by.textContains('Choose an account'))) return true;
+  if (await driver.exists(by.textContains('选择账号'))) return true;
+  if (await driver.exists(by.textContains('选择一个帐号'))) return true;
+  return false;
+}
+
+async function tapContinueIfPresent(app: AppBaseClass): Promise<boolean> {
+  for (const loc of GGL.continueButtons) {
+    if (await app['driver'].exists(loc)) {
+      app['log'](`点 Google 确认按钮: ${loc[0]}=${loc[1]}`);
+      await app['driver'].click(loc);
+      await sleep(1_000);
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * 在 Google 账号页点选已登录账号（不跳转三方 App）。
+ * @param preferredEmail 优先匹配该邮箱；空则点第一个可见账号
+ */
+export async function confirmGoogleAccountOnPicker(
+  app: AppBaseClass,
+  preferredEmail = '',
+  timeoutMs = 25_000,
+): Promise<void> {
+  const driver = app['driver'];
+  const deadline = Date.now() + timeoutMs;
+  let tappedAccount = false;
+
+  while (Date.now() < deadline) {
+    await app['refreshActivity']();
+    // 已回到 App 主页：可能自动用上次账号完成
+    if (/\.MainActivity$/i.test(app['activity'] ?? '')) {
+      if ((await driver.exists(LOC.tabMe)) || (await driver.exists(LOC.mePage))) {
+        app['log']('已回到 MainActivity，视为 Google 授权完成');
+        return;
+      }
+    }
+
+    // 仅剩 Continue / 同意（账号已选）
+    if (await tapContinueIfPresent(app)) {
+      tappedAccount = true;
+      await sleep(800);
+      continue;
+    }
+
+    if (!tappedAccount) {
+      if (preferredEmail) {
+        const byEmail = by.textContains(preferredEmail);
+        if (await driver.exists(byEmail)) {
+          app['log'](`点选 Google 账号: ${preferredEmail}`);
+          // 优先点可点击祖先
+          const clickable = by.xpath(
+            `//*[contains(@text,${JSON.stringify(preferredEmail)})]/ancestor-or-self::*[@clickable='true'][1]`,
+          );
+          if (await driver.exists(clickable)) await driver.click(clickable);
+          else await driver.click(byEmail);
+          tappedAccount = true;
+          await sleep(1_200);
+          continue;
+        }
+      }
+
+      const candidates: Locator[] = [
+        GGL.accountName,
+        GGL.accountDisplayName,
+        GGL.accountRow,
+        GGL.emailLikeClickable,
+        GGL.accountParticle,
+      ];
+      for (const loc of candidates) {
+        if (await driver.exists(loc)) {
+          app['log'](`点选 Google 列表账号: ${loc[0]}=${loc[1]}`);
+          await driver.click(loc);
+          tappedAccount = true;
+          await sleep(1_200);
+          break;
+        }
+      }
+      if (tappedAccount) continue;
+    }
+
+    if (!(await googlePickerVisible(app)) && tappedAccount) {
+      await sleep(800);
+    } else {
+      await sleep(500);
+    }
+  }
+
+  await app['refreshActivity']();
+  if (/\.MainActivity$/i.test(app['activity'] ?? '')) return;
+
+  if (!tappedAccount && !(await driver.exists(LOC.tabMe))) {
+    throw new Error(
+      preferredEmail
+        ? `Google 账号页未出现或未找到邮箱 ${preferredEmail}（请确认设备已登录该 Google 账号）`
+        : 'Google 账号页未出现可点账号（请确认设备已登录 Google，且弹窗未被遮挡）',
+    );
+  }
+}
+
+/**
+ * Google 三方登录：登录主页 → 点 Google → 账号页点已登账号 → 回「我的」。
+ * 前置：设备系统已登录 Google；不会跳转独立 Google App。
+ */
+export async function loginWithGoogle(app: AppBaseClass, account?: AppAccount): Promise<void> {
+  const email = resolveGoogleEmail(app, account);
+  if (email) app['log'](`Google 优先账号: ${email}`);
+  else app['log']('未配置 SCRIPT_GOOGLE_EMAIL / google.email，将点选列表第一个账号');
+
+  await ensureAndroidLoginHome(app);
+  await tapGoogleLoginEntry(app);
+  await sleep(1_000);
+
+  // 等账号选择页或直接回主页
+  const waitPickerDeadline = Date.now() + 20_000;
+  while (Date.now() < waitPickerDeadline) {
+    if (await googlePickerVisible(app)) break;
+    if (/\.MainActivity$/i.test(app['activity'] ?? '') && (await app['driver'].exists(LOC.tabMe))) {
+      app['log']('点 Google 后已直接进入主页（可能已有授权缓存）');
+      await finishOnMeTab(app);
+      return;
+    }
+    await tapContinueIfPresent(app);
+    await sleep(500);
+  }
+
+  await confirmGoogleAccountOnPicker(app, email);
+  await app['closePopups']();
+  await finishOnMeTab(app);
+}
+

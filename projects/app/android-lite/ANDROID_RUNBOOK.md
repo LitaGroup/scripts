@@ -68,6 +68,19 @@ node projects/app/core/login-phone-password.android.lite.test.ts
 
 同级目录也可跑：`projects/app/android-lite/login-phone-password.android.lite.test.ts`。
 
+### Google 登录（SM-LOGIN-07）
+
+前置：模拟器/真机 **系统已登录 Google**；点 App 内 Google 后弹出账号页，点选账号即可（不跳转独立 Google App）。
+
+```bash
+SCRIPT_CONFIG=config.app.json \
+SCRIPT_APPIUM_URL=http://127.0.0.1:4723/ \
+SCRIPT_GOOGLE_EMAIL=you@gmail.com \
+node --experimental-strip-types projects/app/android-lite/login-google.android.lite.test.ts
+```
+
+也可不设邮箱（点列表第一个账号），或在 `config.app.json` 写 `"google": { "email": "..." }`。
+
 ---
 
 ## IM 冒烟（会话列表 / 私聊 / 群聊）

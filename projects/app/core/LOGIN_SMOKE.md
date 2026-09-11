@@ -13,7 +13,7 @@
 |------|------------|----------------|--------|
 | 手机号 + 密码 / OTP | ✅ | ✅ | **P0 主路径** |
 | Facebook | ✅ | ✅ | 入口冒烟；完整 OAuth 手工 |
-| Google | ✅ | ✅ | 同上 |
+| Google | ✅ | ✅ | 入口冒烟；**完整登录见 SM-LOGIN-07** |
 | Line | ✅（按区） | ✅（按区） | 同上 |
 | Kakao | ✅（按区 / DEBUG） | ✅（按区，韩区高优） | 同上 |
 | Apple | ✅ | ❌ 无入口 | iOS 手工；Android 验「无入口」 |
@@ -41,7 +41,7 @@
 | SM-LOGIN-04 | WhatsApp 可关闭 | P1 | 状态机 | 状态机 |
 | SM-LOGIN-05 | 无密码仅 OTP | P1 | 半自动 | 半自动 |
 | SM-LOGIN-06 | Facebook 完整登录 | P2 | 手工 | 手工 |
-| SM-LOGIN-07 | Google 完整登录 | P2 | 手工 | 手工 |
+| SM-LOGIN-07 | Google 完整登录 | P1 | 手工 | `login-google.android.lite.test.ts` |
 | SM-LOGIN-08 | Apple 完整登录 | P2 | 手工真机 | Android N/A |
 | SM-LOGIN-09 | Line 完整登录 | P2 | 手工 | 手工 |
 | SM-LOGIN-10 | Kakao 完整登录 | P2 | 手工 | 手工 |
@@ -53,6 +53,13 @@
 
 - **前置**：未登录（Android 脚本会尝试自动退出）
 - **期望**：手机号入口必现；≥1 个三方入口；Android 不应出现 Apple
+
+### SM-LOGIN-07 要点（Android Google）
+
+- **前置**：设备系统已登录 Google；脚本会先退出 App 登录态再进登录页
+- **步骤**：点 `iv_low_google_login` / `rl_google_login` → 账号选择页点已登账号（可选 `SCRIPT_GOOGLE_EMAIL`）→ 如有 Continue/同意则点 → 回主页「我的」
+- **期望**：`mePage` 或数字 `user_no`
+- **脚本**：`projects/app/android-lite/login-google.android.lite.test.ts`（`core/` 下有同名入口）
 
 ### SM-LOGIN-02 要点
 
@@ -83,12 +90,17 @@ SCRIPT_IOS_DEVICE="iPhone 17" \
 # Android（可选 SCRIPT_ANDROID_UDID）
 node --experimental-strip-types projects/app/core/login-phone-password.android.lite.test.ts
 node --experimental-strip-types projects/app/core/login-entries.android.lite.test.ts
+# Google：设备需已登录 Google；可选 SCRIPT_GOOGLE_EMAIL
+node --experimental-strip-types projects/app/core/login-google.android.lite.test.ts
+# 或 android-lite 同级：
+# node --experimental-strip-types projects/app/android-lite/login-google.android.lite.test.ts
 ```
 
 | 变量 | 用途 |
 |------|------|
 | `SCRIPT_CONFIG` | 账号 JSON（需含 `userToken` 供 Android 查短信） |
 | `SCRIPT_OTP` | 覆盖验证码；不设时 Android 查 `sms_record_*` |
+| `SCRIPT_GOOGLE_EMAIL` | Google 账号页优先点选的邮箱；也可用 `google.email` / `accounts.google.email` |
 | `SCRIPT_IOS_DEVICE` / `UDID` / `VERSION` | iOS 设备 |
 | `SCRIPT_ANDROID_UDID` / `SCRIPT_ANDROID_DEVICE` | Android 设备 |
 
