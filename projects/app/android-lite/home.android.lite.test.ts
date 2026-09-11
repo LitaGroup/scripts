@@ -69,6 +69,7 @@ const ID = {
   tabHome: `${APP_PACKAGE}:id/navigation_home`,
   tabMe: `${APP_PACKAGE}:id/navigation_user_center`,
   // 登录相关
+  mePage: `${APP_PACKAGE}:id/layout_options`,
   meUid: `${APP_PACKAGE}:id/user_no`,
   loginPage: `${APP_PACKAGE}:id/rl_facebook_login`,
   loginClose: `${APP_PACKAGE}:id/close_button`,
@@ -197,7 +198,8 @@ class HomeCheck extends AppBaseClass {
     this.addState({
       name: 'logged-in', // 我的 tab：已登录（先比对 Activity，再做元素级判定）
       activity: ACT.main,
-      detect: () => this.driver.exists(by.id(ID.meUid)),
+      detect: async () =>
+        (await this.driver.exists(by.id(ID.mePage))) || (await this.driver.exists(by.id(ID.meUid))),
     });
     this.addState({
       name: 'logged-out', // 登录相关页面
@@ -473,7 +475,7 @@ class HomeCheck extends AppBaseClass {
     });
 
     await this.check('跳转至陪玩师个人主页', async () => {
-      const ok = await this.driver.isDisplayed(by.id(ID.userDetailProfile));
+      const ok = await this.waitDisplayed(by.id(ID.userDetailProfile), '陪玩师个人主页', 8_000);
       return { expect: '陪玩师个人主页', real: ok ? '已进入' : '未进入', pass: ok };
     });
 
@@ -509,7 +511,7 @@ class HomeCheck extends AppBaseClass {
     });
 
     await this.check('跳转至陪玩师个人主页', async () => {
-      const ok = await this.driver.isDisplayed(by.id(ID.userDetailProfile));
+      const ok = await this.waitDisplayed(by.id(ID.playerUserNo), '陪玩师个人主页', 8_000);
       return { expect: '陪玩师个人主页', real: ok ? '已进入' : '未进入', pass: ok };
     });
 
@@ -531,7 +533,7 @@ class HomeCheck extends AppBaseClass {
     });
 
     await this.check('跳转至陪玩师个人主页', async () => {
-      const ok = await this.driver.isDisplayed(by.id(ID.userDetailProfile));
+      const ok = await this.waitDisplayed(by.id(ID.playerUserNo), '陪玩师个人主页', 8_000);
       return { expect: '陪玩师个人主页', real: ok ? '已进入' : '未进入', pass: ok };
     });
 
@@ -668,13 +670,20 @@ class HomeCheck extends AppBaseClass {
   // ---------- 工具方法 ----------
 
   /** 进入"我的"tab，并等待登录态可知（logged-in / logged-out） */
-  private async enterMeTab(timeoutMs = 15_000): Promise<string> {
+  private async enterMeTab(timeoutMs = 30_000): Promise<string> {
     const deadline = Date.now() + timeoutMs;
     let last = 'unknown';
     while (Date.now() < deadline) {
       await this.closePopups();
       last = await this.currentState();
       if (last === 'logged-in' || last === 'logged-out') return last;
+      // 兜底：已落在登录流程页（手机号/密码输入框可见）直接判定为 logged-out
+      if (
+        (await this.driver.exists(by.id(ID.phoneInput))) ||
+        (await this.driver.exists(by.id(ID.passwordInput)))
+      ) {
+        return 'logged-out';
+      }
       if (await this.driver.exists(by.id(ID.tabMe))) await this.driver.click(by.id(ID.tabMe));
       await sleep(1_000);
     }
