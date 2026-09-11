@@ -5,15 +5,14 @@
  *
  * 步骤：
  *   1. 处理登录状态为未登录：打开 APP 进入首页，若已登录则退出登录，彻底关闭 APP
- *   2. 验证手机号+密码登录：再次打开 APP，进入"我的" tab，使用 18611755224 / 123456 登录；
+ *   2. 验证手机号+密码登录：再次打开 APP，进入"我的" tab，使用 SCRIPT_CONFIG 账号登录（默认区号 +62）；
  *      如触发短信验证码，则查询 stats 库短信记录（按 SCRIPT_ENV 区分测试/生产库）
  *   3. 判断登录成功：我的页可抓取到用户 ID
  *
  * 运行：
- *   node projects/app/sample/sample.android.lite.test.ts
- *   SCRIPT_APPIUM_URL=http://172.20.1.79:4723/ SCRIPT_ENV=TEST node projects/app/sample/sample.android.lite.test.ts
+ *   SCRIPT_CONFIG=config.app.json node --experimental-strip-types projects/app/sample/sample.android.lite.test.ts
  */
-import { AppBaseClass } from '../../../src/base/AppBaseClass.ts';
+import { AppBaseClass, type AppAccount } from '../../../src/base/AppBaseClass.ts';
 import { by, sleep, type AppiumCapabilities, type Locator } from '../../../src/resources/AppiumResource.ts';
 import { MySQLTestResource } from '../../../src/resources/MySQLTestResource.ts';
 import { MySQLProdResource } from '../../../src/resources/MySQLProdResource.ts';
@@ -22,10 +21,12 @@ import { MySQLProdResource } from '../../../src/resources/MySQLProdResource.ts';
 const APP_PACKAGE = 'com.litalite.android';
 const APP_ACTIVITY = '.ui.splash.SplashActivity';
 
-// 测试账号（真实脚本建议通过 SCRIPT_CONFIG 的 accounts 配置注入）
-const TEST_PHONE = '18611755224';
-const TEST_PASSWORD = '123456';
-const PHONE_PREFIX = '86';
+/** 未配 SCRIPT_CONFIG 时的回退（区号默认 +62） */
+const FALLBACK_ACCOUNT: AppAccount = {
+  username: '18611755224',
+  password: '123456',
+  countryCode: '62',
+};
 
 // 元素定位符（基于 com.litalite.android 1.324 实测）
 const ID = {
@@ -97,11 +98,23 @@ class SampleTest extends AppBaseClass {
       'appium:appPackage': APP_PACKAGE,
       'appium:appActivity': APP_ACTIVITY,
       'appium:noReset': true,
+      'appium:autoGrantPermissions': true,
       'appium:newCommandTimeout': 300,
     };
   }
 
+  protected resolveAccount(): AppAccount {
+    try {
+      return this.account();
+    } catch {
+      return FALLBACK_ACCOUNT;
+    }
+  }
+
   protected async runCase(): Promise<void> {
+    const acc = this.resolveAccount();
+    const countryCode = String(acc.countryCode ?? '62').replace(/^\+/, '').trim() || '62';
+
     // ---------- 1. 处理登录状态为未登录 ----------
     await this.act('打开APP进入首页，处理弹窗', async () => {
       // APP 启动后可能落在任意 tab，等待就绪即可（home=MainActivity，登录态会先命中）
@@ -150,30 +163,32 @@ class SampleTest extends AppBaseClass {
       if (state !== 'logged-out') throw new Error(`期望未登录(拉起登录页)，实际: ${state}`);
     });
 
-    await this.act(`手机号+密码登录（${TEST_PHONE}）`, async () => {
+    await this.act(`手机号+密码登录（+${countryCode} ${acc.username}）`, async () => {
       await this.driver.click(by.id(ID.phoneLoginEntry)); // 手机号登录图标
       if (!(await this.driver.waitFor(by.id(ID.phoneInput)))) throw new Error('手机号输入页未出现');
-      // 选择中国区号 +86（底部弹出的国家列表；按区号值 "(+86)" 定位，不受 APP 语言影响）
-      await this.driver.click(by.id(ID.countryCode));
-      if (!(await this.driver.waitFor(by.id(ID.countryList)))) throw new Error('国家列表未出现');
-      const chinaRow = by.xpath(`//*[@text='(+86)']/ancestor::*[@clickable='true'][1]`);
-      for (let i = 0; i < 6 && !(await this.driver.exists(chinaRow)); i++) {
-        await this.driver.swipeInElement(by.id(ID.countryList), 'up');
-        await sleep(500);
+      const current = (await this.driver.textOf(by.id(ID.countryCode))).replace(/\D/g, '');
+      if (current !== countryCode) {
+        await this.driver.click(by.id(ID.countryCode));
+        if (!(await this.driver.waitFor(by.id(ID.countryList)))) throw new Error('国家列表未出现');
+        const row = by.xpath(`//*[@text='(+${countryCode})']/ancestor::*[@clickable='true'][1]`);
+        for (let i = 0; i < 16 && !(await this.driver.exists(row)); i++) {
+          await this.driver.swipeInElement(by.id(ID.countryList), i % 2 === 0 ? 'up' : 'down');
+          await sleep(350);
+        }
+        if (!(await this.driver.exists(row))) throw new Error(`国家列表中未找到区号 (+${countryCode})`);
+        await this.driver.click(row);
+        await sleep(400);
       }
-      if (!(await this.driver.exists(chinaRow))) throw new Error('国家列表中未找到区号 (+86)');
-      await this.driver.click(chinaRow);
-      await this.driver.input(by.id(ID.phoneInput), TEST_PHONE);
-      // 输入后校验：确认内容真实写入
+      await this.driver.input(by.id(ID.phoneInput), acc.username);
       const typedPhone = await this.driver.textOf(by.id(ID.phoneInput));
-      if (!typedPhone.includes(TEST_PHONE)) throw new Error(`手机号输入失败，当前内容: "${typedPhone}"`);
+      if (!typedPhone.includes(acc.username)) throw new Error(`手机号输入失败，当前内容: "${typedPhone}"`);
       const since = new Date(); // 验证码查询的时间基线
       await this.driver.hideKeyboard(); // 收起软键盘，避免遮挡 Next 按钮
       await this.driver.click(by.id(ID.phoneNext)); // Next
 
       if (await this.driver.waitFor(by.id(ID.passwordInput), 8_000)) {
         // 该账号已设置密码 → 直接密码登录
-        await this.driver.input(by.id(ID.passwordInput), TEST_PASSWORD);
+        await this.driver.input(by.id(ID.passwordInput), acc.password);
         const typedPwd = await this.driver.textOf(by.id(ID.passwordInput));
         if (!typedPwd || typedPwd === 'Input password') throw new Error(`密码输入失败，当前内容: "${typedPwd}"`);
         await this.driver.hideKeyboard(); // 收起软键盘，避免遮挡 Login 按钮
@@ -184,7 +199,7 @@ class SampleTest extends AppBaseClass {
         const codeInput = await this.detectCodeInput();
         if (!codeInput) throw new Error('出现验证码页但未识别到验证码输入框，请补充元素ID');
         this.log('触发短信验证码，开始查询 stats 库');
-        const code = await this.querySmsCode(since);
+        const code = await this.querySmsCode(since, countryCode, acc.username);
         this.log(`获取到验证码: ${code}`);
         await this.driver.input(codeInput, code);
         await this.driver.hideKeyboard(); // 收起软键盘，避免遮挡提交按钮
@@ -257,11 +272,11 @@ class SampleTest extends AppBaseClass {
    *   - test: MySQLTestResource 直连 lita_stats 库
    *   - prod: MySQLProdResource 经 API 代理查询 stats 库（只读）
    */
-  private async querySmsCode(since: Date, timeoutMs = 30_000): Promise<string> {
+  private async querySmsCode(since: Date, phonePrefix: string, phone: string, timeoutMs = 30_000): Promise<string> {
     const ym = `${since.getFullYear()}${String(since.getMonth() + 1).padStart(2, '0')}`;
     const sql =
       `select code from sms_record_${ym} ` +
-      `where phone_prefix='${PHONE_PREFIX}' and phone_number='${PHONE_PREFIX}${TEST_PHONE}' and type=1 ` +
+      `where phone_prefix='${phonePrefix}' and phone_number='${phonePrefix}${phone}' and type=1 ` +
       `and created_at > '${formatDateTime(since)}' order by created_at desc limit 1`;
     const deadline = Date.now() + timeoutMs;
     do {
@@ -276,7 +291,7 @@ class SampleTest extends AppBaseClass {
       if (code) return code;
       await sleep(3_000);
     } while (Date.now() < deadline);
-    throw new Error(`查询短信验证码超时（${timeoutMs}ms）: phone=${PHONE_PREFIX}${TEST_PHONE}`);
+    throw new Error(`查询短信验证码超时（${timeoutMs}ms）: phone=${phonePrefix}${phone}`);
   }
 }
 

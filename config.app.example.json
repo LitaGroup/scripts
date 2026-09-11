@@ -3,10 +3,9 @@
     "default": {
       "username": "your-test-account-phone",
       "password": "your-test-account-password",
+      "countryCode": "62",
       "smsCode": "optional-sms-verification-code"
     }
   },
-  "_comment": "iOS (lita) 与 Android Lite 登录冒烟默认共用 accounts.default；并行双端建议分号或错开执行"
-  },
-  "searchPlayerId": "correct-player-id-for-search"
+  "_comment": "iOS (lita) 与 Android Lite 登录冒烟默认共用 accounts.default；区号默认 62（印尼）。并行双端建议分号或错开执行"
 }

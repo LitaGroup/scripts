@@ -13,6 +13,7 @@ export function androidLiteCapabilities(): AppiumCapabilities {
     'appium:appPackage': ANDROID_LITE_PACKAGE,
     'appium:appActivity': ANDROID_ACT.splash,
     'appium:noReset': true,
+    'appium:autoGrantPermissions': true,
     'appium:newCommandTimeout': 300,
   };
   const udid = process.env.SCRIPT_ANDROID_UDID;

@@ -2,21 +2,25 @@
  * Step 2：手机号 + 密码登录（Android / Lite）
  *
  * 前置：未登录状态（已登录会导致"拉起登录页"断言失败并跳过后续步骤）。
- * 流程：打开APP → 我的 tab（未登录则拉起登录页，已登录先退出）→ 手机号登录 → 选区号+86 → 输入手机号
+ * 流程：打开APP → 我的 tab（未登录则拉起登录页，已登录先退出）→ 手机号登录 → 选区号+62 → 输入手机号
  *       → Next → 输入密码 → 关闭软键盘 → 点击登录 → 校验登录成功
  * 约定：输入前先断言输入框存在，不存在则当前步骤直接失败。
+ * 账号：优先 SCRIPT_CONFIG → accounts.default（含 countryCode，默认 62）；未配置则回退下方示例号。
  *
  * 运行：
- *   node projects/app/sample/step-2-phone-login.android.lite.test.ts
+ *   SCRIPT_CONFIG=config.app.json node --experimental-strip-types projects/app/sample/step-2-phone-login.android.lite.test.ts
  */
-import { AppBaseClass } from '../../../src/base/AppBaseClass.ts';
+import { AppBaseClass, type AppAccount } from '../../../src/base/AppBaseClass.ts';
 import { by, sleep, type AppiumCapabilities } from '../../../src/resources/AppiumResource.ts';
 
 const APP_PACKAGE = 'com.litalite.android';
 
-// 测试账号（真实脚本建议通过 SCRIPT_CONFIG 的 accounts 配置注入）
-const TEST_PHONE = '18611755224';
-const TEST_PASSWORD = '123456';
+/** 未配 SCRIPT_CONFIG 时的回退（区号默认 +62，号段需与区号一致） */
+const FALLBACK_ACCOUNT: AppAccount = {
+  username: '18611755224',
+  password: '123456',
+  countryCode: '62',
+};
 
 const ID = {
   tabMe: `${APP_PACKAGE}:id/navigation_user_center`, // 底部 tab - 我的
@@ -78,11 +82,23 @@ class Step2PhoneLogin extends AppBaseClass {
       'appium:appPackage': APP_PACKAGE,
       'appium:appActivity': '.ui.splash.SplashActivity',
       'appium:noReset': true,
+      'appium:autoGrantPermissions': true,
       'appium:newCommandTimeout': 300,
     };
   }
 
+  protected resolveAccount(): AppAccount {
+    try {
+      return this.account();
+    } catch {
+      return FALLBACK_ACCOUNT;
+    }
+  }
+
   protected async runCase(): Promise<void> {
+    const acc = this.resolveAccount();
+    const countryCode = String(acc.countryCode ?? '62').replace(/^\+/, '').trim() || '62';
+
     await this.act(
       '打开APP，等待就绪（关弹窗）',
       async () => {
@@ -124,23 +140,28 @@ class Step2PhoneLogin extends AppBaseClass {
       await this.waitForElement(by.id(ID.phoneInput), '手机号输入框');
     });
 
-    await this.act(`选择区号 +86 并输入手机号（${TEST_PHONE}）`, async () => {
+    await this.act(`选择区号 +${countryCode} 并输入手机号（${acc.username}）`, async () => {
       await this.assertExists(by.id(ID.countryCode), '区号选择器');
-      await this.driver.click(by.id(ID.countryCode));
-      // 国家列表（底部弹层）中找到 China (+86)，必要时在列表内滑动
-      const china = by.text('China');
-      for (let i = 0; i < 6 && !(await this.driver.exists(china)); i++) {
-        await this.driver.swipeInElement(by.id(ID.countryList), 'up');
-        await sleep(500);
+      const current = (await this.driver.textOf(by.id(ID.countryCode))).replace(/\D/g, '');
+      if (current !== countryCode) {
+        await this.driver.click(by.id(ID.countryCode));
+        if (!(await this.driver.waitFor(by.id(ID.countryList), 5_000))) {
+          throw new Error('国家列表未出现');
+        }
+        // 语言无关：按 (+62) 精确匹配可点击行
+        const row = by.xpath(`//*[@text='(+${countryCode})']/ancestor::*[@clickable='true'][1]`);
+        for (let i = 0; i < 16 && !(await this.driver.exists(row)); i++) {
+          await this.driver.swipeInElement(by.id(ID.countryList), i % 2 === 0 ? 'up' : 'down');
+          await sleep(350);
+        }
+        await this.assertExists(row, `国家列表中的 (+${countryCode})`);
+        await this.driver.click(row);
+        await sleep(400);
       }
-      await this.assertExists(china, '国家列表中的 China (+86)');
-      await this.driver.click(china);
-      // 输入前判断元素是否存在，不存在直接失败
       await this.assertExists(by.id(ID.phoneInput), '手机号输入框');
-      await this.driver.input(by.id(ID.phoneInput), TEST_PHONE);
-      // 输入后校验内容真实写入
+      await this.driver.input(by.id(ID.phoneInput), acc.username);
       const typed = await this.driver.textOf(by.id(ID.phoneInput));
-      if (!typed.includes(TEST_PHONE)) throw new Error(`手机号输入失败，当前内容: "${typed}"`);
+      if (!typed.includes(acc.username)) throw new Error(`手机号输入失败，当前内容: "${typed}"`);
     });
 
     await this.act('点击 Next，进入密码输入页', async () => {
@@ -154,7 +175,7 @@ class Step2PhoneLogin extends AppBaseClass {
     await this.act('输入密码', async () => {
       // 输入前判断元素是否存在，不存在直接失败
       await this.assertExists(by.id(ID.passwordInput), '密码输入框');
-      await this.driver.input(by.id(ID.passwordInput), TEST_PASSWORD);
+      await this.driver.input(by.id(ID.passwordInput), acc.password);
       const typed = await this.driver.textOf(by.id(ID.passwordInput));
       if (!typed || typed === 'Input password') throw new Error('密码输入失败（内容为空）');
     });

@@ -20,9 +20,10 @@ import {
 
 export const APP_PACKAGE = 'com.litalite.android';
 
-/** 测试账号回退（与既有 sample 一致；正式环境请走 SCRIPT_CONFIG） */
+/** 测试账号回退（正式环境请走 SCRIPT_CONFIG；区号默认 +62） */
 export const FALLBACK_PHONE = '18611755224';
 export const FALLBACK_PASSWORD = '123456';
+export const FALLBACK_COUNTRY_CODE = '62';
 
 /** 测试环境默认语音房展示号 */
 export const DEFAULT_ROOM_NO = '2000';
@@ -322,11 +323,17 @@ export abstract class VoiceRoomSampleBase extends AppBaseClass {
     try {
       return this.account();
     } catch {
-      return { username: FALLBACK_PHONE, password: FALLBACK_PASSWORD };
+      return {
+        username: FALLBACK_PHONE,
+        password: FALLBACK_PASSWORD,
+        countryCode: FALLBACK_COUNTRY_CODE,
+      };
     }
   }
 
   protected async login(account: AppAccount): Promise<void> {
+    const countryCode = String(account.countryCode ?? FALLBACK_COUNTRY_CODE).replace(/^\+/, '').trim() || '62';
+
     // 可能已在登录主页 / 手机号页 / 密码页
     if (await this.driver.exists(by.id(ID.passwordInput))) {
       // 已在密码页
@@ -339,22 +346,18 @@ export abstract class VoiceRoomSampleBase extends AppBaseClass {
     }
 
     if (!(await this.driver.exists(by.id(ID.passwordInput)))) {
-      await this.driver.click(by.id(ID.countryCode));
-      if (await this.driver.waitFor(by.id(ID.countryList), 5_000)) {
-        const china = by.text('China');
-        for (let i = 0; i < 6 && !(await this.driver.exists(china)); i++) {
-          await this.driver.swipeInElement(by.id(ID.countryList), 'up');
-          await sleep(400);
-        }
-        if (await this.driver.exists(china)) await this.driver.click(china);
-        else {
-          // 语言无关：按 (+86) 文本点选
-          const row = by.xpath(`//*[@text='(+86)']/ancestor::*[@clickable='true'][1]`);
-          for (let i = 0; i < 6 && !(await this.driver.exists(row)); i++) {
-            await this.driver.swipeInElement(by.id(ID.countryList), 'up');
+      const current = (await this.driver.textOf(by.id(ID.countryCode))).replace(/\D/g, '');
+      if (current !== countryCode) {
+        await this.driver.click(by.id(ID.countryCode));
+        if (await this.driver.waitFor(by.id(ID.countryList), 5_000)) {
+          const row = by.xpath(`//*[@text='(+${countryCode})']/ancestor::*[@clickable='true'][1]`);
+          for (let i = 0; i < 16 && !(await this.driver.exists(row)); i++) {
+            await this.driver.swipeInElement(by.id(ID.countryList), i % 2 === 0 ? 'up' : 'down');
             await sleep(400);
           }
           if (await this.driver.exists(row)) await this.driver.click(row);
+          else this.log(`国家列表未找到 (+${countryCode})，继续使用当前区号`);
+          await sleep(400);
         }
       }
       await this.driver.input(by.id(ID.phoneInput), account.username);
