@@ -76,6 +76,7 @@ Script collection: automated test scripts (`*.test.ts`), online health-check scr
   3. Use `ensureLoggedIn()` / `ensureState(name)` at the start of each flow to guarantee the preconditions before operating.
 - **State waits (`ensureState` / `ensureAnyState` / `ensureLoggedIn`) default to 5s (`stateTimeoutMs`)**; special cases (e.g. first app launch, login completion) may pass an explicit longer `timeoutMs`.
 - **State-detection polling intervals default to 200ms (`statePollMs`; `waitFor`'s `intervalMs` also defaults to 200ms)** — framework-internal sleeps are all 200ms; special cases may set them individually.
+- **用例 ↔ 脚本双向同步**：改 `*_SMOKE.md` / 用例步骤时同步改对应 `.test.ts`；改脚本覆盖范围或断言时同步改用例文档。只改一边视为未完成。
 
 ### Export script conventions
 - Params（在 `process.argv` 解析）：

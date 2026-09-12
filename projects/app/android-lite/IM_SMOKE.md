@@ -62,13 +62,13 @@ MainActivity 首页(Game)
 | SM-IM-10 | 多选后批量已读 | P1 | list | ✅ |
 | SM-IM-11 | 多选后批量归档 | P1 | list | ✅ |
 | SM-IM-12 | 私聊更多/关注入口 | P1 | private | ✅ UI |
-| SM-IM-13 | 私聊表情面板 | P1 | private | ✅ |
-| SM-IM-14 | 私聊礼物入口 | P1 | private | ✅ 不支付 |
+| SM-IM-13 | 私聊发送表情并回显 | P1 | private | ✅ 真实发送 |
+| SM-IM-14 | 私聊发送礼物 | P1 | private | ✅ 真发；余额不足则 skip |
 | SM-IM-15 | 私聊图片入口 | P1 | private | ✅ |
 | SM-IM-16 | 陌生人底栏 | P1 | private | 需造数 |
-| SM-IM-17 | 群聊 @ | P1 | group | ✅ |
+| SM-IM-17 | 群聊 @ 并发送 | P1 | group | ✅ 真实 @ 发送 |
 | SM-IM-18 | 群聊更多：公告/背景 | P1 | group | ✅ |
-| SM-IM-19 | 群聊送礼选人 | P1 | group | ✅ |
+| SM-IM-19 | 群聊送礼（含选人） | P1 | group | ✅ 真发；余额不足则 skip |
 | SM-IM-20 | 系统通知入口 | P1 | list | ✅ |
 | SM-IM-21 | 建家族 | P2 | group-create | 半自动 |
 | SM-IM-22 | 双端互发 | P2 | dual | 双账号 |
@@ -109,7 +109,7 @@ MainActivity 首页(Game)
 ### SM-IM-03 打开私聊
 - **前置**：至少 1 条私聊（SM-IM-00）
 - **步骤**：点一条无私聊 `groupId` 的行
-- **期望**：`ChatActivity`；`input_message` + `send_button`；`toolbar_player_name` 非空
+- **期望**：`ChatActivity`；`input_message` 可见；`toolbar_player_name` 非空（`send_button` 可能在输入前隐藏，不强制）
 
 ### SM-IM-04 私聊发文本回显
 - **步骤**：输入 `im-auto-<ts>` → `send_button`

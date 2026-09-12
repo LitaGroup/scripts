@@ -8,6 +8,7 @@ export const ANDROID_LITE_PACKAGE = 'com.litalite.android';
 
 export const ANDROID_ACT = {
   splash: '.ui.splash.SplashActivity',
+  locationConfig: '.ui.splash.LocationConfigActivity',
   onboarding: '.ui.onboarding.OnboardingNewActivity',
   login: '.ui.login.LoginActivity',
   main: '.MainActivity',
@@ -79,6 +80,36 @@ export const ANDROID_GOOGLE_PICKER = {
   ],
 } as const;
 
+/**
+ * Facebook 授权页（设备已登录 Facebook / Chrome 有 FB 会话时，点 Continue as / Continue 即可）。
+ * 可能出现在：Facebook App、Chrome Custom Tab、Facebook SDK WebDialog。
+ */
+export const ANDROID_FACEBOOK_PICKER = {
+  /** 继续使用已登录账号 */
+  continueButtons: [
+    by.textContains('Continue as'),
+    by.textContains('继续使用'),
+    by.text('Continue'),
+    by.text('CONTINUE'),
+    by.text('继续'),
+    by.text('Log In'),
+    by.text('Log in'),
+    by.text('LOGIN'),
+    by.text('登录'),
+    by.text('Allow'),
+    by.text('ALLOW'),
+    by.text('允许'),
+    by.text('OK'),
+    by.text('确定'),
+    by.accessibilityId('Continue'),
+    by.accessibilityId('Log In'),
+  ],
+  /** 账号名 / 展示名（点选列表项） */
+  accountClickable: by.xpath(
+    "//*[contains(@text,'@') or contains(@text,'Continue as') or contains(@text,'继续')]/ancestor-or-self::*[@clickable='true'][1]",
+  ),
+} as const;
+
 export const ANDROID_LOC = {
   tabMe: id('navigation_user_center'),
   tabHome: id('navigation_home'),
@@ -113,6 +144,10 @@ export const ANDROID_LOC = {
 
   /** 首启引导 Skip */
   onboardingSkip: id('skipTv'),
+  /** 首启地区/语言选择（LocationConfigActivity） */
+  locationConfigConfirm: id('tv_confirm_view'),
+  locationConfigList: id('rl_question_list'),
+  locationConfigOption: id('tv_title_view'),
   /** 系统权限弹窗 Allow（不同 API 文案/id 不一） */
   permissionAllowIds: [
     by.id('com.android.permissioncontroller:id/permission_allow_button'),
@@ -121,5 +156,6 @@ export const ANDROID_LOC = {
     by.text('Allow'),
     by.text('ALLOW'),
     by.text('允许'),
+    by.text('While using the app'),
   ],
 };

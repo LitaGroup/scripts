@@ -1,11 +1,11 @@
 /**
- * Android Lite IM 群聊冒烟：打开群会话、发文本、基础入口
+ * Android Lite IM 群聊冒烟：打开群会话、发文本、@、送礼
  *
- * 用例：SM-IM-06/07（及 17～19 有则点入口，无则 skip）
+ * 用例：SM-IM-06/07 / 17～19（见 IM_SMOKE.md）
  * 前置：账号需已有 family 群会话；否则整脚本 skip
  *
  * 运行：
- *   SCRIPT_CONFIG=config.app.json \
+ *   SCRIPT_ENV=TEST SCRIPT_CONFIG=config.app.json \
  *   SCRIPT_APPIUM_URL=http://127.0.0.1:4723/ \
  *   node --experimental-strip-types projects/app/android-lite/im-group-chat.android.lite.test.ts
  */
@@ -18,7 +18,9 @@ import {
   findFirstGroupConversationIndex,
   isGroupChatUi,
   openConversationByIndex,
+  sendChatGift,
   sendChatText,
+  sendGroupAtMention,
   uniqueImText,
 } from '../core/_lib/androidImFlow.ts';
 import {
@@ -31,10 +33,12 @@ import {
 class AndroidImGroupChatSmoke extends AppBaseClass {
   private groupIndex: number | null = null;
   private lastSent = '';
+  private lastAt = '';
+  private giftSkippedForTopup = false;
 
   constructor() {
     super('android', 'lite');
-    this.total = 10;
+    this.total = 12;
     registerAndroidLoginStates(this);
   }
 
@@ -63,22 +67,25 @@ class AndroidImGroupChatSmoke extends AppBaseClass {
         this.skip('账号无群聊会话（family），跳过群聊用例');
       }
     });
+    if (this.groupIndex == null) return;
 
     // —— SM-IM-06 ——
     await this.act('SM-IM-06 打开群聊', async () => {
       await enterMessageTab(this);
       await openConversationByIndex(this, this.groupIndex!);
       await this.waitForActivity(ANDROID_IM_ACT.chat, 12_000);
+      await this.waitForElement(IM.chatInput, 'input_message', 12_000);
     });
 
     await this.check('SM-IM-06 群聊 UI + 输入区', async () => {
       const input = await this.driver.exists(IM.chatInput);
-      const send = await this.driver.exists(IM.chatSend);
+      const giftOrEmoji =
+        (await this.driver.exists(IM.chatGift)) || (await this.driver.exists(IM.chatEmoji));
       const groupUi = await isGroupChatUi(this);
       return {
-        expect: '群特征 UI + input/send',
-        real: `groupUi=${groupUi} input=${input} send=${send}`,
-        pass: groupUi && input && send,
+        expect: '群特征 UI + input + (gift|emoji)',
+        real: `groupUi=${groupUi} input=${input} giftOrEmoji=${giftOrEmoji}`,
+        pass: groupUi && input && giftOrEmoji,
       };
     });
 
@@ -96,13 +103,16 @@ class AndroidImGroupChatSmoke extends AppBaseClass {
       };
     });
 
-    // —— SM-IM-17 @（仅检查加号/输入可用，不强制 @ 面板）——
-    await this.check('SM-IM-17 群聊输入区可交互（@ 半自动）', async () => {
-      const input = await this.driver.exists(IM.chatInput);
+    // —— SM-IM-17 真实 @ ——
+    await this.act('SM-IM-17 群聊发送 @ 消息', async () => {
+      this.lastAt = await sendGroupAtMention(this);
+    });
+
+    await this.check('SM-IM-17 @ 消息已回显', async () => {
       return {
-        expect: 'input_message 仍在',
-        real: input ? 'ok' : 'missing',
-        pass: input,
+        expect: this.lastAt,
+        real: this.lastAt,
+        pass: this.lastAt.length > 0,
       };
     });
 
@@ -116,7 +126,6 @@ class AndroidImGroupChatSmoke extends AppBaseClass {
     });
 
     await this.check('SM-IM-18 更多面板可打开（不校验公告文案）', async () => {
-      // 打开后可能仍是 ChatActivity 上的菜单；退回即可
       const stillChat = await this.isActivity(ANDROID_IM_ACT.chat);
       await this.driver.back().catch(() => undefined);
       await sleep(500);
@@ -127,18 +136,35 @@ class AndroidImGroupChatSmoke extends AppBaseClass {
       };
     });
 
-    // —— SM-IM-19 礼物 ——
-    await this.check('SM-IM-19 群聊礼物入口（不支付）', async () => {
+    // —— SM-IM-19 真实送礼（需选人）——
+    await this.act('SM-IM-19 群聊发送礼物', async () => {
       if (!(await this.driver.exists(IM.chatInput))) {
-        // 可能被菜单挡住，尝试回聊天
         await this.driver.back().catch(() => undefined);
         await sleep(500);
       }
-      const gift = await this.driver.exists(IM.chatGift);
+      if (!(await this.driver.exists(IM.chatGift))) {
+        this.skip('无 iv_gift，跳过群送礼');
+      }
+      const result = await sendChatGift(this, { groupPickRecipient: true });
+      if (result === 'topup') {
+        this.giftSkippedForTopup = true;
+        this.skip('群送礼余额不足（Top Up），跳过');
+      }
+    });
+
+    await this.check('SM-IM-19 礼物气泡已出现', async () => {
+      if (this.giftSkippedForTopup) this.skip('因余额不足未送礼');
+      const n = (await this.driver.findElements(IM.giftBubbleItem)).length;
+      let srcHit = false;
+      try {
+        srcHit = /You sent a gift|你送了|Sent/i.test(await this.driver.source());
+      } catch {
+        /* ignore */
+      }
       return {
-        expect: 'iv_gift（可无）',
-        real: gift ? 'visible' : 'missing',
-        pass: true,
+        expect: 'll_gift_item≥1 或送礼文案',
+        real: `count=${n} srcHit=${srcHit}`,
+        pass: n >= 1 || srcHit,
       };
     });
 

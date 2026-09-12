@@ -10,6 +10,7 @@ import type { AppBaseClass, AppAccount } from '../../../../src/base/AppBaseClass
 import { by, sleep, type AppiumCapabilities, type Locator } from '../../../../src/resources/AppiumResource.ts';
 import {
   ANDROID_ACT,
+  ANDROID_FACEBOOK_PICKER as FB,
   ANDROID_GOOGLE_PICKER as GGL,
   ANDROID_LITE_PACKAGE,
   ANDROID_LOC as LOC,
@@ -66,6 +67,34 @@ export function registerAndroidLoginStates(app: AppBaseClass): void {
       await sleep(600);
     },
   });
+  // 首启地区/语言选择：先点一项再 Confirm，否则会卡在 LocationConfigActivity
+  app['addState']({
+    name: 'popup-location-config',
+    kind: 'popup',
+    activity: ANDROID_ACT.locationConfig,
+    detect: async () =>
+      (await app['driver'].exists(LOC.locationConfigConfirm)) ||
+      (await app['driver'].exists(LOC.locationConfigList)),
+    handle: async () => {
+      const options = await app['driver'].findElements(LOC.locationConfigOption);
+      if (options.length > 0) {
+        await app['driver'].click(LOC.locationConfigOption);
+        await sleep(400);
+      } else if (await app['driver'].exists(LOC.locationConfigList)) {
+        // 兜底：点列表第一项可点击子节点
+        await app['driver'].click(
+          by.xpath(
+            `(//*[@resource-id='${ANDROID_LITE_PACKAGE}:id/rl_question_list']//*[@clickable='true' or @resource-id='${ANDROID_LITE_PACKAGE}:id/tv_title_view'])[1]`,
+          ),
+        );
+        await sleep(400);
+      }
+      if (await app['driver'].exists(LOC.locationConfigConfirm)) {
+        await app['driver'].click(LOC.locationConfigConfirm);
+        await sleep(1_500);
+      }
+    },
+  });
   app['addState']({
     name: 'popup-activity',
     kind: 'popup',
@@ -98,11 +127,9 @@ export function registerAndroidLoginStates(app: AppBaseClass): void {
   app['addState']({
     name: 'logged-in',
     activity: ANDROID_ACT.main,
+    // 仅「我的」页标记；首页 homeRootLayout 访客/已登录都有，不能当 logged-in
     detect: async () =>
-      (await app['driver'].exists(LOC.mePage)) ||
-      (await app['driver'].exists(LOC.meUid)) ||
-      // 登录成功先进首页；me 页需再点「我的」才出现
-      (await app['driver'].exists(by.id(`${ANDROID_LITE_PACKAGE}:id/homeRootLayout`))),
+      (await app['driver'].exists(LOC.mePage)) || (await app['driver'].exists(LOC.meUid)),
   });
   app['addState']({
     name: 'home',
@@ -111,27 +138,60 @@ export function registerAndroidLoginStates(app: AppBaseClass): void {
   });
 }
 
-/** 点「我的」直到落到登录页或已登录的我的页 */
+/** 点「我的」直到落到登录页或已登录的我的页（退出后常停在访客首页，需再点一次「我的」） */
 export async function enterAndroidMeGate(
   app: AppBaseClass,
   timeoutMs = 30_000,
 ): Promise<'logged-in' | 'logged-out'> {
+  const driver = app['driver'];
   const deadline = Date.now() + timeoutMs;
   let last = 'unknown';
+
+  const onLoginPage = async (): Promise<boolean> => {
+    await app['refreshActivity']();
+    if (/\.LoginActivity$/i.test(app['activity'] ?? '')) return true;
+    if (await driver.exists(LOC.loginClose)) return true;
+    if (await driver.exists(ANDROID_LOGIN_ENTRY.facebook.high)) return true;
+    if (await driver.exists(ANDROID_LOGIN_ENTRY.google.high)) return true;
+    if (await driver.exists(ANDROID_LOGIN_ENTRY.facebook.low)) return true;
+    if (await driver.exists(ANDROID_LOGIN_ENTRY.google.low)) return true;
+    if (await driver.exists(ANDROID_LOGIN_ENTRY.phone.high)) return true;
+    if (await driver.exists(ANDROID_LOGIN_ENTRY.phone.low)) return true;
+    if (await driver.exists(LOC.passwordInput)) return true;
+    if (await driver.exists(LOC.phoneInput)) return true;
+    return false;
+  };
+
+  const onLoggedInMe = async (): Promise<boolean> =>
+    (await driver.exists(LOC.mePage)) || (await driver.exists(LOC.meUid));
+
   while (Date.now() < deadline) {
     await app['closePopups']();
+    if (await onLoginPage()) return 'logged-out';
+    if (await onLoggedInMe()) return 'logged-in';
+
     last = await app['currentState']();
     if (last === 'logged-in' || last === 'logged-out') return last;
 
-    if (await app['driver'].exists(LOC.passwordInput) || (await app['driver'].exists(LOC.phoneInput))) {
-      return 'logged-out';
+    // 访客首页 / 已登录首页：点底部「我的」拉起登录页或进入我的页
+    if (await driver.exists(LOC.tabMe)) {
+      app['log']('当前在首页类页面，点击底部「我的」');
+      await driver.click(LOC.tabMe);
+      // 点完后短轮询：登录页可能稍晚才出现，避免误判一直停在 home
+      const settleUntil = Date.now() + 5_000;
+      while (Date.now() < settleUntil) {
+        await sleep(400);
+        await app['refreshActivity']();
+        // Activity 已切到登录页即可返回；入口按钮可能稍晚再挂上
+        if (/\.LoginActivity$/i.test(app['activity'] ?? '')) return 'logged-out';
+        if (await onLoginPage()) return 'logged-out';
+        if (await onLoggedInMe()) return 'logged-in';
+      }
+      continue;
     }
-    if (await app['driver'].exists(LOC.tabMe)) {
-      await app['driver'].click(LOC.tabMe);
-    }
-    await sleep(1_000);
+    await sleep(800);
   }
-  throw new Error(`进入「我的」超时，当前状态: ${last}`);
+  throw new Error(`进入「我的」超时，当前状态: ${last}，Activity: ${app['activity'] || '(未知)'}`);
 }
 
 export type AndroidOtpContext = {
@@ -490,7 +550,7 @@ async function finishOnMeTab(app: AppBaseClass): Promise<void> {
   if (gate !== 'logged-in') {
     throw new Error(`登录后未进入已登录「我的」页，状态=${gate}`);
   }
-  // 尽量点到「我的」以便抓 user_no（首页也被视为 logged-in）
+  // 尽量点到「我的」以便抓 user_no（登录后常先停首页，需再点「我的」）
   if (!(await app['driver'].exists(LOC.mePage)) && (await app['driver'].exists(LOC.tabMe))) {
     await app['driver'].click(LOC.tabMe);
     await sleep(1_000);
@@ -524,7 +584,7 @@ export async function ensureAndroidLoginHome(app: AppBaseClass): Promise<void> {
   await app['closePopups']();
   let gate = await enterAndroidMeGate(app);
   if (gate === 'logged-in') {
-    app['log']('已登录，先退出以便 Google 登录');
+    app['log']('已登录，先退出以便三方登录');
     if (!(await scrollUntilExists(app, LOC.settingEntry))) {
       throw new Error('我的页未找到设置入口 setting_layout');
     }
@@ -534,9 +594,17 @@ export async function ensureAndroidLoginHome(app: AppBaseClass): Promise<void> {
       throw new Error('设置页未找到退出登录 logout_tv');
     }
     await app['driver'].click(LOC.logout);
-    await app['waitForActivity'](/\.MainActivity$/, 15_000);
+    // 退出后可能停在访客首页 MainActivity，或直接 LoginActivity
+    const afterLogoutDeadline = Date.now() + 15_000;
+    while (Date.now() < afterLogoutDeadline) {
+      await app['refreshActivity']();
+      const act = app['activity'] ?? '';
+      if (/\.LoginActivity$/i.test(act) || /\.MainActivity$/i.test(act)) break;
+      await sleep(400);
+    }
     await sleep(800);
     await app['closePopups']();
+    app['log']('退出后若在首页，将再点「我的」进入登录页');
     gate = await enterAndroidMeGate(app);
   }
   if (gate !== 'logged-out') {
@@ -550,6 +618,21 @@ export async function ensureAndroidLoginHome(app: AppBaseClass): Promise<void> {
       continue;
     }
     break;
+  }
+  // LoginActivity 刚出来时按钮可能尚未挂上，等到至少一个登录入口可见
+  const entryDeadline = Date.now() + 10_000;
+  while (Date.now() < entryDeadline) {
+    if (
+      (await app['driver'].exists(ANDROID_LOGIN_ENTRY.facebook.high)) ||
+      (await app['driver'].exists(ANDROID_LOGIN_ENTRY.facebook.low)) ||
+      (await app['driver'].exists(ANDROID_LOGIN_ENTRY.google.high)) ||
+      (await app['driver'].exists(ANDROID_LOGIN_ENTRY.google.low)) ||
+      (await app['driver'].exists(ANDROID_LOGIN_ENTRY.phone.high)) ||
+      (await app['driver'].exists(ANDROID_LOGIN_ENTRY.phone.low))
+    ) {
+      return;
+    }
+    await sleep(400);
   }
 }
 
@@ -737,6 +820,192 @@ export async function loginWithGoogle(app: AppBaseClass, account?: AppAccount): 
   }
 
   await confirmGoogleAccountOnPicker(app, email);
+  await app['closePopups']();
+  await finishOnMeTab(app);
+}
+
+export async function tapFacebookLoginEntry(app: AppBaseClass): Promise<void> {
+  const driver = app['driver'];
+  const e = ANDROID_LOGIN_ENTRY.facebook;
+  if (await driver.exists(e.high)) {
+    await driver.click(e.high);
+    return;
+  }
+  if (await driver.exists(e.low)) {
+    await driver.click(e.low);
+    return;
+  }
+  if (await driver.exists(e.text)) {
+    await driver.click(e.text);
+    return;
+  }
+  await driver.swipeUp(0.35);
+  await sleep(500);
+  if (await driver.exists(e.high)) {
+    await driver.click(e.high);
+    return;
+  }
+  if (await driver.exists(e.low)) {
+    await driver.click(e.low);
+    return;
+  }
+  throw new Error('未找到 Facebook 登录入口（rl_facebook_login / iv_low_facebook_login）');
+}
+
+function resolveFacebookName(app: AppBaseClass, account?: AppAccount): string {
+  const fromEnv = (process.env.SCRIPT_FACEBOOK_NAME ?? '').trim();
+  if (fromEnv) return fromEnv;
+  const root = (app['scriptConfig'].facebook ?? {}) as { name?: string; email?: string };
+  if (root.name?.trim()) return root.name.trim();
+  if (root.email?.trim()) return root.email.trim();
+  const accounts = (app['scriptConfig'].accounts ?? {}) as Record<string, AppAccount | undefined>;
+  const fromAccounts = accounts.facebook;
+  if (fromAccounts) {
+    const name = String(fromAccounts.name ?? fromAccounts.email ?? fromAccounts.username ?? '').trim();
+    if (name) return name;
+  }
+  if (account) {
+    const name = String(
+      (account as { name?: string }).name ?? account.email ?? account.username ?? '',
+    ).trim();
+    if (name) return name;
+  }
+  return '';
+}
+
+async function tapFacebookContinueIfPresent(app: AppBaseClass): Promise<boolean> {
+  for (const loc of FB.continueButtons) {
+    if (!(await app['driver'].exists(loc))) continue;
+    app['log'](`点 Facebook 确认按钮: ${loc[0]}=${loc[1]}`);
+    try {
+      await app['driver'].click(loc);
+      await sleep(1_200);
+      return true;
+    } catch (e) {
+      // Custom Tab / 授权页可能在 exists→click 间已关闭并回到 App
+      await app['refreshActivity']();
+      if (/\.MainActivity$/i.test(app['activity'] ?? '')) {
+        app['log'](`Continue 点击时页面已回主页，视为授权完成（${(e as Error).message}）`);
+        return true;
+      }
+      app['log'](`Continue 点击失败，继续重试: ${(e as Error).message}`);
+    }
+  }
+  return false;
+}
+
+/**
+ * Facebook 授权页：优先点「Continue as / Continue」；可选按展示名匹配。
+ * 前置：设备 Facebook App 或浏览器已登录 FB 账号。
+ */
+export async function confirmFacebookOnPicker(
+  app: AppBaseClass,
+  preferredName = '',
+  timeoutMs = 35_000,
+): Promise<void> {
+  const driver = app['driver'];
+  const deadline = Date.now() + timeoutMs;
+  let tapped = false;
+
+  while (Date.now() < deadline) {
+    await app['refreshActivity']();
+    if (/\.MainActivity$/i.test(app['activity'] ?? '')) {
+      if ((await driver.exists(LOC.tabMe)) || (await driver.exists(LOC.mePage))) {
+        app['log']('已回到 MainActivity，视为 Facebook 授权完成');
+        return;
+      }
+    }
+
+    if (preferredName && !tapped) {
+      const byName = by.textContains(preferredName);
+      if (await driver.exists(byName)) {
+        app['log'](`点选 Facebook 账号/文案: ${preferredName}`);
+        const clickable = by.xpath(
+          `//*[contains(@text,${JSON.stringify(preferredName)})]/ancestor-or-self::*[@clickable='true'][1]`,
+        );
+        try {
+          if (await driver.exists(clickable)) await driver.click(clickable);
+          else await driver.click(byName);
+          tapped = true;
+          await sleep(1_200);
+          continue;
+        } catch (e) {
+          await app['refreshActivity']();
+          if (/\.MainActivity$/i.test(app['activity'] ?? '')) return;
+          app['log'](`点选账号失败: ${(e as Error).message}`);
+        }
+      }
+    }
+
+    if (await tapFacebookContinueIfPresent(app)) {
+      tapped = true;
+      await app['refreshActivity']();
+      if (/\.MainActivity$/i.test(app['activity'] ?? '')) return;
+      await sleep(800);
+      continue;
+    }
+
+    if (!tapped && (await driver.exists(FB.accountClickable))) {
+      app['log']('点选 Facebook 可点账号行');
+      try {
+        await driver.click(FB.accountClickable);
+        tapped = true;
+        await sleep(1_200);
+        continue;
+      } catch (e) {
+        await app['refreshActivity']();
+        if (/\.MainActivity$/i.test(app['activity'] ?? '')) return;
+        app['log'](`点选账号行失败: ${(e as Error).message}`);
+      }
+    }
+
+    await sleep(500);
+  }
+
+  await app['refreshActivity']();
+  if (/\.MainActivity$/i.test(app['activity'] ?? '')) return;
+
+  throw new Error(
+    preferredName
+      ? `Facebook 授权页未完成（未找到「Continue」或账号 ${preferredName}；请确认设备已登录 Facebook）`
+      : 'Facebook 授权页未完成（未找到 Continue as / Continue；请确认设备 Facebook App 或 Chrome 已登录）',
+  );
+}
+
+/**
+ * Facebook 三方登录：登录主页 → 点 Facebook → 授权页 Continue → 回「我的」。
+ * 前置：设备已登录 Facebook（App 或浏览器会话）；优先点 Continue，不填账密。
+ */
+export async function loginWithFacebook(app: AppBaseClass, account?: AppAccount): Promise<void> {
+  const name = resolveFacebookName(app, account);
+  if (name) app['log'](`Facebook 优先账号名: ${name}`);
+  else app['log']('未配置 SCRIPT_FACEBOOK_NAME / facebook.name，将点 Continue as / Continue');
+
+  await ensureAndroidLoginHome(app);
+  await tapFacebookLoginEntry(app);
+  await sleep(1_500);
+
+  const waitDeadline = Date.now() + 20_000;
+  while (Date.now() < waitDeadline) {
+    await app['refreshActivity']();
+    if (/\.MainActivity$/i.test(app['activity'] ?? '') && (await app['driver'].exists(LOC.tabMe))) {
+      app['log']('点 Facebook 后已直接进入主页（可能已有授权缓存）');
+      await finishOnMeTab(app);
+      return;
+    }
+    // 已出现 Continue / 账号页
+    let hasContinue = false;
+    for (const loc of FB.continueButtons) {
+      if (await app['driver'].exists(loc)) {
+        hasContinue = true;
+        break;
+      }
+    }
+    if (hasContinue || (name && (await app['driver'].exists(by.textContains(name))))) break;
+    await sleep(500);
+  }
+
+  await confirmFacebookOnPicker(app, name);
   await app['closePopups']();
   await finishOnMeTab(app);
 }

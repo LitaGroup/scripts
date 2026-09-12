@@ -31,6 +31,9 @@
   "google": {
     "email": "your.google@gmail.com"
   },
+  "facebook": {
+    "name": ""
+  },
   "im": {
     "seedCount": 3,
     "peerNameContains": "",

@@ -13,7 +13,7 @@
 | 方式 | iOS (Lita) | Android (Lite) | 自动化 |
 |------|------------|----------------|--------|
 | 手机号 + 密码 / OTP | ✅ | ✅ | **P0 主路径** |
-| Facebook | ✅ | ✅ | 入口冒烟；完整 OAuth 手工 |
+| Facebook | ✅ | ✅ | 入口冒烟；**完整登录见 SM-LOGIN-06** |
 | Google | ✅ | ✅ | 入口冒烟；**完整登录见 SM-LOGIN-07** |
 | Line | ✅（按区） | ✅（按区） | 同上 |
 | Kakao | ✅（按区 / DEBUG） | ✅（按区，韩区高优） | 同上 |
@@ -41,7 +41,7 @@
 | SM-LOGIN-03 | 新设备 OTP | P0 | 含在 02（`SCRIPT_OTP`） | 含在 02（查库 / `SCRIPT_OTP`） |
 | SM-LOGIN-04 | WhatsApp 可关闭 | P1 | 状态机 | 状态机 |
 | SM-LOGIN-05 | 无密码仅 OTP | P1 | 半自动 | 半自动 |
-| SM-LOGIN-06 | Facebook 完整登录 | P2 | 手工 | 手工 |
+| SM-LOGIN-06 | Facebook 完整登录 | P1 | 手工 | `login-facebook.android.lite.test.ts` |
 | SM-LOGIN-07 | Google 完整登录 | P1 | 手工 | `login-google.android.lite.test.ts` |
 | SM-LOGIN-08 | Apple 完整登录 | P2 | 手工真机 | Android N/A |
 | SM-LOGIN-09 | Line 完整登录 | P2 | 手工 | 手工 |
@@ -55,9 +55,18 @@
 - **前置**：未登录（Android 脚本会尝试自动退出）
 - **期望**：手机号入口必现；≥1 个三方入口；Android 不应出现 Apple
 
+### SM-LOGIN-06 要点（Android Facebook）
+
+- **前置**：设备 Facebook App 或 Chrome 已登录 Facebook；脚本会先退出 App 登录态再进登录页
+- **退出后**：若落到访客首页，会再点底部「我的」进入登录页（不要卡在首页）
+- **步骤**：点 `rl_facebook_login` / `iv_low_facebook_login` → 授权页点 **Continue as / Continue**（可选 `SCRIPT_FACEBOOK_NAME` 匹配展示名）→ 回主页「我的」
+- **期望**：`mePage` 或数字 `user_no`
+- **脚本**：`projects/app/android-lite/login-facebook.android.lite.test.ts`（`core/` 下有同名入口）
+
 ### SM-LOGIN-07 要点（Android Google）
 
 - **前置**：设备系统已登录 Google；脚本会先退出 App 登录态再进登录页
+- **退出后**：若落到访客首页，会再点底部「我的」进入登录页
 - **步骤**：点 `iv_low_google_login` / `rl_google_login` → 账号选择页点已登账号（可选 `SCRIPT_GOOGLE_EMAIL`）→ 如有 Continue/同意则点 → 回主页「我的」
 - **期望**：`mePage` 或数字 `user_no`
 - **脚本**：`projects/app/android-lite/login-google.android.lite.test.ts`（`core/` 下有同名入口）
@@ -94,8 +103,11 @@ node --experimental-strip-types projects/app/core/login-phone-password.android.l
 node --experimental-strip-types projects/app/core/login-entries.android.lite.test.ts
 # Google：设备需已登录 Google；可选 SCRIPT_GOOGLE_EMAIL
 node --experimental-strip-types projects/app/core/login-google.android.lite.test.ts
+# Facebook：设备需已登录 Facebook；可选 SCRIPT_FACEBOOK_NAME
+node --experimental-strip-types projects/app/core/login-facebook.android.lite.test.ts
 # 或 android-lite 同级：
 # node --experimental-strip-types projects/app/android-lite/login-google.android.lite.test.ts
+# node --experimental-strip-types projects/app/android-lite/login-facebook.android.lite.test.ts
 ```
 
 | 变量 | 用途 |
@@ -104,6 +116,7 @@ node --experimental-strip-types projects/app/core/login-google.android.lite.test
 | `SCRIPT_ENV` | `PROD`（默认）/ `TEST` |
 | `SCRIPT_OTP` | 覆盖验证码；PROD 不设则查 `sms_record_*`；TEST 默认 `1234` |
 | `SCRIPT_GOOGLE_EMAIL` | Google 账号页优先点选的邮箱；也可用 `google.email` / `accounts.google.email` |
+| `SCRIPT_FACEBOOK_NAME` | Facebook 授权页优先匹配的展示名；也可用 `facebook.name` / `accounts.facebook.name` |
 | `SCRIPT_IOS_DEVICE` / `UDID` / `VERSION` | iOS 设备 |
 | `SCRIPT_ANDROID_UDID` / `SCRIPT_ANDROID_DEVICE` | Android 设备 |
 
