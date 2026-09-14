@@ -10,7 +10,7 @@ import type { RedisTestResource } from '../resources/RedisTestResource.ts';
  * funbit-api SessionConfig 非 PROD 模式配置一致（to_sigNon_eNckey），
  * 因此可按 RedisToken 二进制格式本地伪造任意用户 token 直接调接口。
  *
- * 存储：图鉴与抽奖表在 funbit 库；gift_award_queue / user_blind_pack* 在 basic 库。
+ * 存储：图鉴与抽奖表在 funbit 库；gift_award_queue / user_blind_pack* 在 lita_basic 库（逻辑名 basic）。
  * 注意：接口响应里的数字字段均被序列化为字符串（如 "albumStar":"0"），读取需 Number()。
  */
 
@@ -19,7 +19,7 @@ const TOKEN_AES_KEY = 'to_sigNon_eNckey';
 const DEFAULT_TIMEOUT_MS = 30_000;
 
 export const DB_FUNBIT = 'funbit';
-export const DB_BASIC = 'basic';
+export const DB_BASIC = 'lita_basic';
 
 /** 图鉴池配置项（spin_draw_album_gift_config） */
 export interface AlbumGiftConfig {
