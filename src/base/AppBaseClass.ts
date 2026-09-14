@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { CheckBaseClass, type CheckResult } from './CheckBaseClass.ts';
-import { AppiumResource, sleep, type AppiumCapabilities, type Locator } from '../resources/AppiumResource.ts';
+import { AppiumResource, resolveAppiumUrl, sleep, type AppiumCapabilities, type Locator } from '../resources/AppiumResource.ts';
 
 export type AppPlatform = 'android' | 'ios';
 export type AppFlavor = 'lita' | 'lite';
@@ -113,6 +113,7 @@ export abstract class AppBaseClass extends CheckBaseClass {
   protected async run(): Promise<void> {
     await this.act(`创建 Appium 会话 (${this.platform}/${this.flavor}/${this.env})`, async () => {
       try {
+        this.log(`Appium URL: ${resolveAppiumUrl()}`);
         await this.driver.createSession(this.capabilities());
         await this.activateApp(); // 确保 APP 在前台（异常退出/会话复用后可能在后台）
       } catch (e) {
