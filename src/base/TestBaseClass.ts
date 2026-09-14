@@ -6,6 +6,7 @@ import { PkFamilyService } from '../services/PkFamilyService.ts';
 import { PkPlayerService } from '../services/PkPlayerService.ts';
 import { LitaTeamMessageService } from '../services/LitaTeamMessageService.ts';
 import { DidibusService } from '../services/DidibusService.ts';
+import { SpinDrawService } from '../services/SpinDrawService.ts';
 
 /**
  * 测试用例基类（测试环境）。
@@ -19,6 +20,7 @@ export abstract class TestBaseClass extends CheckBaseClass {
   private _player: PkPlayerService | null = null;
   private _litaTeam: LitaTeamMessageService | null = null;
   private _didibus: DidibusService | null = null;
+  private _spindraw: SpinDrawService | null = null;
 
   protected get api(): APITestResource {
     return (this._api ??= new APITestResource());
@@ -46,6 +48,10 @@ export abstract class TestBaseClass extends CheckBaseClass {
 
   protected get didibus(): DidibusService {
     return (this._didibus ??= new DidibusService({ api: this.api, mysql: this.mysql, redis: this.redis }));
+  }
+
+  protected get spindraw(): SpinDrawService {
+    return (this._spindraw ??= new SpinDrawService({ mysql: this.mysql, redis: this.redis }));
   }
 
   async execute(): Promise<void> {
