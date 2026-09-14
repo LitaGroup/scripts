@@ -245,16 +245,15 @@ export async function enterAndroidMeGate(
     last = await app['currentState']();
     if (last === 'logged-in' || last === 'logged-out') return last;
 
-    // 访客首页 / 已登录首页：点底部「我的」拉起登录页或进入我的页
+    // 访客首页 / 已登录首页：点底部「我的」拉起登录页或进入我的页（退出后停在首页时必走这里）
     if (await driver.exists(LOC.tabMe)) {
-      app['log']('当前在首页类页面，点击底部「我的」');
+      app['log']('当前在首页类页面（勿停留）→ 点击底部「我的」');
       await driver.click(LOC.tabMe);
-      // 点完后短轮询：登录页可能稍晚才出现，避免误判一直停在 home
-      const settleUntil = Date.now() + 5_000;
+      const settleUntil = Date.now() + 8_000;
       while (Date.now() < settleUntil) {
         await sleep(400);
+        await app['closePopups']();
         await app['refreshActivity']();
-        // Activity 已切到登录页即可返回；入口按钮可能稍晚再挂上
         if (/\.LoginActivity$/i.test(app['activity'] ?? '')) return 'logged-out';
         if (await onLoginPage()) return 'logged-out';
         if (await onLoggedInMe()) return 'logged-in';
@@ -730,38 +729,67 @@ async function waitAndroidLoginEntries(app: AppBaseClass, timeoutMs = 10_000): P
   app['log']('登录入口尚未全部可见，继续后续点击');
 }
 
-/** 在已登录「我的」页：设置 → 退出登录 */
+/** 在已登录「我的」页：设置 → 退出登录 →（若落首页）再点「我的」弹出登录页 */
 async function logoutAndroidFromMe(app: AppBaseClass): Promise<void> {
+  const driver = app['driver'];
   app['log']('已在「我的」且未弹出登录页 → 设置页退出登录');
   if (!(await scrollUntilExists(app, LOC.settingEntry))) {
     throw new Error('我的页未找到设置入口 setting_layout');
   }
-  await app['driver'].click(LOC.settingEntry);
+  await driver.click(LOC.settingEntry);
   await sleep(800);
   if (!(await scrollUntilExists(app, LOC.logout))) {
     throw new Error('设置页未找到退出登录 logout_tv');
   }
-  await app['driver'].click(LOC.logout);
+  await driver.click(LOC.logout);
+
+  // 退出后常见：直接 LoginActivity，或落到访客首页 MainActivity（不要停在首页）
   const afterLogoutDeadline = Date.now() + 15_000;
   while (Date.now() < afterLogoutDeadline) {
+    await app['closePopups']();
     await app['refreshActivity']();
     const act = app['activity'] ?? '';
-    if (/\.LoginActivity$/i.test(act) || /\.MainActivity$/i.test(act)) break;
+    if (/\.LoginActivity$/i.test(act) || (await androidLoginEntriesVisible(app))) {
+      app['log']('退出后已进入登录页');
+      return;
+    }
+    if (/\.MainActivity$/i.test(act)) break;
     await sleep(400);
   }
-  await sleep(800);
+  await sleep(600);
   await app['closePopups']();
+
+  if (await isAndroidUnauthenticatedLoginScreen(app)) {
+    app['log']('退出后已在登录页');
+    return;
+  }
+
+  // 停在首页：必须点「我的」才会弹出登录页，禁止卡在首页
+  app['log']('退出后停在首页 → 点击「我的」拉起登录页，再继续登录流程');
+  if (!(await driver.exists(LOC.tabMe))) {
+    // 偶发底部栏未就绪：先点首页再点「我的」
+    if (await driver.exists(LOC.tabHome)) {
+      await driver.click(LOC.tabHome);
+      await sleep(500);
+    }
+  }
+  const gate = await enterAndroidMeGate(app, 25_000);
+  if (gate !== 'logged-out') {
+    throw new Error(`退出登录后点「我的」未弹出登录页，状态=${gate}`);
+  }
+  app['log']('点「我的」后已弹出登录页，继续登录流程');
 }
 
 /**
  * 打开登录主页，供手机号 / Google / Facebook 共用。
  *
  * 规则：
- * 1. 已在登录页（未登录）→ 直接可走登录流程
+ * 1. 已在登录页（未登录）→ 直接走登录流程
  * 2. 不在登录页 → 先去「我的」
  *    - 弹出登录页 → 走登录流程
- *    - 未弹出（已登录「我的」）→ 设置退出 → 再进登录页
- * 3. 各登录方式最终成功标准：已登录「我的」页（见 finishOnMeTab）
+ *    - 未弹出（已登录「我的」）→ 设置退出
+ *      → 若落到首页：再点「我的」弹出登录页 → 走登录流程
+ * 3. 成功标准：最终进已登录「我的」页
  */
 export async function ensureAndroidLoginHome(app: AppBaseClass): Promise<void> {
   await dismissForeignAuthUi(app);
@@ -776,7 +804,7 @@ export async function ensureAndroidLoginHome(app: AppBaseClass): Promise<void> {
   }
 
   app['log']('当前不在登录页 → 先点「我的」判断是否弹出登录');
-  let gate = await enterAndroidMeGate(app);
+  const gate = await enterAndroidMeGate(app);
 
   if (gate === 'logged-out') {
     app['log']('点「我的」后已弹出登录页，准备登录');
@@ -785,13 +813,8 @@ export async function ensureAndroidLoginHome(app: AppBaseClass): Promise<void> {
     return;
   }
 
-  // gate === logged-in：我的页有 mePage/meUid，未弹登录
+  // gate === logged-in：设置退出；logoutAndroidFromMe 内会处理「首页 → 点我的 → 登录页」
   await logoutAndroidFromMe(app);
-  app['log']('退出后再次经「我的」进入登录页');
-  gate = await enterAndroidMeGate(app);
-  if (gate !== 'logged-out') {
-    throw new Error(`退出登录后未能打开登录页，状态=${gate}`);
-  }
   await escapeAndroidLoginSubpages(app);
   await waitAndroidLoginEntries(app);
 }
