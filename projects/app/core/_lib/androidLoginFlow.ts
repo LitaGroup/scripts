@@ -161,6 +161,46 @@ export async function escapeAndroidLoginSubpages(app: AppBaseClass, maxSteps = 5
   }
 }
 
+/**
+ * 退出 Chrome / Facebook Custom Tab、GMS 等外部授权页，回到 Lite。
+ *  residual Custom Tab 会导致「我的」门控超时（Activity 不在 App 内）。
+ */
+export async function dismissForeignAuthUi(app: AppBaseClass, maxBacks = 8): Promise<void> {
+  for (let i = 0; i < maxBacks; i++) {
+    await app['refreshActivity']();
+    const act = app['activity'] ?? '';
+    const foreign =
+      /chrome|chromium|CustomTab|facebook\.|accounts\.google|gms\.|PermissionController|ErrorActivity/i.test(
+        act,
+      ) ||
+      (/CustomTabMainActivity|CustomTabActivity|chrome\.Main/i.test(act) &&
+        !/litalite\.android/i.test(act));
+    const inLite =
+      /litalite\.android/i.test(act) ||
+      /\.MainActivity$/i.test(act) ||
+      /\.LoginActivity$/i.test(act) ||
+      /\.SplashActivity$/i.test(act) ||
+      /\.LocationConfigActivity$/i.test(act) ||
+      /\.Onboarding/i.test(act);
+    if (!foreign && inLite) break;
+    if (!foreign && !act) break;
+    if (!foreign) {
+      // 未知非 Lite：尝试拉回前台
+      break;
+    }
+    app['log'](`检测到外部授权/浏览器页 Activity=${act}，按返回退出`);
+    await app['driver'].back();
+    await sleep(700);
+  }
+  try {
+    await app['activateApp']();
+  } catch {
+    /* ignore */
+  }
+  await sleep(500);
+  await app['refreshActivity']();
+}
+
 /** 点「我的」直到落到登录页或已登录的我的页（退出后常停在访客首页，需再点一次「我的」） */
 export async function enterAndroidMeGate(
   app: AppBaseClass,
@@ -169,6 +209,8 @@ export async function enterAndroidMeGate(
   const driver = app['driver'];
   const deadline = Date.now() + timeoutMs;
   let last = 'unknown';
+
+  await dismissForeignAuthUi(app);
 
   const onLoginHome = async (): Promise<boolean> => {
     if (await driver.exists(LOC.loginClose)) return true;
@@ -722,6 +764,7 @@ async function logoutAndroidFromMe(app: AppBaseClass): Promise<void> {
  * 3. 各登录方式最终成功标准：已登录「我的」页（见 finishOnMeTab）
  */
 export async function ensureAndroidLoginHome(app: AppBaseClass): Promise<void> {
+  await dismissForeignAuthUi(app);
   await escapeAndroidLoginSubpages(app);
   await app['closePopups']();
 

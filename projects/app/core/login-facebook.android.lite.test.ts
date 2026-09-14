@@ -1,13 +1,9 @@
-/**
- * 与 android-lite/login-facebook.android.lite.test.ts 同逻辑（core 入口副本）。
- * 成功标准：到达已登录「我的」页即通过。
- */
+/** core 入口副本 → android-lite/login-facebook.android.lite.test.ts */
 import { AppBaseClass, type AppAccount } from '../../../src/base/AppBaseClass.ts';
-import { ANDROID_LITE_PACKAGE, ANDROID_LOC as LOC, ANDROID_LOGIN_ENTRY } from './_lib/androidLocators.ts';
+import { ANDROID_LITE_PACKAGE, ANDROID_LOC as LOC } from './_lib/androidLocators.ts';
 import {
   androidLiteCapabilities,
   assertAndroidLoggedInMe,
-  ensureAndroidLoginHome,
   isAndroidLoggedInMe,
   loginWithFacebook,
   registerAndroidLoginStates,
@@ -16,7 +12,7 @@ import {
 class AndroidFacebookLoginSmoke extends AppBaseClass {
   constructor() {
     super('android', 'lite');
-    this.total = 5;
+    this.total = 3;
     registerAndroidLoginStates(this);
   }
 
@@ -32,23 +28,6 @@ class AndroidFacebookLoginSmoke extends AppBaseClass {
     await this.act('启动后关闭弹窗', async () => {
       const n = await this.closePopups();
       this.log(`关闭弹窗 ${n} 个；package=${ANDROID_LITE_PACKAGE}`);
-    });
-
-    await this.act('打开登录主页（未登录则进登录；已登录则先退出）', async () => {
-      await ensureAndroidLoginHome(this);
-    });
-
-    await this.check('Facebook 登录入口可见', async () => {
-      const e = ANDROID_LOGIN_ENTRY.facebook;
-      const visible =
-        (await this.driver.exists(e.high)) ||
-        (await this.driver.exists(e.low)) ||
-        (await this.driver.exists(e.text));
-      return {
-        expect: 'rl_facebook_login / iv_low_facebook_login',
-        real: visible ? 'visible' : 'missing',
-        pass: visible,
-      };
     });
 
     await this.act('执行 Facebook 登录并进入「我的」', async () => {

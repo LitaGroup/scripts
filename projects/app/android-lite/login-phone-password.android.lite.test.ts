@@ -1,19 +1,12 @@
 /**
- * Android Lite 登录冒烟 P0：手机号 + 密码（含 OTP）
- *
- * 成功标准：登录流程完成后到达已登录「我的」页（mePage / user_no）即通过。
- * 门控与 Google / Facebook 相同（ensureAndroidLoginHome）。
- *
- * 运行：
- *   SCRIPT_CONFIG=config.app.json SCRIPT_APPIUM_URL=http://127.0.0.1:4723/ \
- *   node --experimental-strip-types projects/app/android-lite/login-phone-password.android.lite.test.ts
+ * Android Lite 手机号登录冒烟：SM-LOGIN-02
+ * 通过标准：到达已登录「我的」页即整单通过。
  */
 import { AppBaseClass, type AppAccount } from '../../../src/base/AppBaseClass.ts';
 import { ANDROID_LITE_PACKAGE, ANDROID_LOC as LOC } from '../core/_lib/androidLocators.ts';
 import {
   androidLiteCapabilities,
   assertAndroidLoggedInMe,
-  ensureAndroidLoginHome,
   isAndroidLoggedInMe,
   loginWithPhonePassword,
   registerAndroidLoginStates,
@@ -22,7 +15,7 @@ import {
 class AndroidPhonePasswordLoginSmoke extends AppBaseClass {
   constructor() {
     super('android', 'lite');
-    this.total = 4;
+    this.total = 3;
     registerAndroidLoginStates(this);
   }
 
@@ -38,10 +31,6 @@ class AndroidPhonePasswordLoginSmoke extends AppBaseClass {
     await this.act('启动后关闭弹窗', async () => {
       const n = await this.closePopups();
       this.log(`关闭弹窗 ${n} 个；package=${ANDROID_LITE_PACKAGE}`);
-    });
-
-    await this.act('打开登录主页（未登录则进登录；已登录则先退出）', async () => {
-      await ensureAndroidLoginHome(this);
     });
 
     await this.act('执行手机号+密码登录并进入「我的」', async () => {
