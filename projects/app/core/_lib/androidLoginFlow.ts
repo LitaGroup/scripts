@@ -748,14 +748,10 @@ async function tapAndroidMeTab(app: AppBaseClass): Promise<void> {
 }
 
 /**
- * 在已登录「我的」页：设置 → 退出登录 → 等回首页 → 立刻点「我的」拉起登录。
+ * 在已登录「我的」页：设置 → 退出登录 → 等 5s（不等 postLogout 回调）→ 重启 App → 点「我的」进登录页。
  *
- * 对齐 android-lite：
- * - SettingsActivity.onClickLogout：postLogout 后 start MainActivity(HOME)（不会直接进登录）
- * - MainActivity.navigateToFragmentCheckLogin：未登录点「我的」→ LoginFragment → LoginActivity
- * - home.android.lite.test.ts logoutIfNeeded：ensureState(home) 后再 enterMeTab
- *
- * 注意：回首页只盯 Activity；到首页后立刻坐标点「我的」，不做 exists 扫入口。
+ * 对齐约定：Settings 的 postLogout 可能长时间不回调，自动化不依赖回首页；
+ * 点退出后固定等 5s，terminate+activate 重启，再走「我的」拉起 LoginActivity。
  */
 async function logoutAndroidFromMe(app: AppBaseClass): Promise<void> {
   const driver = app['driver'];
@@ -774,53 +770,58 @@ async function logoutAndroidFromMe(app: AppBaseClass): Promise<void> {
     throw new Error('设置页未找到退出登录 logoutLayout / logout_tv');
   }
   await driver.click(logoutTarget);
-  app['log']('已点退出登录：等待回到 MainActivity（只盯 Activity）');
+  app['log']('已点退出登录：不等 postLogout 回调，固定等待 5s 后重启 App');
+  await sleep(5_000);
 
-  const homeDeadline = Date.now() + 30_000;
-  let onHome = false;
-  let lastAct = '';
-  let lastLogAt = 0;
-  while (Date.now() < homeDeadline) {
-    lastAct = await app['refreshActivity']();
-    if (/\.LoginActivity$/i.test(lastAct)) {
-      app['log']('退出后已进入登录页');
-      return;
-    }
-    if (/\.MainActivity$/i.test(lastAct)) {
-      onHome = true;
-      break;
-    }
-    if (Date.now() - lastLogAt > 2_000) {
-      app['log'](`退出中… Activity=${lastAct || '(空)'}`);
-      lastLogAt = Date.now();
-    }
-    await sleep(200);
+  // 若 5s 内已自行进登录页，直接继续
+  await app['refreshActivity']();
+  if (/\.LoginActivity$/i.test(app['activity'] ?? '') || (await isAndroidUnauthenticatedLoginScreen(app))) {
+    app['log']('等待期间已进入登录页，跳过重启');
+    return;
   }
 
-  if (!onHome) {
-    throw new Error(`退出登录后未回到 MainActivity，Activity: ${lastAct || '(未知)'}`);
+  app['log']('重启 App（terminate + activate）');
+  await app['terminateApp']();
+  await sleep(800);
+  await app['activateApp']();
+  await sleep(1_500);
+  await app['closePopups']();
+  await dismissForeignAuthUi(app);
+
+  if (await isAndroidUnauthenticatedLoginScreen(app)) {
+    app['log']('重启后已在登录页，继续登录流程');
+    return;
   }
 
-  // 一到首页立刻点「我的」，不再扫登录入口 / waitFor
-  app['log'](`已回首页 ${lastAct} → 立刻点「我的」拉起登录`);
-  await tapAndroidMeTab(app);
-
-  const loginDeadline = Date.now() + 12_000;
-  let taps = 1;
-  while (Date.now() < loginDeadline) {
-    lastAct = await app['refreshActivity']();
-    if (/\.LoginActivity$/i.test(lastAct)) {
-      app['log']('已进入 LoginActivity，继续登录流程');
-      return;
-    }
-    await tapAndroidMeTab(app);
-    taps += 1;
-    await sleep(400);
+  app['log']('重启后点「我的」拉起登录页');
+  const gate = await enterAndroidMeGate(app, 20_000);
+  if (gate === 'logged-out') {
+    app['log']('已弹出登录页，继续登录流程');
+    return;
   }
 
-  throw new Error(
-    `退出登录后点「我的」未弹出登录页（taps=${taps}），Activity: ${lastAct || app['activity'] || '(未知)'}`,
-  );
+  // postLogout 若卡住，本地会话可能未清，重启后仍已登录 → clearApp 后再进登录
+  app['log']('重启后仍已登录（本地会话可能未清），执行 clearApp 后重进');
+  try {
+    await driver.execute('mobile: clearApp', [{ appId: ANDROID_LITE_PACKAGE }]);
+  } catch (e) {
+    throw new Error(
+      `退出重启后仍已登录，且 clearApp 失败: ${((e as Error).message || String(e)).slice(0, 160)}`,
+    );
+  }
+  await sleep(500);
+  await app['activateApp']();
+  await sleep(2_000);
+  await app['closePopups']();
+  if (await isAndroidUnauthenticatedLoginScreen(app)) {
+    app['log']('clearApp 后已在登录页，继续登录流程');
+    return;
+  }
+  const gate2 = await enterAndroidMeGate(app, 20_000);
+  if (gate2 !== 'logged-out') {
+    throw new Error(`clearApp 后仍未进入登录页，状态=${gate2}，Activity=${app['activity'] || '(未知)'}`);
+  }
+  app['log']('已弹出登录页，继续登录流程');
 }
 
 /**
@@ -830,7 +831,7 @@ async function logoutAndroidFromMe(app: AppBaseClass): Promise<void> {
  * 1. 已在登录页（未登录）→ 直接走登录流程
  * 2. 不在登录页 → 先去「我的」
  *    - 弹出登录页 → 走登录流程
- *    - 未弹出（已登录「我的」）→ 设置退出 → 等 MainActivity → 点「我的」→ LoginActivity
+ *    - 未弹出（已登录「我的」）→ 设置退出 → 等 5s（不等回调）→ 重启 App → 点「我的」→ LoginActivity
  * 3. 成功标准：最终进已登录「我的」页
  */
 export async function ensureAndroidLoginHome(app: AppBaseClass): Promise<void> {
