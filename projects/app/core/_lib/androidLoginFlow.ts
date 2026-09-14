@@ -751,11 +751,79 @@ async function tapAndroidMeTab(app: AppBaseClass): Promise<void> {
 }
 
 /**
+ * 已登录「我的」：设置 → 退出 → 等回首页 → 点「我的」弹出登录页。
+ * 用于串联多种登录方式切换（不重启 App，符合「退出后再点我的」约定）。
+ */
+export async function logoutAndroidThenOpenLoginPage(app: AppBaseClass): Promise<void> {
+  const driver = app['driver'];
+  if (!(await isAndroidLoggedInMe(app))) {
+    app['log']('当前不在「我的」，先进入「我的」再退出');
+    await assertAndroidLoggedInMe(app, 15_000);
+  }
+
+  app['log']('设置页退出登录');
+  if (!(await scrollUntilExists(app, LOC.settingEntry))) {
+    throw new Error('我的页未找到设置入口 setting_layout');
+  }
+  await driver.click(LOC.settingEntry);
+  await sleep(800);
+  const logoutTarget = (await softExists(app, LOC.logoutLayout))
+    ? LOC.logoutLayout
+    : (await scrollUntilExists(app, LOC.logout))
+      ? LOC.logout
+      : null;
+  if (!logoutTarget) {
+    throw new Error('设置页未找到退出登录 logoutLayout / logout_tv');
+  }
+  await driver.click(logoutTarget);
+  app['log']('已点退出：等待回首页（不等 postLogout 回调）');
+
+  const homeDeadline = Date.now() + 25_000;
+  let onHome = false;
+  let lastAct = '';
+  let lastLogAt = 0;
+  while (Date.now() < homeDeadline) {
+    lastAct = await app['refreshActivity']();
+    if (/\.LoginActivity$/i.test(lastAct) || (await isAndroidUnauthenticatedLoginScreen(app))) {
+      app['log']('退出后已进入登录页');
+      await escapeAndroidLoginSubpages(app);
+      await waitAndroidLoginEntries(app);
+      return;
+    }
+    if (/\.MainActivity$/i.test(lastAct)) {
+      onHome = true;
+      app['log'](`已回到首页 ${lastAct} → 点「我的」拉起登录`);
+      break;
+    }
+    if (Date.now() - lastLogAt > 2_000) {
+      app['log'](`等待回首页… Activity=${lastAct || '(空)'}`);
+      lastLogAt = Date.now();
+    }
+    await sleep(200);
+  }
+
+  if (!onHome) {
+    throw new Error(`退出登录后未回到首页，Activity: ${lastAct || '(未知)'}`);
+  }
+
+  const gate = await enterAndroidMeGate(app, 20_000);
+  if (gate !== 'logged-out') {
+    throw new Error(
+      `退出后点「我的」未弹出登录页，状态=${gate}，Activity=${app['activity'] || '(未知)'}`,
+    );
+  }
+  await escapeAndroidLoginSubpages(app);
+  await waitAndroidLoginEntries(app);
+  app['log']('已弹出登录页，可继续下一登录方式');
+}
+
+/**
  * 在已登录「我的」页：设置 → 退出登录 → 等自动回首页 → 重启 App → 点「我的」进登录页。
  *
  * - 不等待 postLogout 回调本身，只轮询 Activity 直到 MainActivity / LoginActivity
  * - 到首页后 terminate+activate 重启，再点「我的」拉起登录
  * - 不 clearApp / 不卸载
+ * - 串联多登录方式请用 logoutAndroidThenOpenLoginPage（不重启）
  */
 async function logoutAndroidFromMe(app: AppBaseClass): Promise<void> {
   const driver = app['driver'];

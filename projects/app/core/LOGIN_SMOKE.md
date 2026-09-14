@@ -13,8 +13,8 @@
 | 方式 | iOS (Lita) | Android (Lite) | 自动化 |
 |------|------------|----------------|--------|
 | 手机号 + 密码 / OTP | ✅ | ✅ | **P0 主路径** |
-| Facebook | ✅ | ✅ | 入口冒烟；**完整登录见 SM-LOGIN-06** |
-| Google | ✅ | ✅ | 入口冒烟；**完整登录见 SM-LOGIN-07** |
+| Facebook | ✅ | ✅ | 入口冒烟；完整登录 SM-LOGIN-06；串联 SM-LOGIN-14 |
+| Google | ✅ | ✅ | 入口冒烟；完整登录 SM-LOGIN-07；串联 SM-LOGIN-14 |
 | Line | ✅（按区） | ✅（按区） | 同上 |
 | Kakao | ✅（按区 / DEBUG） | ✅（按区，韩区高优） | 同上 |
 | Apple | ✅ | ❌ 无入口 | iOS 手工；Android 验「无入口」 |
@@ -68,6 +68,7 @@
 | SM-LOGIN-11 | 已登录幂等 | P0 | `ensureLoggedIn` | `ensureAndroidLoggedIn`（IM 等业务用；完整登录冒烟不走此捷径） |
 | SM-LOGIN-12 | 错误密码提示 | P1 | 手工 | 手工 |
 | SM-LOGIN-13 | 韩国手机登录 UI | P2 | 手工 | 手工（低优电话图标） |
+| SM-LOGIN-14 | Google→Facebook→手机号串联 | P1 | — | `login-all.android.lite.test.ts` |
 
 ### SM-LOGIN-01 要点
 
@@ -99,6 +100,19 @@
 - **期望**：已登录「我的」页（`mePage` / 数字 `user_no`）
 - **OTP**：默认经 `userToken` 查 `stats.sms_record_*`；可用 `SCRIPT_OTP` / `accounts.smsCode` 覆盖
 
+### SM-LOGIN-14 要点（Android 三种登录串联）
+
+- **脚本**：`projects/app/android-lite/login-all.android.lite.test.ts`（`core/` 下有同名入口）
+- **前置**：设备已登录 Google + Facebook；`config.app.json` 手机号账号可用
+- **流程**（切换时**不重启 App**）：
+  1. Google 登录 → 已登录「我的」
+  2. 设置 → 退出 → 回首页 → 点「我的」→ 登录页
+  3. Facebook 登录 → 已登录「我的」
+  4. 设置 → 退出 → 回首页 → 点「我的」→ 登录页
+  5. 手机号登录 → 已登录「我的」→ 整单通过
+- **期望**：每段登录后 `mePage` / 数字 `user_no`；最终停在手机号登录后的「我的」
+- **与单测差异**：单测门控（SM-LOGIN-02/06/07）退出后仍会 **重启 App**；本用例用 `logoutAndroidThenOpenLoginPage` 仅退出再点「我的」
+
 ---
 
 ## 3. 运行命令
@@ -126,6 +140,8 @@ node --experimental-strip-types projects/app/core/login-entries.android.lite.tes
 node --experimental-strip-types projects/app/core/login-google.android.lite.test.ts
 # Facebook：设备需已登录 Facebook；可选 SCRIPT_FACEBOOK_NAME
 node --experimental-strip-types projects/app/core/login-facebook.android.lite.test.ts
+# 三种登录串联（Google → Facebook → 手机号；切换不重启）
+node --experimental-strip-types projects/app/android-lite/login-all.android.lite.test.ts
 # 或 android-lite 同级：
 # node --experimental-strip-types projects/app/android-lite/login-google.android.lite.test.ts
 # node --experimental-strip-types projects/app/android-lite/login-facebook.android.lite.test.ts
