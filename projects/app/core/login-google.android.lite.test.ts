@@ -1,17 +1,14 @@
 /**
- * Android Lite Google 登录冒烟：SM-LOGIN-07（core 入口，与 android-lite 同逻辑）
- *
- * 运行：
- *   SCRIPT_CONFIG=config.app.json \
- *   SCRIPT_APPIUM_URL=http://127.0.0.1:4723/ \
- *   node --experimental-strip-types projects/app/core/login-google.android.lite.test.ts
+ * 与 android-lite/login-google.android.lite.test.ts 同逻辑（core 入口副本）。
+ * 成功标准：到达已登录「我的」页即通过。
  */
 import { AppBaseClass, type AppAccount } from '../../../src/base/AppBaseClass.ts';
-import { sleep } from '../../../src/resources/AppiumResource.ts';
 import { ANDROID_LITE_PACKAGE, ANDROID_LOC as LOC, ANDROID_LOGIN_ENTRY } from './_lib/androidLocators.ts';
 import {
   androidLiteCapabilities,
+  assertAndroidLoggedInMe,
   ensureAndroidLoginHome,
+  isAndroidLoggedInMe,
   loginWithGoogle,
   registerAndroidLoginStates,
 } from './_lib/androidLoginFlow.ts';
@@ -19,7 +16,7 @@ import {
 class AndroidGoogleLoginSmoke extends AppBaseClass {
   constructor() {
     super('android', 'lite');
-    this.total = 6;
+    this.total = 5;
     registerAndroidLoginStates(this);
   }
 
@@ -37,7 +34,7 @@ class AndroidGoogleLoginSmoke extends AppBaseClass {
       this.log(`关闭弹窗 ${n} 个；package=${ANDROID_LITE_PACKAGE}`);
     });
 
-    await this.act('打开登录主页（已登录则先退出）', async () => {
+    await this.act('打开登录主页（未登录则进登录；已登录则先退出）', async () => {
       await ensureAndroidLoginHome(this);
     });
 
@@ -54,33 +51,20 @@ class AndroidGoogleLoginSmoke extends AppBaseClass {
       };
     });
 
-    await this.act('执行 Google 登录（点入口 → 选已登账号）', async () => {
+    await this.act('执行 Google 登录并进入「我的」', async () => {
       await loginWithGoogle(this);
+      await assertAndroidLoggedInMe(this, 20_000);
     });
 
-    await this.act('确认停留在已登录「我的」页', async () => {
-      await this.closePopups();
-      if (await this.driver.exists(LOC.tabMe)) {
-        await this.driver.click(LOC.tabMe);
-        await sleep(1_000);
-        await this.closePopups();
-      }
-      await this.ensureState('logged-in', 20_000);
-      if (!(await this.driver.exists(LOC.mePage)) && !(await this.driver.exists(LOC.meUid))) {
-        throw new Error('Google 登录后未出现我的页容器 / user_no');
-      }
-    });
-
-    await this.check('Google 登录成功：可抓取用户 ID 或我的页', async () => {
-      const hasPage = await this.driver.exists(LOC.mePage);
+    await this.check('登录成功：已进入「我的」页', async () => {
+      const pass = await isAndroidLoggedInMe(this);
       let uid = '';
       if (await this.driver.exists(LOC.meUid)) {
         uid = (await this.driver.textOf(LOC.meUid)).trim();
       }
-      const pass = hasPage || /^\d+$/.test(uid);
       return {
-        expect: 'mePage 或数字 user_no',
-        real: uid ? `uid=${uid}` : hasPage ? 'mePage' : 'missing',
+        expect: '已登录「我的」（mePage / user_no）',
+        real: uid ? `uid=${uid}` : pass ? 'mePage' : 'missing',
         pass,
       };
     });

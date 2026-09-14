@@ -1,25 +1,14 @@
 /**
- * Android Lite 登录冒烟 P0：手机号 + 密码（含 OTP）
- *
- * 用例：SM-LOGIN-02 / SM-LOGIN-03 / SM-LOGIN-11（见 LOGIN_SMOKE.md）
- * 工程：lita-lite-android，package com.litalite.android
- *
- * 账号：config.app.json → PROD 用 accounts.prod（+86）；TEST 用 accounts.test（62 + OTP 1234）
- * 默认 SCRIPT_ENV=PROD。OTP：查库 / SCRIPT_OTP / smsCode
- *
- * 运行：
- *   SCRIPT_CONFIG=config.app.json \
- *   SCRIPT_APPIUM_URL=http://127.0.0.1:4723/ \
- *   node --experimental-strip-types projects/app/core/login-phone-password.android.lite.test.ts
- *
- * 测网：SCRIPT_ENV=TEST（需安装 debug 包）
+ * 与 android-lite/login-phone-password.android.lite.test.ts 同逻辑（core 入口副本）。
+ * 成功标准：到达已登录「我的」页即通过。
  */
 import { AppBaseClass, type AppAccount } from '../../../src/base/AppBaseClass.ts';
-import { sleep } from '../../../src/resources/AppiumResource.ts';
 import { ANDROID_LITE_PACKAGE, ANDROID_LOC as LOC } from './_lib/androidLocators.ts';
 import {
   androidLiteCapabilities,
-  ensureAndroidLoggedIn,
+  assertAndroidLoggedInMe,
+  ensureAndroidLoginHome,
+  isAndroidLoggedInMe,
   loginWithPhonePassword,
   registerAndroidLoginStates,
 } from './_lib/androidLoginFlow.ts';
@@ -27,7 +16,7 @@ import {
 class AndroidPhonePasswordLoginSmoke extends AppBaseClass {
   constructor() {
     super('android', 'lite');
-    this.total = 5;
+    this.total = 4;
     registerAndroidLoginStates(this);
   }
 
@@ -45,38 +34,24 @@ class AndroidPhonePasswordLoginSmoke extends AppBaseClass {
       this.log(`关闭弹窗 ${n} 个；package=${ANDROID_LITE_PACKAGE}`);
     });
 
-    await this.act('识别登录态（经「我的」门控）', async () => {
-      this.log(`当前状态: ${await this.currentState()}`);
+    await this.act('打开登录主页（未登录则进登录；已登录则先退出）', async () => {
+      await ensureAndroidLoginHome(this);
     });
 
-    await this.act('确保已登录（未登录则走手机号+密码）', async () => {
-      await ensureAndroidLoggedIn(this, this.account());
+    await this.act('执行手机号+密码登录并进入「我的」', async () => {
+      await loginWithPhonePassword(this, this.account());
+      await assertAndroidLoggedInMe(this, 20_000);
     });
 
-    await this.act('确认停留在已登录「我的」页', async () => {
-      await this.closePopups();
-      // 登录成功常停在首页，主动进「我的」再验 logged-in 标记
-      if (await this.driver.exists(LOC.tabMe)) {
-        await this.driver.click(LOC.tabMe);
-        await sleep(1_000);
-        await this.closePopups();
-      }
-      await this.ensureState('logged-in', 15_000);
-      if (!(await this.driver.exists(LOC.mePage)) && !(await this.driver.exists(LOC.meUid))) {
-        throw new Error('已在 MainActivity 但未出现我的页容器 / user_no');
-      }
-    });
-
-    await this.check('登录成功：可抓取用户 ID 或我的页容器', async () => {
-      const hasPage = await this.driver.exists(LOC.mePage);
+    await this.check('登录成功：已进入「我的」页', async () => {
+      const pass = await isAndroidLoggedInMe(this);
       let uid = '';
       if (await this.driver.exists(LOC.meUid)) {
         uid = (await this.driver.textOf(LOC.meUid)).trim();
       }
-      const pass = hasPage || /^\d+$/.test(uid);
       return {
-        expect: 'mePage 或数字 user_no',
-        real: uid ? `uid=${uid}` : hasPage ? 'mePage' : 'missing',
+        expect: '已登录「我的」（mePage / user_no）',
+        real: uid ? `uid=${uid}` : pass ? 'mePage' : 'missing',
         pass,
       };
     });

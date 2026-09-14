@@ -29,6 +29,8 @@ export function androidLiteCapabilities(): AppiumCapabilities {
     'appium:noReset': true,
     'appium:autoGrantPermissions': true,
     'appium:newCommandTimeout': 300,
+    // API 35 上 Google/GMS 账号页 XPath 易触发 mSealed；强制 XPath1
+    'appium:settings[enforceXPath1]': true,
   };
   const udid = process.env.SCRIPT_ANDROID_UDID;
   if (udid) caps['appium:udid'] = udid;
@@ -464,11 +466,12 @@ async function selectCountryCode(app: AppBaseClass, countryCode: string): Promis
 
 /**
  * 手机号 + 密码登录（含 WhatsApp 弹窗、OTP）。
- * 结束时尽量停在 MainActivity「我的」页，便于 logged-in 判定。
+ * 统一门控：先 ensureAndroidLoginHome（未登录页→我的→必要时退出），再走手机号流程；
+ * 结束停在已登录「我的」页。
  */
 export async function loginWithPhonePassword(app: AppBaseClass, account: AppAccount): Promise<void> {
   const driver = app['driver'];
-  await app['closePopups']();
+  await ensureAndroidLoginHome(app);
   let smsSince = new Date(Date.now() - 5 * 60_000);
 
   if (await driver.exists(LOC.otpInput)) {
@@ -492,16 +495,9 @@ export async function loginWithPhonePassword(app: AppBaseClass, account: AppAcco
     return;
   }
 
-  // 不在登录流程页：先通过「我的」拉起登录
+  // 登录主页：点手机号入口进入输入页
   if (!(await driver.exists(LOC.phoneInput))) {
-    const gate = await enterAndroidMeGate(app);
-    if (gate === 'logged-in') {
-      app['log']('已登录，跳过登录流程');
-      return;
-    }
-    if (!(await driver.exists(LOC.phoneInput))) {
-      await tapPhoneLoginEntry(app);
-    }
+    await tapPhoneLoginEntry(app);
   }
 
   await app['waitForElement'](LOC.phoneInput, '手机号输入框', 10_000);
@@ -570,20 +566,73 @@ export async function loginWithPhonePassword(app: AppBaseClass, account: AppAcco
   await finishOnMeTab(app);
 }
 
-async function finishOnMeTab(app: AppBaseClass): Promise<void> {
-  await app['waitForActivity'](/\.MainActivity$/, 20_000);
-  await sleep(800);
-  await app['closePopups']();
-  const gate = await enterAndroidMeGate(app, 20_000);
-  if (gate !== 'logged-in') {
-    throw new Error(`登录后未进入已登录「我的」页，状态=${gate}`);
+async function softExists(app: AppBaseClass, locator: Locator): Promise<boolean> {
+  try {
+    return await app['driver'].exists(locator);
+  } catch (e) {
+    const msg = (e as Error).message || String(e);
+    // API 35 XPath mSealed 等：不当作元素存在，也不中断登录
+    if (/mSealed|enforceXPath1|xpath/i.test(msg)) {
+      app['log'](`定位忽略异常: ${msg.slice(0, 160)}`);
+      return false;
+    }
+    throw e;
   }
-  // 尽量点到「我的」以便抓 user_no（登录后常先停首页，需再点「我的」）
-  if (!(await app['driver'].exists(LOC.mePage)) && (await app['driver'].exists(LOC.tabMe))) {
+}
+
+async function softClick(app: AppBaseClass, locator: Locator): Promise<boolean> {
+  try {
+    if (!(await softExists(app, locator))) return false;
+    await app['driver'].click(locator);
+    return true;
+  } catch (e) {
+    const msg = (e as Error).message || String(e);
+    if (/mSealed|enforceXPath1|xpath|stale|not found|could not be located/i.test(msg)) {
+      app['log'](`点击忽略异常: ${msg.slice(0, 160)}`);
+      return false;
+    }
+    throw e;
+  }
+}
+
+/** 是否已在已登录「我的」页（登录成功的唯一判定） */
+export async function isAndroidLoggedInMe(app: AppBaseClass): Promise<boolean> {
+  return (
+    (await softExists(app, LOC.mePage)) || (await softExists(app, LOC.meUid))
+  );
+}
+
+/**
+ * 断言已登录「我的」页 —— 到达此处即视为登录成功。
+ * 若停在首页会先点底部「我的」。
+ */
+export async function assertAndroidLoggedInMe(app: AppBaseClass, timeoutMs = 20_000): Promise<void> {
+  await app['closePopups']();
+  if (await softExists(app, LOC.tabMe) && !(await isAndroidLoggedInMe(app))) {
     await app['driver'].click(LOC.tabMe);
     await sleep(1_000);
     await app['closePopups']();
   }
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await isAndroidLoggedInMe(app)) {
+      app['log']('已到达「我的」页 → 登录成功');
+      return;
+    }
+    if (await softExists(app, LOC.tabMe)) {
+      await app['driver'].click(LOC.tabMe);
+      await sleep(800);
+      await app['closePopups']();
+    }
+    await sleep(400);
+  }
+  throw new Error('登录后未进入「我的」页（无 mePage / user_no）');
+}
+
+async function finishOnMeTab(app: AppBaseClass): Promise<void> {
+  await app['waitForActivity'](/\.MainActivity$/, 20_000);
+  await sleep(800);
+  await assertAndroidLoggedInMe(app, 20_000);
 }
 
 /** 确保已登录：未登录则走手机号密码；已登录则停留在我的页 */
@@ -607,55 +656,101 @@ async function scrollUntilExists(app: AppBaseClass, locator: Locator, maxSwipes 
   return false;
 }
 
-/** 已登录则退出，并打开登录主页（三方入口可见） */
-export async function ensureAndroidLoginHome(app: AppBaseClass): Promise<void> {
-  // 先清掉遗留的手机号/密码页（常见于上次用例中断），避免卡在 MainActivity+enter_phone_number
-  await escapeAndroidLoginSubpages(app);
-  await app['closePopups']();
-  let gate = await enterAndroidMeGate(app);
-  if (gate === 'logged-in') {
-    app['log']('已登录，先退出以便三方登录');
-    if (!(await scrollUntilExists(app, LOC.settingEntry))) {
-      throw new Error('我的页未找到设置入口 setting_layout');
-    }
-    await app['driver'].click(LOC.settingEntry);
-    await sleep(800);
-    if (!(await scrollUntilExists(app, LOC.logout))) {
-      throw new Error('设置页未找到退出登录 logout_tv');
-    }
-    await app['driver'].click(LOC.logout);
-    // 退出后可能停在访客首页 MainActivity，或直接 LoginActivity
-    const afterLogoutDeadline = Date.now() + 15_000;
-    while (Date.now() < afterLogoutDeadline) {
-      await app['refreshActivity']();
-      const act = app['activity'] ?? '';
-      if (/\.LoginActivity$/i.test(act) || /\.MainActivity$/i.test(act)) break;
-      await sleep(400);
-    }
-    await sleep(800);
-    await app['closePopups']();
-    app['log']('退出后若在首页，将再点「我的」进入登录页');
-    gate = await enterAndroidMeGate(app);
-  }
-  if (gate !== 'logged-out') {
-    throw new Error(`未能打开登录页，状态=${gate}`);
-  }
-  await escapeAndroidLoginSubpages(app);
-  // LoginActivity 刚出来时按钮可能尚未挂上，等到至少一个登录入口可见
-  const entryDeadline = Date.now() + 10_000;
-  while (Date.now() < entryDeadline) {
-    if (
-      (await app['driver'].exists(ANDROID_LOGIN_ENTRY.facebook.high)) ||
-      (await app['driver'].exists(ANDROID_LOGIN_ENTRY.facebook.low)) ||
-      (await app['driver'].exists(ANDROID_LOGIN_ENTRY.google.high)) ||
-      (await app['driver'].exists(ANDROID_LOGIN_ENTRY.google.low)) ||
-      (await app['driver'].exists(ANDROID_LOGIN_ENTRY.phone.high)) ||
-      (await app['driver'].exists(ANDROID_LOGIN_ENTRY.phone.low))
-    ) {
-      return;
-    }
+/** 登录主页入口是否可见（手机号 / Google / Facebook 任一） */
+async function androidLoginEntriesVisible(app: AppBaseClass): Promise<boolean> {
+  const driver = app['driver'];
+  return (
+    (await driver.exists(ANDROID_LOGIN_ENTRY.facebook.high)) ||
+    (await driver.exists(ANDROID_LOGIN_ENTRY.facebook.low)) ||
+    (await driver.exists(ANDROID_LOGIN_ENTRY.google.high)) ||
+    (await driver.exists(ANDROID_LOGIN_ENTRY.google.low)) ||
+    (await driver.exists(ANDROID_LOGIN_ENTRY.phone.high)) ||
+    (await driver.exists(ANDROID_LOGIN_ENTRY.phone.low)) ||
+    (await driver.exists(LOC.loginClose))
+  );
+}
+
+/** 是否已在未登录的登录页（含 LoginActivity / 入口页；不含已登录「我的」） */
+async function isAndroidUnauthenticatedLoginScreen(app: AppBaseClass): Promise<boolean> {
+  await app['refreshActivity']();
+  if (/\.LoginActivity$/i.test(app['activity'] ?? '')) return true;
+  if (await androidLoginEntriesVisible(app)) return true;
+  return false;
+}
+
+async function waitAndroidLoginEntries(app: AppBaseClass, timeoutMs = 10_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await androidLoginEntriesVisible(app)) return;
     await sleep(400);
   }
+  // 不硬失败：部分机型入口挂载慢，后续 tap 会再断言
+  app['log']('登录入口尚未全部可见，继续后续点击');
+}
+
+/** 在已登录「我的」页：设置 → 退出登录 */
+async function logoutAndroidFromMe(app: AppBaseClass): Promise<void> {
+  app['log']('已在「我的」且未弹出登录页 → 设置页退出登录');
+  if (!(await scrollUntilExists(app, LOC.settingEntry))) {
+    throw new Error('我的页未找到设置入口 setting_layout');
+  }
+  await app['driver'].click(LOC.settingEntry);
+  await sleep(800);
+  if (!(await scrollUntilExists(app, LOC.logout))) {
+    throw new Error('设置页未找到退出登录 logout_tv');
+  }
+  await app['driver'].click(LOC.logout);
+  const afterLogoutDeadline = Date.now() + 15_000;
+  while (Date.now() < afterLogoutDeadline) {
+    await app['refreshActivity']();
+    const act = app['activity'] ?? '';
+    if (/\.LoginActivity$/i.test(act) || /\.MainActivity$/i.test(act)) break;
+    await sleep(400);
+  }
+  await sleep(800);
+  await app['closePopups']();
+}
+
+/**
+ * 打开登录主页，供手机号 / Google / Facebook 共用。
+ *
+ * 规则：
+ * 1. 已在登录页（未登录）→ 直接可走登录流程
+ * 2. 不在登录页 → 先去「我的」
+ *    - 弹出登录页 → 走登录流程
+ *    - 未弹出（已登录「我的」）→ 设置退出 → 再进登录页
+ * 3. 各登录方式最终成功标准：已登录「我的」页（见 finishOnMeTab）
+ */
+export async function ensureAndroidLoginHome(app: AppBaseClass): Promise<void> {
+  await escapeAndroidLoginSubpages(app);
+  await app['closePopups']();
+
+  if (await isAndroidUnauthenticatedLoginScreen(app)) {
+    app['log']('当前已在登录页（未登录），直接走登录流程');
+    await escapeAndroidLoginSubpages(app);
+    await waitAndroidLoginEntries(app);
+    return;
+  }
+
+  app['log']('当前不在登录页 → 先点「我的」判断是否弹出登录');
+  let gate = await enterAndroidMeGate(app);
+
+  if (gate === 'logged-out') {
+    app['log']('点「我的」后已弹出登录页，准备登录');
+    await escapeAndroidLoginSubpages(app);
+    await waitAndroidLoginEntries(app);
+    return;
+  }
+
+  // gate === logged-in：我的页有 mePage/meUid，未弹登录
+  await logoutAndroidFromMe(app);
+  app['log']('退出后再次经「我的」进入登录页');
+  gate = await enterAndroidMeGate(app);
+  if (gate !== 'logged-out') {
+    throw new Error(`退出登录后未能打开登录页，状态=${gate}`);
+  }
+  await escapeAndroidLoginSubpages(app);
+  await waitAndroidLoginEntries(app);
 }
 
 export async function tapGoogleLoginEntry(app: AppBaseClass): Promise<void> {
@@ -706,23 +801,20 @@ function resolveGoogleEmail(app: AppBaseClass, account?: AppAccount): string {
 }
 
 async function googlePickerVisible(app: AppBaseClass): Promise<boolean> {
-  const driver = app['driver'];
-  if (await driver.exists(GGL.accountName)) return true;
-  if (await driver.exists(GGL.accountDisplayName)) return true;
-  if (await driver.exists(GGL.accountParticle)) return true;
-  if (await driver.exists(GGL.emailLikeClickable)) return true;
-  // 文案启发式：Choose an account / 选择账号
-  if (await driver.exists(by.textContains('Choose an account'))) return true;
-  if (await driver.exists(by.textContains('选择账号'))) return true;
-  if (await driver.exists(by.textContains('选择一个帐号'))) return true;
+  if (await softExists(app, GGL.accountName)) return true;
+  if (await softExists(app, GGL.accountDisplayName)) return true;
+  if (await softExists(app, GGL.accountParticle)) return true;
+  if (await softExists(app, GGL.emailLikeClickable)) return true;
+  if (await softExists(app, by.textContains('Choose an account'))) return true;
+  if (await softExists(app, by.textContains('选择账号'))) return true;
+  if (await softExists(app, by.textContains('选择一个帐号'))) return true;
   return false;
 }
 
 async function tapContinueIfPresent(app: AppBaseClass): Promise<boolean> {
   for (const loc of GGL.continueButtons) {
-    if (await app['driver'].exists(loc)) {
+    if (await softClick(app, loc)) {
       app['log'](`点 Google 确认按钮: ${loc[0]}=${loc[1]}`);
-      await app['driver'].click(loc);
       await sleep(1_000);
       return true;
     }
@@ -732,28 +824,26 @@ async function tapContinueIfPresent(app: AppBaseClass): Promise<boolean> {
 
 /**
  * 在 Google 账号页点选已登录账号（不跳转三方 App）。
- * @param preferredEmail 优先匹配该邮箱；空则点第一个可见账号
+ * @param preferredEmail 优先匹配该邮箱；空则点列表第一个账号
  */
 export async function confirmGoogleAccountOnPicker(
   app: AppBaseClass,
   preferredEmail = '',
   timeoutMs = 25_000,
 ): Promise<void> {
-  const driver = app['driver'];
   const deadline = Date.now() + timeoutMs;
   let tappedAccount = false;
 
   while (Date.now() < deadline) {
     await app['refreshActivity']();
-    // 已回到 App 主页：可能自动用上次账号完成
+    // 已回到 App：授权完成（到达「我的」由 finishOnMeTab 再确认）
     if (/\.MainActivity$/i.test(app['activity'] ?? '')) {
-      if ((await driver.exists(LOC.tabMe)) || (await driver.exists(LOC.mePage))) {
+      if ((await softExists(app, LOC.tabMe)) || (await isAndroidLoggedInMe(app))) {
         app['log']('已回到 MainActivity，视为 Google 授权完成');
         return;
       }
     }
 
-    // 仅剩 Continue / 同意（账号已选）
     if (await tapContinueIfPresent(app)) {
       tappedAccount = true;
       await sleep(800);
@@ -763,14 +853,15 @@ export async function confirmGoogleAccountOnPicker(
     if (!tappedAccount) {
       if (preferredEmail) {
         const byEmail = by.textContains(preferredEmail);
-        if (await driver.exists(byEmail)) {
+        if (await softExists(app, byEmail)) {
           app['log'](`点选 Google 账号: ${preferredEmail}`);
-          // 优先点可点击祖先
-          const clickable = by.xpath(
-            `//*[contains(@text,${JSON.stringify(preferredEmail)})]/ancestor-or-self::*[@clickable='true'][1]`,
-          );
-          if (await driver.exists(clickable)) await driver.click(clickable);
-          else await driver.click(byEmail);
+          // 优先点邮箱文案本身，避免 API35 XPath mSealed
+          if (!(await softClick(app, byEmail))) {
+            const clickable = by.xpath(
+              `//*[contains(@text,${JSON.stringify(preferredEmail)})]/ancestor-or-self::*[@clickable='true'][1]`,
+            );
+            await softClick(app, clickable);
+          }
           tappedAccount = true;
           await sleep(1_200);
           continue;
@@ -785,9 +876,8 @@ export async function confirmGoogleAccountOnPicker(
         GGL.accountParticle,
       ];
       for (const loc of candidates) {
-        if (await driver.exists(loc)) {
+        if (await softClick(app, loc)) {
           app['log'](`点选 Google 列表账号: ${loc[0]}=${loc[1]}`);
-          await driver.click(loc);
           tappedAccount = true;
           await sleep(1_200);
           break;
@@ -805,8 +895,9 @@ export async function confirmGoogleAccountOnPicker(
 
   await app['refreshActivity']();
   if (/\.MainActivity$/i.test(app['activity'] ?? '')) return;
+  if (await isAndroidLoggedInMe(app)) return;
 
-  if (!tappedAccount && !(await driver.exists(LOC.tabMe))) {
+  if (!tappedAccount && !(await softExists(app, LOC.tabMe))) {
     throw new Error(
       preferredEmail
         ? `Google 账号页未出现或未找到邮箱 ${preferredEmail}（请确认设备已登录该 Google 账号）`
@@ -832,7 +923,7 @@ export async function loginWithGoogle(app: AppBaseClass, account?: AppAccount): 
   const waitPickerDeadline = Date.now() + 20_000;
   while (Date.now() < waitPickerDeadline) {
     if (await googlePickerVisible(app)) break;
-    if (/\.MainActivity$/i.test(app['activity'] ?? '') && (await app['driver'].exists(LOC.tabMe))) {
+    if (/\.MainActivity$/i.test(app['activity'] ?? '') && (await softExists(app, LOC.tabMe))) {
       app['log']('点 Google 后已直接进入主页（可能已有授权缓存）');
       await finishOnMeTab(app);
       return;
@@ -841,7 +932,21 @@ export async function loginWithGoogle(app: AppBaseClass, account?: AppAccount): 
     await sleep(500);
   }
 
-  await confirmGoogleAccountOnPicker(app, email);
+  try {
+    await confirmGoogleAccountOnPicker(app, email);
+  } catch (e) {
+    // 选账号阶段 XPath 异常时，若已回主页则以「我的」为准
+    await app['refreshActivity']();
+    if (
+      /\.MainActivity$/i.test(app['activity'] ?? '') ||
+      (await isAndroidLoggedInMe(app)) ||
+      (await softExists(app, LOC.tabMe))
+    ) {
+      app['log'](`Google 选账号异常但已回 App，按「我的」页判定: ${(e as Error).message.slice(0, 120)}`);
+    } else {
+      throw e;
+    }
+  }
   await app['closePopups']();
   await finishOnMeTab(app);
 }

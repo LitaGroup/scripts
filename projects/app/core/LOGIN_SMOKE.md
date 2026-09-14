@@ -34,10 +34,25 @@
 
 ## 2. 冒烟用例
 
+### 统一登录门控（Android 手机号 / Google / Facebook）
+
+所有完整登录用例共用 `ensureAndroidLoginHome`，**成功标准：到达已登录「我的」页（`mePage` / 数字 `user_no`）即视为登录成功、用例通过**：
+
+```text
+启动并关弹窗
+  ├─ 已在登录页（未登录 / LoginActivity 或入口可见）
+  │     → 直接走对应登录流程
+  └─ 不在登录页
+        → 点底部「我的」
+              ├─ 弹出登录页 → 走对应登录流程
+              └─ 未弹出（已登录「我的」）→ 设置 → 退出登录 → 再进登录页 → 走登录流程
+登录完成 → 进入「我的」→ 通过
+```
+
 | ID | 标题 | P | iOS 脚本 | Android 脚本 |
 |----|------|---|----------|--------------|
 | SM-LOGIN-01 | 登录页入口可见 | P0 | `login-entries.ios.lita.test.ts` | `login-entries.android.lite.test.ts` |
-| SM-LOGIN-02 | 手机号+密码进首页 | P0 | `login-phone-password.ios.lita.test.ts` | `login-phone-password.android.lite.test.ts` |
+| SM-LOGIN-02 | 手机号+密码进「我的」 | P0 | `login-phone-password.ios.lita.test.ts` | `login-phone-password.android.lite.test.ts` |
 | SM-LOGIN-03 | 新设备 OTP | P0 | 含在 02（`SCRIPT_OTP`） | 含在 02（查库 / `SCRIPT_OTP`） |
 | SM-LOGIN-04 | WhatsApp 可关闭 | P1 | 状态机 | 状态机 |
 | SM-LOGIN-05 | 无密码仅 OTP | P1 | 半自动 | 半自动 |
@@ -46,7 +61,7 @@
 | SM-LOGIN-08 | Apple 完整登录 | P2 | 手工真机 | Android N/A |
 | SM-LOGIN-09 | Line 完整登录 | P2 | 手工 | 手工 |
 | SM-LOGIN-10 | Kakao 完整登录 | P2 | 手工 | 手工 |
-| SM-LOGIN-11 | 已登录幂等 | P0 | `ensureLoggedIn` | `ensureAndroidLoggedIn` |
+| SM-LOGIN-11 | 已登录幂等 | P0 | `ensureLoggedIn` | `ensureAndroidLoggedIn`（IM 等业务用；完整登录冒烟不走此捷径） |
 | SM-LOGIN-12 | 错误密码提示 | P1 | 手工 | 手工 |
 | SM-LOGIN-13 | 韩国手机登录 UI | P2 | 手工 | 手工（低优电话图标） |
 
@@ -57,26 +72,27 @@
 
 ### SM-LOGIN-06 要点（Android Facebook）
 
-- **前置**：设备 Facebook App 或 Chrome 已登录 Facebook；脚本会先退出 App 登录态再进登录页
-- **退出后**：若落到访客首页，会再点底部「我的」进入登录页（不要卡在首页）
-- **步骤**：点 `rl_facebook_login` / `iv_low_facebook_login` → 授权页点 **Continue as / Continue**（可选 `SCRIPT_FACEBOOK_NAME` 匹配展示名）→ 回主页「我的」
+- **门控**：见上文「统一登录门控」
+- **前置**：设备 Facebook App 或 Chrome 已登录 Facebook
+- **步骤**：点 `rl_facebook_login` / `iv_low_facebook_login` → 授权页点 **Continue as / Continue**（可选 `SCRIPT_FACEBOOK_NAME`）→ 「我的」
 - **期望**：`mePage` 或数字 `user_no`
 - **脚本**：`projects/app/android-lite/login-facebook.android.lite.test.ts`（`core/` 下有同名入口）
 
 ### SM-LOGIN-07 要点（Android Google）
 
-- **前置**：设备系统已登录 Google；脚本会先退出 App 登录态再进登录页
-- **退出后**：若落到访客首页，会再点底部「我的」进入登录页
-- **中间页**：若停在手机号/密码/OTP 页（`enter_phone_number` 等），会先点 `iv_back` 退回登录主页再点 Google
-- **步骤**：点 `iv_low_google_login` / `rl_google_login` → 账号选择页点已登账号（可选 `SCRIPT_GOOGLE_EMAIL`）→ 如有 Continue/同意则点 → 回主页「我的」
+- **门控**：见上文「统一登录门控」
+- **前置**：设备系统已登录 Google
+- **中间页**：若停在手机号/密码/OTP 页，会先点 `iv_back` 退回登录主页
+- **步骤**：点 `iv_low_google_login` / `rl_google_login` → 账号页点已登账号（可选 `SCRIPT_GOOGLE_EMAIL`）→ Continue/同意 → 「我的」
 - **期望**：`mePage` 或数字 `user_no`
 - **脚本**：`projects/app/android-lite/login-google.android.lite.test.ts`（`core/` 下有同名入口）
 
 ### SM-LOGIN-02 要点
 
+- **门控**：见上文「统一登录门控」（与 Google / Facebook 相同，不因已登录而跳过）
 - **前置**：`config.app.json`；PROD：`86` / `18810242906`（OTP 查库）；TEST：`62` 开头号 + OTP `1234`
-- **步骤**：入口 → 选区号 → 手机号 → Next/下一步 → 密码 → 登录 →（可选）OTP
-- **期望**：进入主页 / 我的页已登录标记
+- **步骤**：入口 → 选区号 → 手机号 → Next/下一步 → 密码 → 登录 →（可选）OTP → 「我的」
+- **期望**：已登录「我的」页（`mePage` / 数字 `user_no`）
 - **OTP**：默认经 `userToken` 查 `stats.sms_record_*`；可用 `SCRIPT_OTP` / `accounts.smsCode` 覆盖
 
 ---
