@@ -90,7 +90,7 @@ cp config.app.example.json config.app.json
 }
 ```
 
-`config.app.json` 已在 `.gitignore`，勿提交。区号按测试号国家填写（印尼常用 `62`）。
+`config.app.json` 已纳入仓库跟踪（与 `config.app.example.json` 同结构）。区号按测试号国家填写（印尼常用 `62`）。
 
 ---
 
@@ -114,7 +114,7 @@ node --experimental-strip-types projects/app/core/login-phone-password.ios.lita.
 | `SCRIPT_IOS_VERSION` | 系统版本，如 `18.2`（多台同名时建议加） |
 | `SCRIPT_IOS_UDID` | 真机 UDID（真机必填） |
 | `SCRIPT_OTP` | 新设备验证码，测试环境常用 `1234` |
-| `SCRIPT_ENV` | `TEST`（默认）/ `PROD` |
+| `SCRIPT_ENV` | `TEST`（测网）/ `PROD`（默认线上） |
 
 成功时 stdout 会出现类似：
 

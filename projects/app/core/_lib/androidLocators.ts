@@ -8,6 +8,8 @@ export const ANDROID_LITE_PACKAGE = 'com.litalite.android';
 
 export const ANDROID_ACT = {
   splash: '.ui.splash.SplashActivity',
+  locationConfig: '.ui.splash.LocationConfigActivity',
+  onboarding: '.ui.onboarding.OnboardingNewActivity',
   login: '.ui.login.LoginActivity',
   main: '.MainActivity',
 } as const;
@@ -43,6 +45,71 @@ export const ANDROID_LOGIN_ENTRY = {
   },
 };
 
+/**
+ * Google 账号选择 / 确认页（系统 GMS，设备已登录 Google 时点账号即可）。
+ * 常见包：com.google.android.gms；不跳转独立 Google App。
+ */
+export const ANDROID_GOOGLE_PICKER = {
+  /** 账号邮箱 / 展示名（旧版 AccountPicker） */
+  accountName: by.id('com.google.android.gms:id/account_name'),
+  accountDisplayName: by.id('com.google.android.gms:id/account_display_name'),
+  accountParticle: by.id('com.google.android.gms:id/account_particle_disc'),
+  /** 列表项容器 */
+  accountRow: by.xpath(
+    "//*[contains(@resource-id,'account_name') or contains(@resource-id,'account_display_name') or contains(@resource-id,'account_particle')]/ancestor::*[@clickable='true'][1]",
+  ),
+  /** 任意含 @ 的可点节点（邮箱行兜底） */
+  emailLikeClickable: by.xpath(
+    "//*[contains(@text,'@')]/ancestor-or-self::*[@clickable='true'][1]",
+  ),
+  /** 选账号后的继续 / 同意 */
+  continueButtons: [
+    by.text('Continue'),
+    by.text('CONTINUE'),
+    by.text('继续'),
+    by.text('同意并继续'),
+    by.textContains('Continue as'),
+    by.textContains('继续使用'),
+    by.text('Allow'),
+    by.text('ALLOW'),
+    by.text('允许'),
+    by.text('OK'),
+    by.text('确定'),
+    by.id('com.google.android.gms:id/continue_button'),
+    by.id('com.google.android.gms:id/accept_button'),
+  ],
+} as const;
+
+/**
+ * Facebook 授权页（设备已登录 Facebook / Chrome 有 FB 会话时，点 Continue as / Continue 即可）。
+ * 可能出现在：Facebook App、Chrome Custom Tab、Facebook SDK WebDialog。
+ */
+export const ANDROID_FACEBOOK_PICKER = {
+  /** 继续使用已登录账号 */
+  continueButtons: [
+    by.textContains('Continue as'),
+    by.textContains('继续使用'),
+    by.text('Continue'),
+    by.text('CONTINUE'),
+    by.text('继续'),
+    by.text('Log In'),
+    by.text('Log in'),
+    by.text('LOGIN'),
+    by.text('登录'),
+    by.text('Allow'),
+    by.text('ALLOW'),
+    by.text('允许'),
+    by.text('OK'),
+    by.text('确定'),
+    by.accessibilityId('Continue'),
+    by.accessibilityId('Log In'),
+  ],
+  /** 账号名 / 展示名（点选列表项） */
+  accountClickable: by.xpath(
+    "//*[contains(@text,'@') or contains(@text,'Continue as') or contains(@text,'继续')]/ancestor-or-self::*[@clickable='true'][1]",
+  ),
+} as const;
+
 export const ANDROID_LOC = {
   tabMe: id('navigation_user_center'),
   tabHome: id('navigation_home'),
@@ -54,6 +121,8 @@ export const ANDROID_LOC = {
   logout: id('logout_tv'),
 
   loginClose: id('close_button'),
+  /** 手机号/密码等中间页左上角返回 */
+  loginBack: id('iv_back'),
   phoneLoginHigh: ANDROID_LOGIN_ENTRY.phone.high,
   phoneLoginLow: ANDROID_LOGIN_ENTRY.phone.low,
 
@@ -74,4 +143,21 @@ export const ANDROID_LOC = {
 
   popupActivity: id('vp_banner'),
   popupActivityClose: id('img_close'),
+
+  /** 首启引导 Skip */
+  onboardingSkip: id('skipTv'),
+  /** 首启地区/语言选择（LocationConfigActivity） */
+  locationConfigConfirm: id('tv_confirm_view'),
+  locationConfigList: id('rl_question_list'),
+  locationConfigOption: id('tv_title_view'),
+  /** 系统权限弹窗 Allow（不同 API 文案/id 不一） */
+  permissionAllowIds: [
+    by.id('com.android.permissioncontroller:id/permission_allow_button'),
+    by.id('com.android.permissioncontroller:id/permission_allow_foreground_only_button'),
+    by.id('com.android.packageinstaller:id/permission_allow_button'),
+    by.text('Allow'),
+    by.text('ALLOW'),
+    by.text('允许'),
+    by.text('While using the app'),
+  ],
 };

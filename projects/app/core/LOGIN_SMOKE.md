@@ -2,8 +2,9 @@
 
 > **iOS**：`lita-ios-v2`，bundleId `but.lita.ios`，flavor=`lita`  
 > **Android**：`lita-lite-android`，package `com.litalite.android`，flavor=`lite`  
-> 共用账号：`config.app.json` → `accounts.default`  
-> 定位与流程：`projects/app/core/_lib/`
+> 账号：`config.app.json` → `SCRIPT_ENV=PROD`（默认）用 `accounts.prod`；`SCRIPT_ENV=TEST` 用 `accounts.test`  
+> 定位与流程：`projects/app/core/_lib/`  
+> Android 包：PROD 装 **release**，TEST 装 **debug**（同 applicationId，需覆盖安装）
 
 ---
 
@@ -12,8 +13,8 @@
 | 方式 | iOS (Lita) | Android (Lite) | 自动化 |
 |------|------------|----------------|--------|
 | 手机号 + 密码 / OTP | ✅ | ✅ | **P0 主路径** |
-| Facebook | ✅ | ✅ | 入口冒烟；完整 OAuth 手工 |
-| Google | ✅ | ✅ | 同上 |
+| Facebook | ✅ | ✅ | 入口冒烟；**完整登录见 SM-LOGIN-06** |
+| Google | ✅ | ✅ | 入口冒烟；**完整登录见 SM-LOGIN-07** |
 | Line | ✅（按区） | ✅（按区） | 同上 |
 | Kakao | ✅（按区 / DEBUG） | ✅（按区，韩区高优） | 同上 |
 | Apple | ✅ | ❌ 无入口 | iOS 手工；Android 验「无入口」 |
@@ -33,19 +34,36 @@
 
 ## 2. 冒烟用例
 
+### 统一登录门控（Android 手机号 / Google / Facebook）
+
+所有完整登录用例共用 `ensureAndroidLoginHome`，**成功标准：到达已登录「我的」页（`mePage` / 数字 `user_no`）即视为登录成功、用例通过**：
+
+```text
+启动并关弹窗
+  ├─ 已在登录页（未登录 / LoginActivity 或入口可见）
+  │     → 直接走对应登录流程
+  └─ 不在登录页
+        → 点底部「我的」
+              ├─ 弹出登录页 → 走对应登录流程
+              └─ 未弹出（已登录「我的」）→ 设置 → 退出登录 → 再进登录页 → 走登录流程
+登录完成 → 进入「我的」→ **整单通过**（前置门控/入口检查失败但最终进「我的」时，以最终结果为准；脚本已合并为单步登录判定）
+```
+
+> **判定**：`[done].status=success` 当且仅当最终进入已登录「我的」；中间若卡在 Chrome/Facebook Custom Tab 会先 `back` 回 Lite。
+
 | ID | 标题 | P | iOS 脚本 | Android 脚本 |
 |----|------|---|----------|--------------|
 | SM-LOGIN-01 | 登录页入口可见 | P0 | `login-entries.ios.lita.test.ts` | `login-entries.android.lite.test.ts` |
-| SM-LOGIN-02 | 手机号+密码进首页 | P0 | `login-phone-password.ios.lita.test.ts` | `login-phone-password.android.lite.test.ts` |
-| SM-LOGIN-03 | 新设备 OTP | P0 | 含在 02（`SCRIPT_OTP`） | 含在 02 |
+| SM-LOGIN-02 | 手机号+密码进「我的」 | P0 | `login-phone-password.ios.lita.test.ts` | `login-phone-password.android.lite.test.ts` |
+| SM-LOGIN-03 | 新设备 OTP | P0 | 含在 02（`SCRIPT_OTP`） | 含在 02（查库 / `SCRIPT_OTP`） |
 | SM-LOGIN-04 | WhatsApp 可关闭 | P1 | 状态机 | 状态机 |
 | SM-LOGIN-05 | 无密码仅 OTP | P1 | 半自动 | 半自动 |
-| SM-LOGIN-06 | Facebook 完整登录 | P2 | 手工 | 手工 |
-| SM-LOGIN-07 | Google 完整登录 | P2 | 手工 | 手工 |
+| SM-LOGIN-06 | Facebook 完整登录 | P1 | 手工 | `login-facebook.android.lite.test.ts` |
+| SM-LOGIN-07 | Google 完整登录 | P1 | 手工 | `login-google.android.lite.test.ts` |
 | SM-LOGIN-08 | Apple 完整登录 | P2 | 手工真机 | Android N/A |
 | SM-LOGIN-09 | Line 完整登录 | P2 | 手工 | 手工 |
 | SM-LOGIN-10 | Kakao 完整登录 | P2 | 手工 | 手工 |
-| SM-LOGIN-11 | 已登录幂等 | P0 | `ensureLoggedIn` | `ensureAndroidLoggedIn` |
+| SM-LOGIN-11 | 已登录幂等 | P0 | `ensureLoggedIn` | `ensureAndroidLoggedIn`（IM 等业务用；完整登录冒烟不走此捷径） |
 | SM-LOGIN-12 | 错误密码提示 | P1 | 手工 | 手工 |
 | SM-LOGIN-13 | 韩国手机登录 UI | P2 | 手工 | 手工（低优电话图标） |
 
@@ -54,11 +72,30 @@
 - **前置**：未登录（Android 脚本会尝试自动退出）
 - **期望**：手机号入口必现；≥1 个三方入口；Android 不应出现 Apple
 
+### SM-LOGIN-06 要点（Android Facebook）
+
+- **门控**：见上文「统一登录门控」
+- **前置**：设备 Facebook App 或 Chrome 已登录 Facebook
+- **步骤**：点 `rl_facebook_login` / `iv_low_facebook_login` → 授权页点 **Continue as / Continue**（可选 `SCRIPT_FACEBOOK_NAME`）→ 「我的」
+- **期望**：`mePage` 或数字 `user_no`
+- **脚本**：`projects/app/android-lite/login-facebook.android.lite.test.ts`（`core/` 下有同名入口）
+
+### SM-LOGIN-07 要点（Android Google）
+
+- **门控**：见上文「统一登录门控」
+- **前置**：设备系统已登录 Google
+- **中间页**：若停在手机号/密码/OTP 页，会先点 `iv_back` 退回登录主页
+- **步骤**：点 `iv_low_google_login` / `rl_google_login` → 账号页点已登账号（可选 `SCRIPT_GOOGLE_EMAIL`）→ Continue/同意 → 「我的」
+- **期望**：`mePage` 或数字 `user_no`
+- **脚本**：`projects/app/android-lite/login-google.android.lite.test.ts`（`core/` 下有同名入口）
+
 ### SM-LOGIN-02 要点
 
-- **前置**：`config.app.json` 密码号；`countryCode` 与号段一致（如 `62`）
-- **步骤**：入口 → 选区号 → 手机号 → Next/下一步 → 密码 → 登录 →（可选）OTP
-- **期望**：进入主页 / 我的页已登录标记
+- **门控**：见上文「统一登录门控」（与 Google / Facebook 相同，不因已登录而跳过）
+- **前置**：`config.app.json`；PROD：`86` / `18810242906`（OTP 查库）；TEST：`62` 开头号 + OTP `1234`
+- **步骤**：入口 → 选区号 → 手机号 → Next/下一步 → 密码 → 登录 →（可选）OTP → 「我的」
+- **期望**：已登录「我的」页（`mePage` / 数字 `user_no`）
+- **OTP**：默认经 `userToken` 查 `stats.sms_record_*`；可用 `SCRIPT_OTP` / `accounts.smsCode` 覆盖
 
 ---
 
@@ -70,10 +107,12 @@
 cd /path/to/lita-script
 export SCRIPT_CONFIG=config.app.json
 export SCRIPT_APPIUM_URL=http://127.0.0.1:4723/
-export SCRIPT_OTP=1234
+# 默认 SCRIPT_ENV=PROD（线上 release + accounts.prod + 查库 OTP）
+# 测网：export SCRIPT_ENV=TEST（debug 包 + accounts.test + OTP 1234）
+# 可选覆盖：export SCRIPT_OTP=xxxx
 
-# iOS（模拟器名按本机修改）
-SCRIPT_IOS_DEVICE="iPhone 17" \
+# iOS（模拟器名按本机修改；iOS 仍常用 SCRIPT_OTP）
+SCRIPT_IOS_DEVICE="iPhone 17" SCRIPT_OTP=1234 \
   node --experimental-strip-types projects/app/core/login-phone-password.ios.lita.test.ts
 SCRIPT_IOS_DEVICE="iPhone 17" \
   node --experimental-strip-types projects/app/core/login-entries.ios.lita.test.ts
@@ -81,12 +120,22 @@ SCRIPT_IOS_DEVICE="iPhone 17" \
 # Android（可选 SCRIPT_ANDROID_UDID）
 node --experimental-strip-types projects/app/core/login-phone-password.android.lite.test.ts
 node --experimental-strip-types projects/app/core/login-entries.android.lite.test.ts
+# Google：设备需已登录 Google；可选 SCRIPT_GOOGLE_EMAIL
+node --experimental-strip-types projects/app/core/login-google.android.lite.test.ts
+# Facebook：设备需已登录 Facebook；可选 SCRIPT_FACEBOOK_NAME
+node --experimental-strip-types projects/app/core/login-facebook.android.lite.test.ts
+# 或 android-lite 同级：
+# node --experimental-strip-types projects/app/android-lite/login-google.android.lite.test.ts
+# node --experimental-strip-types projects/app/android-lite/login-facebook.android.lite.test.ts
 ```
 
 | 变量 | 用途 |
 |------|------|
-| `SCRIPT_CONFIG` | 账号 JSON |
-| `SCRIPT_OTP` | 测试环境验证码，默认 `1234` |
+| `SCRIPT_CONFIG` | 账号 JSON（PROD 查短信需 `userToken`） |
+| `SCRIPT_ENV` | `PROD`（默认）/ `TEST` |
+| `SCRIPT_OTP` | 覆盖验证码；PROD 不设则查 `sms_record_*`；TEST 默认 `1234` |
+| `SCRIPT_GOOGLE_EMAIL` | Google 账号页优先点选的邮箱；也可用 `google.email` / `accounts.google.email` |
+| `SCRIPT_FACEBOOK_NAME` | Facebook 授权页优先匹配的展示名；也可用 `facebook.name` / `accounts.facebook.name` |
 | `SCRIPT_IOS_DEVICE` / `UDID` / `VERSION` | iOS 设备 |
 | `SCRIPT_ANDROID_UDID` / `SCRIPT_ANDROID_DEVICE` | Android 设备 |
 

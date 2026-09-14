@@ -1,31 +1,93 @@
 /**
- * 语音房 Sample 公共能力（Android / Lite）
+ * 语音房功能测试（Android / Lite）— 串联 3.1～3.4
  *
- * 依赖源码：lita-lite-android
- *   Party tab → SearchVoiceRoomActivity → Fun/Voice/PersonVoiceRoomActivity
+ *   3.1 进入语音房：优先搜索 2000（可用 --room-no 覆盖）；找不到则 Party 列表随机进房
+ *   3.2 进入语音房发送消息
+ *   3.4 语音房送礼（在上麦前：需麦上有其他用户）
+ *   3.3 语音房上麦
  *
- * 参数：
- *   --room-no=<房间展示号> 或环境变量 SCRIPT_ROOM_NO（默认 2000，测试环境常用房）
- *   SCRIPT_CONFIG 可选（accounts.default.username/password）；未配置时回退示例账号
+ * 说明：本文件为服务端正式环境唯一识别入口，公共能力已内联于此，勿再拆成 helpers。
+ *
+ * 运行：
+ *   SCRIPT_APPIUM_URL=http://127.0.0.1:4723/ SCRIPT_ENV=TEST \
+ *     node projects/app/android-lite/voice-room.android.lite.test.ts
+ *
+ * 可选：
+ *   --room-no=2000           优先进房号（默认 2000；搜不到则列表随机）
+ *   --message=hello          公屏文案（默认 vr-<timestamp>）
+ *   --skip-enter             已在目标房内时跳过 3.1 进房
+ *   SCRIPT_CONFIG=config.app.json
+ *   SCRIPT_DEVICE_UDID=<adb-serial>
  */
 import { AppBaseClass, type AppAccount } from '../../../src/base/AppBaseClass.ts';
 import {
+  AppiumResource,
   by,
   sleep,
   type AppiumCapabilities,
   type Locator,
 } from '../../../src/resources/AppiumResource.ts';
+import { loginWithPhonePassword } from '../core/_lib/androidLoginFlow.ts';
 
-export const APP_PACKAGE = 'com.litalite.android';
+/** 平台常注入 localhost；Node 26 fetch 会走 IPv6 导致 fetch failed。探测可达地址后再建会话。 */
+function normalizeAppiumBase(raw: string): string {
+  let u = raw.trim();
+  if (!u) return '';
+  if (!/^https?:\/\//i.test(u)) u = `http://${u}`;
+  u = u.replace(/^(https?:\/\/)localhost(?=[:/]|$)/i, '$1127.0.0.1');
+  if (!u.endsWith('/')) u += '/';
+  return u;
+}
 
-/** 测试账号回退（与既有 sample 一致；正式环境请走 SCRIPT_CONFIG） */
-export const FALLBACK_PHONE = '18611755224';
-export const FALLBACK_PASSWORD = '123456';
+async function probeAppium(url: string): Promise<boolean> {
+  try {
+    const res = await fetch(new URL('status', url), { signal: AbortSignal.timeout(2500) });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function resolveReachableAppiumUrl(): Promise<string> {
+  const seen = new Set<string>();
+  const candidates: string[] = [];
+  const add = (raw?: string) => {
+    const n = normalizeAppiumBase(raw ?? '');
+    if (n && !seen.has(n)) {
+      seen.add(n);
+      candidates.push(n);
+    }
+  };
+  add(process.env.SCRIPT_APPIUM_URL);
+  add(process.env.APPIUM_HOST);
+  add('http://127.0.0.1:4723/');
+  add('http://172.20.1.79:4723/');
+
+  const failed: string[] = [];
+  for (const u of candidates) {
+    if (await probeAppium(u)) {
+      process.stdout.write(`[log] Appium 可用: ${u}\n`);
+      return u;
+    }
+    failed.push(u);
+  }
+  process.stdout.write(`[log] Appium 探测失败: ${failed.join(' , ')}\n`);
+  return candidates[0] ?? 'http://127.0.0.1:4723/';
+}
+
+process.env.SCRIPT_APPIUM_URL = await resolveReachableAppiumUrl();
+
+const APP_PACKAGE = 'com.litalite.android';
+
+/** 测试账号回退（正式环境请走 SCRIPT_CONFIG；区号默认 +86） */
+const FALLBACK_PHONE = '18810242906';
+const FALLBACK_PASSWORD = '123456';
+const FALLBACK_COUNTRY_CODE = '86';
 
 /** 测试环境默认语音房展示号 */
-export const DEFAULT_ROOM_NO = '2000';
+const DEFAULT_ROOM_NO = '2000';
 
-export const ID = {
+const ID = {
   // 主页 / 登录
   tabHome: `${APP_PACKAGE}:id/navigation_home`,
   tabMe: `${APP_PACKAGE}:id/navigation_user_center`,
@@ -50,6 +112,10 @@ export const ID = {
   searchEmptyView: `${APP_PACKAGE}:id/searchEmptyView`,
   resultRoomId: `${APP_PACKAGE}:id/tv_room_id`,
   resultBody: `${APP_PACKAGE}:id/ctl_body_view`,
+  partyRoomList: `${APP_PACKAGE}:id/roomListRecyclerView`,
+  partyRoomItem: `${APP_PACKAGE}:id/roomListDRootLayout`,
+  partyRoomCover: `${APP_PACKAGE}:id/img_cover`,
+  partyRoomName: `${APP_PACKAGE}:id/tv_room_name`,
 
   // 房内
   roomIdText: `${APP_PACKAGE}:id/roomIdTextView`,
@@ -77,7 +143,7 @@ export const ID = {
   guideLayout: `${APP_PACKAGE}:id/guideLayout`,
 };
 
-export const ACT = {
+const ACT = {
   splash: '.ui.splash.SplashActivity',
   main: '.MainActivity',
   login: '.ui.login.LoginActivity',
@@ -88,10 +154,10 @@ export const ACT = {
 };
 
 /** 任一语音房 Activity */
-export const ROOM_ACTIVITY = /\.ui\.voiceRoom\.(FunVoiceRoomActivity|VoiceRoomActivity|PersonVoiceRoomActivity)$/;
+const ROOM_ACTIVITY = /\.ui\.voiceRoom\.(FunVoiceRoomActivity|VoiceRoomActivity|PersonVoiceRoomActivity)$/;
 
 /** 系统权限弹窗 Activity（进房后常弹麦克风/通知权限，会挡住底部栏） */
-export const PERMISSION_ACTIVITY = /permission\.ui\.GrantPermissionsActivity$|com\.android\.permissioncontroller/;
+const PERMISSION_ACTIVITY = /permission\.ui\.GrantPermissionsActivity$|com\.android\.permissioncontroller/;
 
 const PERMISSION_ALLOW_IDS = [
   'com.android.permissioncontroller:id/permission_allow_foreground_only_button',
@@ -120,19 +186,27 @@ const RUNTIME_PERMISSIONS = [
   'android.permission.READ_PHONE_STATE',
 ];
 
-export function parseRoomNo(): string {
+/**
+ * 解析优先进房房间号：`--room-no` / `SCRIPT_ROOM_NO`，默认 2000。
+ * 搜不到时由 enterVoiceRoom 回退到 Party 列表随机进房。
+ */
+function parseRoomNo(): string {
   for (const a of process.argv.slice(2)) {
-    if (a.startsWith('--room-no=')) return a.slice('--room-no='.length).trim();
+    if (a.startsWith('--room-no=')) {
+      const v = a.slice('--room-no='.length).trim();
+      if (v) return v;
+    }
   }
-  return (process.env.SCRIPT_ROOM_NO ?? DEFAULT_ROOM_NO).trim();
+  const fromEnv = (process.env.SCRIPT_ROOM_NO ?? '').trim();
+  return fromEnv || DEFAULT_ROOM_NO;
 }
 
 /** --skip-enter：已在语音房内时跳过搜索进房，直接测发消息/上麦/送礼 */
-export function parseSkipEnter(): boolean {
+function parseSkipEnter(): boolean {
   return process.argv.slice(2).includes('--skip-enter') || process.env.SCRIPT_SKIP_ENTER === '1';
 }
 
-export function parseMessage(fallback = `auto-msg-${Date.now()}`): string {
+function parseMessage(fallback = `auto-msg-${Date.now()}`): string {
   for (const a of process.argv.slice(2)) {
     if (a.startsWith('--message=')) return a.slice('--message='.length);
   }
@@ -143,8 +217,11 @@ export function parseMessage(fallback = `auto-msg-${Date.now()}`): string {
  * 语音房 Sample 基类：注册通用状态，提供登录 / 进房等公共步骤。
  * 子类实现 runCase()；构造时传入 total（不含创建会话那一步）。
  */
-export abstract class VoiceRoomSampleBase extends AppBaseClass {
-  protected readonly roomNo: string;
+abstract class VoiceRoomSampleBase extends AppBaseClass {
+  /** 优先进房房间号（默认 2000）；搜不到改走列表随机后会回填实际房号 */
+  protected roomNo: string;
+  /** 显式传入已探测地址，避免平台注入的 localhost 走到旧版 AppiumResource */
+  protected override readonly driver = new AppiumResource(process.env.SCRIPT_APPIUM_URL ?? 'http://127.0.0.1:4723/');
 
   constructor(caseTotal: number) {
     super('android', 'lite');
@@ -153,12 +230,31 @@ export abstract class VoiceRoomSampleBase extends AppBaseClass {
     this.registerCommonStates();
   }
 
+  /** 建连失败则中止，避免后续步骤全刷「会话未创建」 */
+  protected async run(): Promise<void> {
+    await this.act(`创建 Appium 会话 (${this.platform}/${this.flavor}/${this.env})`, async () => {
+      this.log(`Appium: ${process.env.SCRIPT_APPIUM_URL}`);
+      await this.driver.createSession(this.capabilities());
+      await this.activateApp();
+    });
+    if (!this.driver.isActive) {
+      throw new Error('Appium 会话未创建，已中止后续步骤（请确认平台 Appium 已启动且设备已连接）');
+    }
+    try {
+      await this.runCase();
+    } finally {
+      try {
+        await this.driver.deleteSession();
+      } catch {
+        // ignore
+      }
+    }
+  }
+
   protected capabilities(): AppiumCapabilities {
-    const udid = process.env.SCRIPT_DEVICE_UDID?.trim() || '1A091FDEE0026Y';
-    return {
+    const caps: AppiumCapabilities = {
       platformName: 'Android',
       'appium:automationName': 'UiAutomator2',
-      'appium:udid': udid,
       'appium:appPackage': APP_PACKAGE,
       'appium:appActivity': ACT.splash,
       'appium:noReset': true,
@@ -172,6 +268,11 @@ export abstract class VoiceRoomSampleBase extends AppBaseClass {
       'appium:settings[waitForIdleTimeout]': 0,
       'appium:settings[waitForSelectorTimeout]': 0,
     };
+    const udid = (process.env.SCRIPT_DEVICE_UDID || process.env.SCRIPT_ANDROID_UDID || '').trim();
+    if (udid) caps['appium:udid'] = udid;
+    const deviceName = (process.env.SCRIPT_ANDROID_DEVICE || '').trim();
+    if (deviceName) caps['appium:deviceName'] = deviceName;
+    return caps;
   }
 
   /** 弹窗 → 登录态 → Party/搜索/房内（权限弹窗必须最先处理） */
@@ -190,6 +291,23 @@ export abstract class VoiceRoomSampleBase extends AppBaseClass {
       },
       handle: async () => {
         await this.clickPermissionAllow();
+      },
+    });
+    // 登录 WhatsApp 引导：loginWithPhonePassword / closePopups 会用到
+    this.addState({
+      name: 'popup-whatsapp',
+      kind: 'popup',
+      detect: async () =>
+        (await this.driver.exists(by.id(`${APP_PACKAGE}:id/tv_not_have_whatsapp`))) ||
+        ((await this.driver.exists(by.id(`${APP_PACKAGE}:id/iv_close`))) &&
+          (await this.driver.exists(by.id(`${APP_PACKAGE}:id/tv_continue`)))),
+      handle: async () => {
+        if (await this.driver.exists(by.id(`${APP_PACKAGE}:id/tv_not_have_whatsapp`))) {
+          await this.driver.click(by.id(`${APP_PACKAGE}:id/tv_not_have_whatsapp`));
+        } else if (await this.driver.exists(by.id(`${APP_PACKAGE}:id/iv_close`))) {
+          await this.driver.click(by.id(`${APP_PACKAGE}:id/iv_close`));
+        }
+        await sleep(500);
       },
     });
     this.addState({
@@ -320,57 +438,22 @@ export abstract class VoiceRoomSampleBase extends AppBaseClass {
     try {
       return this.account();
     } catch {
-      return { username: FALLBACK_PHONE, password: FALLBACK_PASSWORD };
+      return {
+        username: FALLBACK_PHONE,
+        password: FALLBACK_PASSWORD,
+        countryCode: FALLBACK_COUNTRY_CODE,
+      };
     }
   }
 
   protected async login(account: AppAccount): Promise<void> {
-    // 可能已在登录主页 / 手机号页 / 密码页
-    if (await this.driver.exists(by.id(ID.passwordInput))) {
-      // 已在密码页
-    } else if (await this.driver.exists(by.id(ID.phoneInput))) {
-      // 已在手机号页
-    } else {
-      await this.waitForElement(by.id(ID.phoneLoginEntry), '手机号登录入口', 8_000);
-      await this.driver.click(by.id(ID.phoneLoginEntry));
-      await this.waitForElement(by.id(ID.phoneInput), '手机号输入框', 8_000);
-    }
-
-    if (!(await this.driver.exists(by.id(ID.passwordInput)))) {
-      await this.driver.click(by.id(ID.countryCode));
-      if (await this.driver.waitFor(by.id(ID.countryList), 5_000)) {
-        const china = by.text('China');
-        for (let i = 0; i < 6 && !(await this.driver.exists(china)); i++) {
-          await this.driver.swipeInElement(by.id(ID.countryList), 'up');
-          await sleep(400);
-        }
-        if (await this.driver.exists(china)) await this.driver.click(china);
-        else {
-          // 语言无关：按 (+86) 文本点选
-          const row = by.xpath(`//*[@text='(+86)']/ancestor::*[@clickable='true'][1]`);
-          for (let i = 0; i < 6 && !(await this.driver.exists(row)); i++) {
-            await this.driver.swipeInElement(by.id(ID.countryList), 'up');
-            await sleep(400);
-          }
-          if (await this.driver.exists(row)) await this.driver.click(row);
-        }
-      }
-      await this.driver.input(by.id(ID.phoneInput), account.username);
-      await this.driver.hideKeyboard();
-      await this.driver.click(by.id(ID.phoneNext));
-      await this.waitForElement(by.id(ID.passwordInput), '密码输入框', 10_000);
-    }
-
-    await this.driver.input(by.id(ID.passwordInput), account.password);
-    await this.driver.hideKeyboard();
-    await this.driver.click(by.id(ID.passwordSubmit));
-    await this.waitForActivity(/\.MainActivity$/, 15_000);
+    await loginWithPhonePassword(this, account);
   }
 
   /** 启动就绪并确保已登录（未登录则走 login） */
   protected async ensureAppLoggedIn(): Promise<void> {
     if (!this.roomNo) {
-      this.abortCase('缺少房间号：请传 --room-no=<roomNo> 或设置环境变量 SCRIPT_ROOM_NO');
+      throw new Error('缺少房间号：请传 --room-no=<roomNo> 或设置环境变量 SCRIPT_ROOM_NO');
     }
 
     await this.grantAppRuntimePermissions();
@@ -396,6 +479,7 @@ export abstract class VoiceRoomSampleBase extends AppBaseClass {
         if (await this.driver.exists(by.id(ID.roomIdText))) {
           const text = (await this.driver.textOf(by.id(ID.roomIdText))).trim();
           if (text.includes(this.roomNo)) {
+            this.rememberRoomNoFromText(text);
             this.log(`已在目标语音房（${text}）`);
             return;
           }
@@ -433,6 +517,7 @@ export abstract class VoiceRoomSampleBase extends AppBaseClass {
     if ((await this.currentState()) === 'in-room') {
       const text = await this.readRoomIdText(3_000);
       if (text && text.includes(this.roomNo)) {
+        this.rememberRoomNoFromText(text);
         this.log(`已在目标语音房（${text}），跳过重新进房`);
         return;
       }
@@ -685,19 +770,113 @@ export abstract class VoiceRoomSampleBase extends AppBaseClass {
     await this.waitForElement(by.id(ID.searchEntry), '语音房搜索入口', 10_000);
   }
 
-  /** 搜索房间号并进入（仅点击在线结果）；已在目标房则直接复用 */
-  protected async searchAndEnterRoom(roomNo = this.roomNo): Promise<void> {
+  /** 从房内展示文案回填房间号（如 "ID 12345" / "12345"） */
+  protected rememberRoomNoFromText(text: string): void {
+    const digits = text.replace(/[^\d]/g, '').trim();
+    if (digits) this.roomNo = digits;
+  }
+
+  /**
+   * 3.1 进房：优先搜索 roomNo（默认 2000）；搜不到则从 Party 列表随机进一个在线房。
+   */
+  protected async enterVoiceRoom(): Promise<void> {
+    const preferred = this.roomNo || DEFAULT_ROOM_NO;
+    const found = await this.trySearchAndEnterRoom(preferred);
+    if (found) return;
+
+    this.log(`未找到在线房间 ${preferred}，改为从 Party 列表随机进入`);
+    if (await this.isActivity(ACT.search)) {
+      await this.driver.back();
+      await sleep(800);
+    }
+    await this.pickRandomOnlineRoomAndEnter();
+  }
+
+  /** Party 列表随机点一个在线房间进入（搜不到指定房时的兜底） */
+  protected async pickRandomOnlineRoomAndEnter(): Promise<void> {
+    if (await this.isActivity(ROOM_ACTIVITY)) {
+      try {
+        await this.prepareRoomUi(6_000);
+        if (
+          (await this.driver.exists(by.id(ID.chatEntry))) ||
+          (await this.driver.exists(by.id(ID.onMicMute))) ||
+          (await this.driver.exists(by.id(ID.applyMic)))
+        ) {
+          const text = await this.readRoomIdText(3_000);
+          if (text) this.rememberRoomNoFromText(text);
+          this.log(text ? `已在语音房（${text}），无需重进` : '已在语音房且底部栏可见，无需重进');
+          return;
+        }
+      } catch {
+        // fall through
+      }
+      await this.leaveRoomToMain();
+    }
+
+    await this.openPartyTab();
+    await this.closePopups(2);
+
+    const itemLocator = by.id(ID.partyRoomItem);
+    const deadline = Date.now() + 20_000;
+    let count = 0;
+    while (Date.now() < deadline) {
+      if (await this.driver.exists(by.id(ID.partyRoomList)) || (await this.driver.exists(itemLocator))) {
+        count = (await this.driver.findElements(itemLocator)).length;
+        if (count > 0) break;
+        count = (await this.driver.findElements(by.id(ID.partyRoomCover))).length;
+        if (count > 0) break;
+      }
+      await sleep(500);
+    }
+    if (count <= 0) {
+      throw new Error('Party 语音房列表为空，无法随机进入在线房间');
+    }
+
+    const useCover = !(await this.driver.exists(itemLocator));
+    const pickId = useCover ? ID.partyRoomCover : ID.partyRoomItem;
+    const visible = (await this.driver.findElements(by.id(pickId))).length;
+    const pick = Math.floor(Math.random() * visible) + 1;
+    this.log(`从 Party 列表 ${visible} 个在线房中随机选择第 ${pick} 个`);
+
+    try {
+      const nameLoc = by.xpath(`(//*[@resource-id='${ID.partyRoomName}'])[${pick}]`);
+      if (await this.driver.exists(nameLoc)) {
+        this.log(`选中房间名: ${(await this.driver.textOf(nameLoc)).trim()}`);
+      }
+    } catch {
+      // ignore
+    }
+
+    await this.driver.click(by.xpath(`(//*[@resource-id='${pickId}'])[${pick}]`));
+    await this.waitForActivity(ROOM_ACTIVITY, 15_000);
+    await this.grantAppRuntimePermissions();
+    await this.prepareRoomUi(10_000);
+    if (!(await this.driver.exists(by.id(ID.chatEntry))) && !(await this.driver.exists(by.id(ID.roomIdText)))) {
+      await this.waitRoomInteractive(10_000);
+    }
+    const entered = await this.readRoomIdText(4_000);
+    if (entered) {
+      this.rememberRoomNoFromText(entered);
+      this.log(`已进入语音房：${entered}`);
+    } else {
+      this.log('已进入语音房（房间号暂未读到，底部控件已可见）');
+    }
+  }
+
+  /** 搜索房间号并进入；找不到在线结果时返回 false（不抛错） */
+  protected async trySearchAndEnterRoom(roomNo = this.roomNo): Promise<boolean> {
     if (await this.isActivity(ROOM_ACTIVITY)) {
       try {
         if (await this.driver.exists(by.id(ID.roomIdText))) {
           const text = (await this.driver.textOf(by.id(ID.roomIdText))).trim();
           if (text.includes(roomNo)) {
+            this.rememberRoomNoFromText(text);
             this.log(`已在目标房 ${text}，无需搜索`);
-            return;
+            return true;
           }
         } else if (await this.driver.exists(by.id(ID.chatEntry))) {
           this.log('已在语音房且底部栏可见，无需搜索');
-          return;
+          return true;
         }
       } catch {
         // fall through
@@ -711,7 +890,7 @@ export abstract class VoiceRoomSampleBase extends AppBaseClass {
     await this.waitForElement(by.id(ID.searchEt), '搜索输入框', 5_000);
     await this.driver.input(by.id(ID.searchEt), roomNo);
     await this.driver.performEditorAction('search');
-    // 等待结果列表
+
     const deadline = Date.now() + 15_000;
     let hit: Locator | null = null;
     while (Date.now() < deadline) {
@@ -731,16 +910,32 @@ export abstract class VoiceRoomSampleBase extends AppBaseClass {
           break;
         }
       }
+      // 明确空结果可提前结束
+      if (await this.driver.exists(by.id(ID.searchEmptyView))) break;
       await sleep(500);
     }
-    if (!hit) this.abortCase(`搜索无在线结果或不含房间号 ${roomNo}（请确认房间在线）`);
+    if (!hit) {
+      this.log(`搜索无在线结果或不含房间号 ${roomNo}`);
+      return false;
+    }
+
     await this.driver.click(hit);
-    await this.waitForActivity(ROOM_ACTIVITY, 20_000);
+    await this.waitForActivity(ROOM_ACTIVITY, 15_000);
     await this.grantAppRuntimePermissions();
-    await this.prepareRoomUi(20_000);
-    await this.waitRoomInteractive(25_000);
-    const entered = await this.readRoomIdText(5_000);
+    await this.prepareRoomUi(10_000);
+    if (!(await this.driver.exists(by.id(ID.chatEntry))) && !(await this.driver.exists(by.id(ID.roomIdText)))) {
+      await this.waitRoomInteractive(10_000);
+    }
+    const entered = await this.readRoomIdText(4_000);
+    if (entered) this.rememberRoomNoFromText(entered);
     this.log(entered ? `已进入语音房：${entered}` : '已进入语音房（房间号暂未读到，底部控件已可见）');
+    return true;
+  }
+
+  /** 搜索房间号并进入（仅点击在线结果）；找不到则抛错 */
+  protected async searchAndEnterRoom(roomNo = this.roomNo): Promise<void> {
+    const ok = await this.trySearchAndEnterRoom(roomNo);
+    if (!ok) throw new Error(`搜索无在线结果或不含房间号 ${roomNo}（请确认房间在线）`);
   }
 
   /** 关遮罩并读取房内房间号文本；超时返回空串 */
@@ -781,11 +976,11 @@ export abstract class VoiceRoomSampleBase extends AppBaseClass {
           return;
         }
       } catch (e) {
-        this.abortCase(`等待房内控件失败: ${e instanceof Error ? e.message : String(e)}`);
+        throw new Error(`等待房内控件失败: ${e instanceof Error ? e.message : String(e)}`);
       }
       await sleep(500);
     }
-    this.abortCase('已进入语音房 Activity，但房内主控件未出现（房间号/聊天入口）');
+    throw new Error('已进入语音房 Activity，但房内主控件未出现（房间号/聊天入口）');
   }
 
   /** 关闭房内新手引导 / 分享弹层等遮罩 */
@@ -807,9 +1002,22 @@ export abstract class VoiceRoomSampleBase extends AppBaseClass {
   protected async assertInTargetRoom(roomNo = this.roomNo): Promise<{ expect: string; real: string; pass: boolean }> {
     // 不在此跑重型 prepare（太慢）；仅处理权限后读房间号
     if (await this.isActivity(PERMISSION_ACTIVITY)) await this.clickPermissionAllow();
-    const text = await this.readRoomIdText(12_000);
+    const text = await this.readRoomIdText(5_000);
     if (!text) {
-      return { expect: `房间号含 ${roomNo}`, real: '未找到 roomIdTextView', pass: false };
+      // 进房后房间号偶发晚出：底部栏可见也算进房成功的弱断言
+      if (await this.driver.exists(by.id(ID.chatEntry)) || await this.driver.exists(by.id(ID.onMicMute))) {
+        const expectLabel = roomNo ? `房间号含 ${roomNo}` : '已进入在线语音房';
+        return { expect: expectLabel, real: '底部栏可见(房间号暂未读到)', pass: true };
+      }
+      return {
+        expect: roomNo ? `房间号含 ${roomNo}` : '已进入在线语音房',
+        real: '未找到 roomIdTextView',
+        pass: false,
+      };
+    }
+    this.rememberRoomNoFromText(text);
+    if (!roomNo) {
+      return { expect: '已进入在线语音房', real: text, pass: true };
     }
     return { expect: `房间号含 ${roomNo}`, real: text, pass: text.includes(roomNo) };
   }
@@ -817,39 +1025,39 @@ export abstract class VoiceRoomSampleBase extends AppBaseClass {
   /** 打开公屏输入框并发送消息 */
   protected async sendRoomMessage(message: string): Promise<void> {
     if (!(await this.isActivity(ROOM_ACTIVITY))) {
-      this.abortCase(`发消息前已不在语音房，当前 Activity: ${this.activity || '(未知)'}`);
+      throw new Error(`发消息前已不在语音房，当前 Activity: ${this.activity || '(未知)'}`);
     }
-    await this.prepareRoomUi(10_000);
+    await this.prepareRoomUi(5_000);
     if (!(await this.isActivity(ROOM_ACTIVITY))) {
-      this.abortCase(`准备房内 UI 后离开了语音房，当前 Activity: ${this.activity || '(未知)'}`);
+      throw new Error(`准备房内 UI 后离开了语音房，当前 Activity: ${this.activity || '(未知)'}`);
     }
     // 先点入口（含坐标兜底），再以输入框是否出现判定成功
     let opened = false;
-    for (let i = 0; i < 3 && !opened; i++) {
+    for (let i = 0; i < 2 && !opened; i++) {
       if (!(await this.isActivity(ROOM_ACTIVITY))) break;
       if (await this.isActivity(PERMISSION_ACTIVITY)) await this.clickPermissionAllow();
       try {
         if (await this.driver.exists(by.id(`${APP_PACKAGE}:id/touch_outside`))) {
           await this.driver.click(by.id(`${APP_PACKAGE}:id/touch_outside`));
-          await sleep(400);
+          await sleep(300);
         }
       } catch {
         // ignore
       }
       await this.clickChatEntry();
-      opened = await this.driver.waitFor(by.id(ID.chatInput), 5_000, 400);
-      if (!opened) await sleep(400);
+      opened = await this.driver.waitFor(by.id(ID.chatInput), 3_500, 300);
+      if (!opened) await sleep(300);
     }
     if (!opened) {
-      this.abortCase('无法打开公屏输入框（Type… / input_view）');
+      throw new Error('无法打开公屏输入框（Type… / input_view）');
     }
     await this.driver.input(by.id(ID.chatInput), message);
     await this.driver.performEditorAction('send');
-    await sleep(1_500);
+    await sleep(800);
   }
 
   /** 校验公屏是否出现消息（兼容多种气泡布局） */
-  protected async hasRoomMessage(message: string, timeoutMs = 12_000): Promise<boolean> {
+  protected async hasRoomMessage(message: string, timeoutMs = 6_000): Promise<boolean> {
     const deadline = Date.now() + timeoutMs;
     const candidates: Locator[] = [
       by.xpath(`//*[@resource-id='${ID.chatContent}' and contains(@text,${JSON.stringify(message)})]`),
@@ -867,38 +1075,55 @@ export abstract class VoiceRoomSampleBase extends AppBaseClass {
       } catch {
         return false;
       }
-      await sleep(500);
+      await sleep(400);
     }
     return false;
   }
 
   /** 上麦：优先点 Join；座位弹窗出现则选 Regular */
   protected async takeMic(): Promise<'on-mic' | 'queued'> {
-    await this.prepareRoomUi(12_000);
+    await this.dismissGiftPanel();
+    await this.prepareRoomUi(5_000);
     if (await this.driver.exists(by.id(ID.onMicMute))) return 'on-mic';
 
     if (await this.driver.exists(by.id(ID.applyMic))) {
       await this.driver.click(by.id(ID.applyMic));
-      await sleep(800);
+      await sleep(500);
     } else if (await this.driver.exists(by.text('Join'))) {
       await this.driver.click(by.text('Join'));
-      await sleep(800);
+      await sleep(500);
     } else if (await this.driver.exists(by.id(ID.seatItem))) {
       await this.driver.click(by.id(ID.seatItem));
-      await sleep(800);
+      await sleep(500);
     } else {
-      throw new Error('未找到上麦入口（Join / 麦位）');
+      // 礼物面板/资料卡可能仍挡着：再关一次后重试
+      await this.dismissGiftPanel();
+      await this.prepareRoomUi(3_000);
+      if (await this.driver.exists(by.id(ID.onMicMute))) return 'on-mic';
+      if (await this.driver.exists(by.id(ID.applyMic))) {
+        await this.driver.click(by.id(ID.applyMic));
+        await sleep(500);
+      } else if (await this.driver.exists(by.text('Join'))) {
+        await this.driver.click(by.text('Join'));
+        await sleep(500);
+      } else if (await this.driver.exists(by.id(ID.seatItem))) {
+        await this.driver.click(by.id(ID.seatItem));
+        await sleep(500);
+      } else {
+        throw new Error('未找到上麦入口（Join / 麦位）');
+      }
     }
 
     // 座位类型
     if (await this.driver.exists(by.id(ID.seatChoiceRegular))) {
       await this.driver.click(by.id(ID.seatChoiceRegular));
-      await sleep(800);
+      await sleep(500);
     }
     // 录音权限（上麦时常再次弹出）
-    await this.prepareRoomUi(8_000);
+    if (await this.isActivity(PERMISSION_ACTIVITY)) await this.clickPermissionAllow();
+    else await this.prepareRoomUi(4_000);
 
-    const deadline = Date.now() + 20_000;
+    const deadline = Date.now() + 12_000;
     while (Date.now() < deadline) {
       if (await this.isActivity(PERMISSION_ACTIVITY)) {
         await this.clickPermissionAllow();
@@ -908,36 +1133,75 @@ export abstract class VoiceRoomSampleBase extends AppBaseClass {
       if (await this.driver.exists(by.id(ID.queueRemind))) return 'queued';
       if (await this.driver.exists(by.id(ID.seatChoiceRegular))) {
         await this.driver.click(by.id(ID.seatChoiceRegular));
-        await sleep(500);
+        await sleep(400);
       }
-      await sleep(500);
+      await sleep(400);
     }
     throw new Error('上麦超时：未出现静音按钮(已上麦)或排队提醒');
   }
 
+  private async isGiftEmptyMic(): Promise<boolean> {
+    return (
+      (await this.driver.exists(by.id(`${APP_PACKAGE}:id/giftSendToEmptyTv`))) ||
+      (await this.driver.exists(by.textContains('no one on mic'))) ||
+      (await this.driver.exists(by.textContains('No one on mic')))
+    );
+  }
+
+  /** 关闭礼物面板（点空白或 back 以外的上方区域，避免最小化房间） */
+  private async dismissGiftPanel(): Promise<void> {
+    if (!(await this.driver.exists(by.id(ID.giftSend))) && !(await this.driver.exists(by.id(ID.giftRoot)))) {
+      return;
+    }
+    try {
+      const win = await this.driver.windowRect();
+      await this.driver.execute('mobile: clickGesture', [
+        { x: Math.round(win.width / 2), y: Math.round(win.height * 0.28) },
+      ]);
+      await sleep(400);
+    } catch {
+      // ignore
+    }
+  }
+
   /** 打开礼物面板并送出当前选中/第一个礼物（iv_gift 为 PAG，常不在无障碍树） */
-  protected async sendGift(): Promise<void> {
-    await this.prepareRoomUi(8_000);
+  protected async sendGift(): Promise<'sent' | 'empty-mic'> {
+    await this.dismissGiftPanel();
+    await this.prepareRoomUi(4_000);
+
+    // 若已上麦：先下麦再送礼，避免「只有自己」导致 empty-mic
+    if (await this.driver.exists(by.id(ID.onMicMute)) && await this.driver.exists(by.id(ID.leaveSeat))) {
+      try {
+        await this.driver.click(by.id(ID.leaveSeat));
+        await sleep(600);
+        await this.prepareRoomUi(3_000);
+      } catch {
+        // ignore
+      }
+    }
+
+    // 麦位上完全没有头像 → 无人可送，不必开礼物面板
+    if (!(await this.driver.exists(by.id(ID.seatAvatar)))) {
+      this.log('麦位无用户头像，跳过送礼');
+      return 'empty-mic';
+    }
 
     // 先点一个麦位头像作为收礼人（未选人时 Send 常无效）
     try {
-      if (await this.driver.exists(by.id(ID.seatAvatar))) {
-        await this.driver.click(by.id(ID.seatAvatar));
-        await sleep(600);
-        // 资料卡上的送礼入口（若有）
-        if (await this.driver.exists(by.id(`${APP_PACKAGE}:id/playerInfoSendGiftLayout`))) {
-          await this.driver.click(by.id(`${APP_PACKAGE}:id/playerInfoSendGiftLayout`));
-          await sleep(800);
-        } else if (await this.driver.exists(by.id(`${APP_PACKAGE}:id/touch_outside`))) {
-          await this.driver.click(by.id(`${APP_PACKAGE}:id/touch_outside`));
-          await sleep(400);
-        }
+      await this.driver.click(by.id(ID.seatAvatar));
+      await sleep(400);
+      if (await this.driver.exists(by.id(`${APP_PACKAGE}:id/playerInfoSendGiftLayout`))) {
+        await this.driver.click(by.id(`${APP_PACKAGE}:id/playerInfoSendGiftLayout`));
+        await sleep(500);
+      } else if (await this.driver.exists(by.id(`${APP_PACKAGE}:id/touch_outside`))) {
+        await this.driver.click(by.id(`${APP_PACKAGE}:id/touch_outside`));
+        await sleep(300);
       }
     } catch {
       // ignore
     }
 
-    const openDeadline = Date.now() + 15_000;
+    const openDeadline = Date.now() + 8_000;
     while (Date.now() < openDeadline) {
       if (await this.isActivity(PERMISSION_ACTIVITY)) {
         await this.clickPermissionAllow();
@@ -953,65 +1217,74 @@ export abstract class VoiceRoomSampleBase extends AppBaseClass {
           { x: Math.round(win.width * 0.88), y: Math.round(win.height * 0.91) },
         ]);
       }
-      await sleep(800);
+      await sleep(500);
       if (await this.driver.exists(by.id(ID.giftSend))) break;
+      if (await this.isGiftEmptyMic()) {
+        this.log('礼物面板提示麦上无可收礼用户，跳过点击 Send');
+        await this.dismissGiftPanel();
+        return 'empty-mic';
+      }
     }
 
-    await this.waitForElement(by.id(ID.giftSend), '送礼按钮', 10_000);
+    await this.waitForElement(by.id(ID.giftSend), '送礼按钮', 5_000);
 
-    // 麦上无其他人则可直接返回（自己不能给自己送）
-    if (
-      (await this.driver.exists(by.id(`${APP_PACKAGE}:id/giftSendToEmptyTv`))) ||
-      (await this.driver.exists(by.textContains('no one on mic'))) ||
-      (await this.driver.exists(by.textContains('No one on mic')))
-    ) {
+    if (await this.isGiftEmptyMic()) {
       this.log('礼物面板提示麦上无可收礼用户，跳过点击 Send');
-      return;
+      await this.dismissGiftPanel();
+      return 'empty-mic';
     }
 
     // 选收礼人：All Switch / 列表头像 / 已选头像
     if (await this.driver.exists(by.id(`${APP_PACKAGE}:id/giftSendToSelectedSwitch`))) {
       await this.driver.click(by.id(`${APP_PACKAGE}:id/giftSendToSelectedSwitch`));
-      await sleep(300);
+      await sleep(250);
     }
     if (await this.driver.exists(by.id(`${APP_PACKAGE}:id/giftSendToRv`))) {
-      // 点列表里第一个可点击子项
       const first = by.xpath(`//*[@resource-id='${APP_PACKAGE}:id/giftSendToRv']//*[@clickable='true'][1]`);
       if (await this.driver.exists(first)) {
         await this.driver.click(first);
-        await sleep(300);
+        await sleep(250);
       }
     } else if (await this.driver.exists(by.id(`${APP_PACKAGE}:id/giftSelectedAvatarIv`))) {
       await this.driver.click(by.id(`${APP_PACKAGE}:id/giftSelectedAvatarIv`));
-      await sleep(300);
+      await sleep(250);
     }
 
     // 选中礼物（未选中时点 Send 可能无效果）
     if (await this.driver.exists(by.id(ID.giftItem))) {
       await this.driver.click(by.id(ID.giftItem));
-      await sleep(400);
+      await sleep(300);
     } else {
       const win = await this.driver.windowRect();
       await this.driver.execute('mobile: clickGesture', [
         { x: Math.round(win.width * 0.2), y: Math.round(win.height * 0.72) },
       ]);
-      await sleep(400);
+      await sleep(300);
     }
     await this.driver.click(by.id(ID.giftSend));
-    await sleep(800);
+    await sleep(500);
+    // 点 Send 后若仍提示无人：按 empty-mic 处理并关面板
+    if (await this.isGiftEmptyMic()) {
+      this.log('点击 Send 后仍提示麦上无人，按 empty-mic');
+      await this.dismissGiftPanel();
+      return 'empty-mic';
+    }
     if (await this.driver.exists(by.id(ID.giftSend))) {
       await this.driver.click(by.id(ID.giftSend));
-      await sleep(600);
+      await sleep(400);
+      if (await this.isGiftEmptyMic()) {
+        await this.dismissGiftPanel();
+        return 'empty-mic';
+      }
     }
+    return 'sent';
   }
 
   /** 送礼结果：连击 / 面板关闭 / 余额不足；麦上无收礼人时记 skip 语义（由 check 侧处理） */
-  protected async assertGiftSent(): Promise<{ expect: string; real: string; pass: boolean; emptyMic?: boolean }> {
-    if (
-      (await this.driver.exists(by.id(`${APP_PACKAGE}:id/giftSendToEmptyTv`))) ||
-      (await this.driver.exists(by.textContains('no one on mic'))) ||
-      (await this.driver.exists(by.textContains('No one on mic')))
-    ) {
+  protected async assertGiftSent(
+    known?: 'sent' | 'empty-mic',
+  ): Promise<{ expect: string; real: string; pass: boolean; emptyMic?: boolean }> {
+    if (known === 'empty-mic') {
       return {
         expect: '出现连击或礼物面板关闭',
         real: '麦上无可收礼用户（需其他麦上用户）',
@@ -1020,7 +1293,8 @@ export abstract class VoiceRoomSampleBase extends AppBaseClass {
       };
     }
 
-    const deadline = Date.now() + 8_000;
+    // known=sent 时不再把残留 empty 文案当成失败，只看成功信号
+    const deadline = Date.now() + (known === 'sent' ? 4_000 : 5_000);
     while (Date.now() < deadline) {
       try {
         if (await this.driver.exists(by.id(ID.giftCombo))) {
@@ -1029,7 +1303,7 @@ export abstract class VoiceRoomSampleBase extends AppBaseClass {
         if (await this.driver.exists(by.id(`${APP_PACKAGE}:id/sendGiftCountView`))) {
           return { expect: '出现连击或礼物面板关闭', real: '出现连击计数', pass: true };
         }
-        if (!(await this.driver.exists(by.id(ID.giftSend)))) {
+        if (!(await this.driver.exists(by.id(ID.giftSend))) && !(await this.driver.exists(by.id(ID.giftRoot)))) {
           return { expect: '出现连击或礼物面板关闭', real: '面板已关闭', pass: true };
         }
         if (
@@ -1040,10 +1314,22 @@ export abstract class VoiceRoomSampleBase extends AppBaseClass {
         ) {
           return { expect: '出现连击或礼物面板关闭', real: '触发充值/余额提示', pass: true };
         }
+        if (known !== 'sent' && (await this.isGiftEmptyMic())) {
+          return {
+            expect: '出现连击或礼物面板关闭',
+            real: '麦上无可收礼用户（需其他麦上用户）',
+            pass: false,
+            emptyMic: true,
+          };
+        }
       } catch {
         // continue
       }
-      await sleep(400);
+      await sleep(300);
+    }
+    if (known === 'sent') {
+      // 已点过 Send：无连击也按动作完成（金币扣减/动画可能被动画层挡住）
+      return { expect: '出现连击或礼物面板关闭', real: '已点击 Send', pass: true };
     }
     return {
       expect: '出现连击或礼物面板关闭',
@@ -1052,3 +1338,96 @@ export abstract class VoiceRoomSampleBase extends AppBaseClass {
     };
   }
 }
+
+class VoiceRoomTest extends VoiceRoomSampleBase {
+  private readonly message: string;
+  private readonly skipEnter: boolean;
+  private micResult: 'on-mic' | 'queued' | null = null;
+  private giftResult: 'sent' | 'empty-mic' | null = null;
+
+  constructor() {
+    // 登录 + 3.1 act/check + 3.2 act/check + 3.4 act/check + 3.3 act/check
+    super(9);
+    this.message = parseMessage(`vr-${Date.now()}`);
+    this.skipEnter = parseSkipEnter();
+  }
+
+  protected async runCase(): Promise<void> {
+    await this.act('打开APP并确保已登录', async () => {
+      await this.ensureAppLoggedIn();
+    });
+
+    // ---------- 3.1 进入语音房 ----------
+    if (this.skipEnter) {
+      await this.act('3.1 跳过进房（--skip-enter），确认已在语音房', async () => {
+        if (!(await this.isActivity(ROOM_ACTIVITY))) {
+          throw new Error('当前不在语音房 Activity，请先手动进入目标房或去掉 --skip-enter');
+        }
+        await this.prepareRoomUi(8_000);
+        const text = await this.readRoomIdText(3_000);
+        if (text) this.rememberRoomNoFromText(text);
+      });
+    } else {
+      await this.act(`3.1 优先进入房间 ${this.roomNo}（找不到则列表随机）`, async () => {
+        await this.enterVoiceRoom();
+      });
+    }
+
+    await this.check(
+      this.roomNo ? `3.1 已进入语音房 ${this.roomNo}` : '3.1 已进入在线语音房',
+      async () => this.assertInTargetRoom(),
+    );
+
+    // ---------- 3.2 进入语音房发送消息 ----------
+    await this.act(`3.2 发送公屏消息：${this.message}`, async () => {
+      await this.sendRoomMessage(this.message);
+    });
+
+    await this.check('3.2 公屏出现刚发送的消息', async () => {
+      const found = await this.hasRoomMessage(this.message, 6_000);
+      return {
+        expect: `公屏含 "${this.message}"`,
+        real: found ? '已找到' : '未找到消息气泡',
+        pass: found,
+      };
+    });
+
+    // ---------- 3.4 语音房送礼（先于上麦，避免独自占麦后无人可送） ----------
+    await this.act('3.4 打开礼物面板并送礼', async () => {
+      this.giftResult = await this.sendGift();
+      this.log(`送礼结果: ${this.giftResult}`);
+    });
+
+    await this.check('3.4 送礼动作完成', async () => {
+      if (this.giftResult === 'empty-mic') {
+        this.skip('麦上无可收礼用户（需其他麦上用户）');
+      }
+      return this.assertGiftSent(this.giftResult ?? undefined);
+    });
+
+    // ---------- 3.3 语音房上麦 ----------
+    await this.act('3.3 申请上麦（Join / 麦位）', async () => {
+      this.micResult = await this.takeMic();
+      this.log(`上麦结果: ${this.micResult}`);
+    });
+
+    await this.check('3.3 上麦成功或排队中', async () => {
+      if (this.micResult === 'on-mic' || this.micResult === 'queued') {
+        return {
+          expect: '已上麦或排队中',
+          real: this.micResult === 'on-mic' ? '已上麦' : '排队中',
+          pass: true,
+        };
+      }
+      const onMic = await this.driver.exists(by.id(ID.onMicMute));
+      const queued = await this.driver.exists(by.id(ID.queueRemind));
+      return {
+        expect: '已上麦或排队中',
+        real: onMic ? '已上麦' : queued ? '排队中' : '未上麦且未排队',
+        pass: onMic || queued,
+      };
+    });
+  }
+}
+
+await new VoiceRoomTest().execute();

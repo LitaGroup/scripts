@@ -33,22 +33,18 @@
  */
 import { AppBaseClass, type AppAccount } from '../../../src/base/AppBaseClass.ts';
 import { by, sleep, type AppiumCapabilities, type Locator } from '../../../src/resources/AppiumResource.ts';
-import { MySQLProdResource } from '../../../src/resources/MySQLProdResource.ts';
+import { alignLiteConfigPath, querySmsCode as querySmsCodeFromDb } from '../core/_lib/androidSmsOtp.ts';
 
 // 本脚本账号与 userToken 统一从 SCRIPT_CONFIG 指定的单一配置文件读取：
 //   - 账号：AppBaseClass.account() 读 SCRIPT_CONFIG 的 accounts.{game|friend}
 //   - userToken：短信验证码查库走 loadConfig()，默认读 config.json（或 LITA_CONFIG_PATH）
-// 这里把 LITA_CONFIG_PATH 对齐到 SCRIPT_CONFIG，使两者指向同一文件，避免维护两份配置。
-if (process.env.SCRIPT_CONFIG && !process.env.LITA_CONFIG_PATH) {
-  process.env.LITA_CONFIG_PATH = process.env.SCRIPT_CONFIG;
-}
+alignLiteConfigPath();
 
 const APP_PACKAGE = 'com.litalite.android';
 const APP_ACTIVITY = '.ui.splash.SplashActivity';
 
 /** 手机号国家前缀（用于拼接 DB 里 sms_record 的 phone_number = 前缀 + 手机号） */
 const PHONE_PREFIX = '86';
-
 // 系统权限弹窗（相机/麦克风）允许按钮
 const ID_PERMISSION_ALLOW = 'com.android.packageinstaller:id/permission_allow_button';
 
@@ -61,6 +57,7 @@ const ACT = {
   friendDetail: '.ui.friends.FriendUserDetailActivity',
   videoMatch: '.ui.random.RandomVideoMatchActivity',
   voiceMatch: '.ui.random.RandomVoiceMatchActivity',
+  topUp: '.ui.wallet.TopUpActivity',
 };
 
 // 元素定位符（基于 com.litalite.android 1.326，与 com.funbit.android 同一套代码仅包名不同）
@@ -69,7 +66,9 @@ const ID = {
   tabHome: `${APP_PACKAGE}:id/navigation_home`,
   tabMe: `${APP_PACKAGE}:id/navigation_user_center`,
   // 登录相关
+  mePage: `${APP_PACKAGE}:id/layout_options`,
   meUid: `${APP_PACKAGE}:id/user_no`,
+  meName: `${APP_PACKAGE}:id/user_name`,
   loginPage: `${APP_PACKAGE}:id/rl_facebook_login`,
   loginClose: `${APP_PACKAGE}:id/close_button`,
   phoneLoginEntry: `${APP_PACKAGE}:id/iv_low_phone_login`,
@@ -150,12 +149,6 @@ function inContainer(containerRaw: string, childRaw: string): Locator {
   return by.xpath(`//*[@resource-id='${xid(containerRaw)}']//*[@resource-id='${xid(childRaw)}']`);
 }
 
-/** 格式化为 DB 比较用的本地时间字符串（yyyy-MM-dd HH:mm:ss） */
-function formatDateTime(d: Date): string {
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
-}
-
 class HomeCheck extends AppBaseClass {
   constructor() {
     super('android', 'lite');
@@ -197,7 +190,10 @@ class HomeCheck extends AppBaseClass {
     this.addState({
       name: 'logged-in', // 我的 tab：已登录（先比对 Activity，再做元素级判定）
       activity: ACT.main,
-      detect: () => this.driver.exists(by.id(ID.meUid)),
+      detect: async () =>
+        (await this.driver.exists(by.id(ID.mePage))) ||
+        (await this.driver.exists(by.id(ID.meUid))) ||
+        (await this.driver.exists(by.id(ID.meName))),
     });
     this.addState({
       name: 'logged-out', // 登录相关页面
@@ -332,27 +328,15 @@ class HomeCheck extends AppBaseClass {
     throw new Error('登录超时：既未进入主页面也未出现验证码页');
   }
 
-  /**
-   * 轮询查询最新短信验证码（短信 OTP）。
-   * 表：sms_record_{yyyyMM}（lita_stats/stats 库）；经 MySQLProdResource（PROD API 代理 + userToken）只读查询。
-   * phone_number = '86' + 手机号。
-   */
+  /** 轮询查询最新短信验证码（见 androidSmsOtp.querySmsCode） */
   private async querySmsCode(since: Date, phone: string, timeoutMs = 30_000): Promise<string> {
-    const ym = `${since.getFullYear()}${String(since.getMonth() + 1).padStart(2, '0')}`;
-    const sql =
-      `select code from sms_record_${ym} ` +
-      `where phone_prefix='${PHONE_PREFIX}' and phone_number='${PHONE_PREFIX}${phone}' and type=1 ` +
-      `and created_at > '${formatDateTime(since)}' order by created_at desc limit 1`;
-    const deadline = Date.now() + timeoutMs;
-    do {
-      const r = await MySQLProdResource.query('stats', sql);
-      if (r.data.length > 0) {
-        const code = String(r.data[0][0] ?? '').trim();
-        if (code) return code;
-      }
-      await sleep(3_000);
-    } while (Date.now() < deadline);
-    throw new Error(`查询短信验证码超时（${timeoutMs}ms）: phone=${PHONE_PREFIX}${phone}`);
+    return querySmsCodeFromDb({
+      since,
+      phone,
+      countryCode: PHONE_PREFIX,
+      timeoutMs,
+      env: 'prod',
+    });
   }
 
   protected async runCase(): Promise<void> {
@@ -417,19 +401,7 @@ class HomeCheck extends AppBaseClass {
       if (!(await this.waitListItem(avatar, '智能推荐陪玩师条目', 15_000))) {
         this.skip('智能推荐列表为空，无法取得陪玩师ID');
       }
-      // 随机挑一个可见的陪玩师头像并打开其主页
-      const avatars = await this.driver.findElements(avatar);
-      const n = avatars.length;
-      const pick = n > 0 ? Math.floor(Math.random() * n) + 1 : 1;
-      this.log(`从 ${n} 位推荐陪玩师中随机选择第 ${pick} 位`);
-      await this.driver.click(by.xpath(`(${avatar[1]})[${pick}]`));
-      await this.waitForActivity(ACT.userService, 12_000);
-      // 主页展示用户ID数字（tv_user_no 文本形如 "ID 9174567"）
-      if (!(await this.driver.waitFor(by.id(ID.playerUserNo), 8_000))) {
-        throw new Error('陪玩师主页未展示用户ID');
-      }
-      playerId = (await this.driver.textOf(by.id(ID.playerUserNo))).replace(/[^\d]/g, '').trim();
-      if (!/^\d+$/.test(playerId)) throw new Error(`陪玩师主页用户ID格式异常: "${playerId}"`);
+      playerId = await this.readPlayerIdFromRecommend();
       gotId = true;
       this.log(`取到陪玩师 ID: ${playerId}`);
     });
@@ -441,31 +413,58 @@ class HomeCheck extends AppBaseClass {
     });
     if (!gotId) return; // 未能取得陪玩师ID，跳过后续搜索步骤
 
-    await this.act('点击右上角搜索 icon', async () => {
-      await this.driver.click(by.id(ID.imgSearch));
-      await this.waitForActivity(ACT.search);
-    });
+    // 搜索最多尝试 3 次：搜不到结果就回到推荐列表另选一位陪玩师重试
+    let found = false;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      await this.act('点击右上角搜索 icon', async () => {
+        await this.driver.click(by.id(ID.imgSearch));
+        await this.waitForActivity(ACT.search);
+      });
 
-    await this.act(`输入陪玩师 ID 并搜索（${playerId}）`, async () => {
-      await this.waitForElement(by.id(ID.searchEt), '搜索输入框');
-      await this.driver.input(by.id(ID.searchEt), playerId);
-      await sleep(300);
-      // 搜索框无「搜索」按钮，触发 IME 搜索动作（imeOptions=actionSearch）
-      try {
-        await this.driver.execute('mobile: performEditorAction', [{ action: 'search' }]);
-      } catch {
-        await this.driver.execute('mobile: pressKey', [{ keycode: 66 }]);
-      }
-    });
+      await this.act(`输入陪玩师 ID 并搜索（${playerId}）`, async () => {
+        await this.waitForElement(by.id(ID.searchEt), '搜索输入框');
+        await this.driver.input(by.id(ID.searchEt), playerId);
+        await sleep(300);
+        // 搜索框无「搜索」按钮，触发 IME 搜索动作（imeOptions=actionSearch）
+        try {
+          await this.driver.execute('mobile: performEditorAction', [{ action: 'search' }]);
+        } catch {
+          await this.driver.execute('mobile: pressKey', [{ keycode: 66 }]);
+        }
+      });
 
-    await this.check('搜索列表展示陪玩师信息', async () => {
-      if (!(await this.waitDisplayed(by.id(ID.searchResultRv), '搜索结果列表', 8_000))) {
-        return { expect: '搜索结果列表可见', real: '列表未出现', pass: false };
+      let attemptFound = false;
+      await this.check('搜索列表展示陪玩师信息', async () => {
+        if (!(await this.waitDisplayed(by.id(ID.searchResultRv), '搜索结果列表', 8_000))) {
+          return { expect: '搜索结果列表可见', real: '列表未出现', pass: false };
+        }
+        const first = inContainer(RAW_CONTAINER.searchResultRv, RAW.searchResultItem);
+        const has = await this.driver.isDisplayed(first);
+        attemptFound = has;
+        return { expect: '展示陪玩师列表项', real: has ? '已展示' : '列表为空', pass: has };
+      });
+
+      if (attemptFound) {
+        found = true;
+        break;
       }
-      const first = inContainer(RAW_CONTAINER.searchResultRv, RAW.searchResultItem);
-      const has = await this.driver.isDisplayed(first);
-      return { expect: '展示陪玩师列表项', real: has ? '已展示' : '列表为空', pass: has };
-    });
+
+      // 未搜到结果：回到推荐列表另选一位陪玩师再试
+      if (attempt < 3) {
+        await this.act('搜索无结果，从推荐列表另选陪玩师', async () => {
+          await this.backToMain();
+          await this.gotoGameTab();
+          playerId = await this.readPlayerIdFromRecommend();
+          this.log(`另选陪玩师 ID: ${playerId}`);
+        });
+        // 重新回到首页-游戏 tab，准备下一次搜索
+        await this.act('返回首页-游戏 tab', async () => {
+          await this.backToMain();
+          await this.gotoGameTab();
+        });
+      }
+    }
+    if (!found) return; // 3 次均未搜到结果（最后一次 check 已 fail）
 
     await this.act('点击陪玩师列表项', async () => {
       await this.driver.click(inContainer(RAW_CONTAINER.searchResultRv, RAW.searchResultItem));
@@ -473,7 +472,7 @@ class HomeCheck extends AppBaseClass {
     });
 
     await this.check('跳转至陪玩师个人主页', async () => {
-      const ok = await this.driver.isDisplayed(by.id(ID.userDetailProfile));
+      const ok = await this.waitDisplayed(by.id(ID.userDetailProfile), '陪玩师个人主页', 8_000);
       return { expect: '陪玩师个人主页', real: ok ? '已进入' : '未进入', pass: ok };
     });
 
@@ -481,6 +480,30 @@ class HomeCheck extends AppBaseClass {
       await this.backToMain();
       await this.gotoGameTab();
     });
+  }
+
+  /**
+   * 从首页智能推荐列表随机选一位陪玩师并读取其用户 ID。
+   * 前置：已处于首页-游戏 tab（推荐列表可见）；结束停在陪玩师主页（UserServiceActivity）。
+   */
+  private async readPlayerIdFromRecommend(): Promise<string> {
+    const avatar = this.recommendFirstItemLocator();
+    if (!(await this.waitListItem(avatar, '智能推荐陪玩师条目', 15_000))) {
+      throw new Error('智能推荐列表为空或未加载');
+    }
+    const avatars = await this.driver.findElements(avatar);
+    const n = avatars.length;
+    const pick = n > 0 ? Math.floor(Math.random() * n) + 1 : 1;
+    this.log(`从 ${n} 位推荐陪玩师中随机选择第 ${pick} 位`);
+    await this.driver.click(by.xpath(`(${avatar[1]})[${pick}]`));
+    await this.waitForActivity(ACT.userService, 12_000);
+    // 主页展示用户ID数字（tv_user_no 文本形如 "ID 9174567"）
+    if (!(await this.driver.waitFor(by.id(ID.playerUserNo), 8_000))) {
+      throw new Error('陪玩师主页未展示用户ID');
+    }
+    const id = (await this.driver.textOf(by.id(ID.playerUserNo))).replace(/[^\d]/g, '').trim();
+    if (!/^\d+$/.test(id)) throw new Error(`陪玩师主页用户ID格式异常: "${id}"`);
+    return id;
   }
 
   /** 2.1.2 技能推荐 */
@@ -509,7 +532,7 @@ class HomeCheck extends AppBaseClass {
     });
 
     await this.check('跳转至陪玩师个人主页', async () => {
-      const ok = await this.driver.isDisplayed(by.id(ID.userDetailProfile));
+      const ok = await this.waitDisplayed(by.id(ID.playerUserNo), '陪玩师个人主页', 8_000);
       return { expect: '陪玩师个人主页', real: ok ? '已进入' : '未进入', pass: ok };
     });
 
@@ -531,7 +554,7 @@ class HomeCheck extends AppBaseClass {
     });
 
     await this.check('跳转至陪玩师个人主页', async () => {
-      const ok = await this.driver.isDisplayed(by.id(ID.userDetailProfile));
+      const ok = await this.waitDisplayed(by.id(ID.playerUserNo), '陪玩师个人主页', 8_000);
       return { expect: '陪玩师个人主页', real: ok ? '已进入' : '未进入', pass: ok };
     });
 
@@ -555,6 +578,14 @@ class HomeCheck extends AppBaseClass {
     if (skipped) return;
 
     await this.caseFateRecommend();
+    // 生产环境去除充值步骤：视频/语音匹配需 ≥10 金币，不足会跳充值页，
+    // 生产账号不做充值，故跳过匹配相关用例。
+    if (this.env === 'prod') {
+      await this.act('跳过视频/语音匹配（生产环境去除充值步骤）', async () => {
+        this.skip('生产环境去除充值步骤，跳过视频/语音匹配用例');
+      });
+      return;
+    }
     await this.caseVideoMatch();
     await this.caseVoiceMatch();
   }
@@ -583,6 +614,7 @@ class HomeCheck extends AppBaseClass {
 
   /** 2.2.2 视频匹配（单账号侧：进入倒计时待匹配页 → 开始匹配 → 匹配中 → 关闭） */
   private async caseVideoMatch(): Promise<void> {
+    let insufficient = false;
     await this.act('点击视频匹配按钮，进入待匹配页面', async () => {
       const entry = inContainer(RAW_CONTAINER.rvFriend, RAW.videoMatchEntry);
       if (!(await this.driver.waitFor(entry, 15_000))) {
@@ -590,8 +622,19 @@ class HomeCheck extends AppBaseClass {
       }
       await this.driver.click(entry);
       await this.grantPermissions(); // 相机+麦克风权限
+      // 金币不足会跳充值页（TopUpActivity），此时跳过后续匹配步骤
+      if (await this.waitForActivityOr(ACT.topUp, 5_000)) {
+        insufficient = true;
+        this.skip('交友账号金币不足，跳转充值页，跳过视频匹配用例');
+        return;
+      }
       await this.waitForActivity(ACT.videoMatch, 12_000);
     });
+    if (insufficient) {
+      await this.backToMain();
+      await this.gotoFriendTab();
+      return;
+    }
 
     await this.check('进入 5 秒倒计时待匹配页面', async () => {
       const countdown = await this.driver.isDisplayed(by.id(ID.videoMatchTime));
@@ -633,6 +676,7 @@ class HomeCheck extends AppBaseClass {
 
   /** 2.2.3 语音匹配（单账号侧：进入匹配页 → 匹配中 → 关闭） */
   private async caseVoiceMatch(): Promise<void> {
+    let insufficient = false;
     await this.act('点击语音匹配按钮，进入待匹配页面', async () => {
       const entry = inContainer(RAW_CONTAINER.rvFriend, RAW.voiceMatchEntry);
       if (!(await this.driver.waitFor(entry, 15_000))) {
@@ -640,8 +684,19 @@ class HomeCheck extends AppBaseClass {
       }
       await this.driver.click(entry);
       await this.grantPermissions(); // 麦克风权限
+      // 金币不足会跳充值页（TopUpActivity），此时跳过后续匹配步骤
+      if (await this.waitForActivityOr(ACT.topUp, 5_000)) {
+        insufficient = true;
+        this.skip('交友账号金币不足，跳转充值页，跳过语音匹配用例');
+        return;
+      }
       await this.waitForActivity(ACT.voiceMatch, 12_000);
     });
+    if (insufficient) {
+      await this.backToMain();
+      await this.gotoFriendTab();
+      return;
+    }
 
     await this.check('进入语音匹配页面（正在匹配中）', async () => {
       const title = await this.driver.isDisplayed(by.id(ID.voiceMatchTitle));
@@ -667,14 +722,31 @@ class HomeCheck extends AppBaseClass {
 
   // ---------- 工具方法 ----------
 
+  /** 在 timeoutMs 内是否进入指定 Activity（用于检测「意外跳转页」，如金币不足跳充值页） */
+  private async waitForActivityOr(expect: string | RegExp, timeoutMs = 5_000): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs;
+    do {
+      if (await this.isActivity(expect)) return true;
+      await sleep(this.statePollMs);
+    } while (Date.now() < deadline);
+    return false;
+  }
+
   /** 进入"我的"tab，并等待登录态可知（logged-in / logged-out） */
-  private async enterMeTab(timeoutMs = 15_000): Promise<string> {
+  private async enterMeTab(timeoutMs = 45_000): Promise<string> {
     const deadline = Date.now() + timeoutMs;
     let last = 'unknown';
     while (Date.now() < deadline) {
       await this.closePopups();
       last = await this.currentState();
       if (last === 'logged-in' || last === 'logged-out') return last;
+      // 兜底：已落在登录流程页（手机号/密码输入框可见）直接判定为 logged-out
+      if (
+        (await this.driver.exists(by.id(ID.phoneInput))) ||
+        (await this.driver.exists(by.id(ID.passwordInput)))
+      ) {
+        return 'logged-out';
+      }
       if (await this.driver.exists(by.id(ID.tabMe))) await this.driver.click(by.id(ID.tabMe));
       await sleep(1_000);
     }
@@ -806,13 +878,37 @@ class HomeCheck extends AppBaseClass {
   }
 
   /** 滚动页面直到元素出现（用于我的页/设置页的长列表） */
-  private async scrollToVisible(locator: Locator, maxSwipes = 8): Promise<void> {
-    for (let i = 0; i <= maxSwipes; i++) {
+  private async scrollToVisible(locator: Locator, maxSwipes = 15): Promise<void> {
+    for (let i = 0; i < maxSwipes; i++) {
       if (await this.driver.exists(locator)) return;
       await this.driver.swipeUp();
-      await sleep(600);
+      await sleep(500);
+    }
+    // 元素仍在 DOM 外（懒渲染列表）或滚动容器非 ScrollView：改用坐标滑动兜底
+    for (let i = 0; i < maxSwipes; i++) {
+      if (await this.driver.exists(locator)) return;
+      await this.swipeByCoordinates();
+      await sleep(500);
+    }
+    // 诊断：失败时输出当前页面文本，便于定位远端布局差异
+    try {
+      const src = await this.driver.source();
+      const texts = [...src.matchAll(/text="([^"]{1,24})"/g)].map((m) => m[1]).filter(Boolean);
+      this.log(`滚动后未找到 ${locator[1]}，当前页面文本: ${[...new Set(texts)].slice(0, 20).join(' | ')}`);
+    } catch {
+      // ignore
     }
     throw new Error(`滚动后仍未找到元素: ${locator[0]}=${locator[1]}`);
+  }
+
+  /** 屏幕中段坐标滑动（元素滚动失效时的兜底，如懒渲染 RecyclerView / ViewPager 内嵌列表） */
+  private async swipeByCoordinates(): Promise<void> {
+    const { width, height } = await this.driver.windowRect();
+    const left = Math.round(width * 0.15);
+    const top = Math.round(height * 0.25);
+    await this.driver.execute('mobile: scrollGesture', [
+      { left, top, width: width - left * 2, height: Math.round(height * 0.5), direction: 'down', percent: 0.8 },
+    ]);
   }
 }
 

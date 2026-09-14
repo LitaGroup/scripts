@@ -1,13 +1,16 @@
-/** core 入口副本 → android-lite/login-phone-password.android.lite.test.ts */
+/**
+ * Android Lite 手机号登录冒烟：SM-LOGIN-02
+ * 通过标准：到达已登录「我的」页即整单通过。
+ */
 import { AppBaseClass, type AppAccount } from '../../../src/base/AppBaseClass.ts';
-import { ANDROID_LITE_PACKAGE, ANDROID_LOC as LOC } from './_lib/androidLocators.ts';
+import { ANDROID_LITE_PACKAGE, ANDROID_LOC as LOC } from '../core/_lib/androidLocators.ts';
 import {
   androidLiteCapabilities,
   assertAndroidLoggedInMe,
   isAndroidLoggedInMe,
   loginWithPhonePassword,
   registerAndroidLoginStates,
-} from './_lib/androidLoginFlow.ts';
+} from '../core/_lib/androidLoginFlow.ts';
 
 class AndroidPhonePasswordLoginSmoke extends AppBaseClass {
   constructor() {
