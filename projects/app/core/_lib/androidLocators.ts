@@ -121,6 +121,8 @@ export const ANDROID_LOC = {
   logout: id('logout_tv'),
 
   loginClose: id('close_button'),
+  /** 手机号/密码等中间页左上角返回 */
+  loginBack: id('iv_back'),
   phoneLoginHigh: ANDROID_LOGIN_ENTRY.phone.high,
   phoneLoginLow: ANDROID_LOGIN_ENTRY.phone.low,
 

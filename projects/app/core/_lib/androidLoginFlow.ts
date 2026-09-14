@@ -138,6 +138,27 @@ export function registerAndroidLoginStates(app: AppBaseClass): void {
   });
 }
 
+/**
+ * 从手机号/密码等登录中间页退回登录主页（入口按钮可见）。
+ * 优先点 iv_back；失败再 driver.back()。遗留中间页会卡在 MainActivity+enter_phone_number。
+ */
+export async function escapeAndroidLoginSubpages(app: AppBaseClass, maxSteps = 5): Promise<void> {
+  const driver = app['driver'];
+  for (let i = 0; i < maxSteps; i++) {
+    const onPhone = await driver.exists(LOC.phoneInput);
+    const onPassword = await driver.exists(LOC.passwordInput);
+    const onOtp = await driver.exists(LOC.otpInput);
+    if (!onPhone && !onPassword && !onOtp) return;
+    app['log'](`检测到登录中间页（phone=${onPhone} password=${onPassword} otp=${onOtp}），返回上一层`);
+    if (await driver.exists(LOC.loginBack)) {
+      await driver.click(LOC.loginBack);
+    } else {
+      await driver.back();
+    }
+    await sleep(700);
+  }
+}
+
 /** 点「我的」直到落到登录页或已登录的我的页（退出后常停在访客首页，需再点一次「我的」） */
 export async function enterAndroidMeGate(
   app: AppBaseClass,
@@ -147,9 +168,7 @@ export async function enterAndroidMeGate(
   const deadline = Date.now() + timeoutMs;
   let last = 'unknown';
 
-  const onLoginPage = async (): Promise<boolean> => {
-    await app['refreshActivity']();
-    if (/\.LoginActivity$/i.test(app['activity'] ?? '')) return true;
+  const onLoginHome = async (): Promise<boolean> => {
     if (await driver.exists(LOC.loginClose)) return true;
     if (await driver.exists(ANDROID_LOGIN_ENTRY.facebook.high)) return true;
     if (await driver.exists(ANDROID_LOGIN_ENTRY.google.high)) return true;
@@ -157,8 +176,17 @@ export async function enterAndroidMeGate(
     if (await driver.exists(ANDROID_LOGIN_ENTRY.google.low)) return true;
     if (await driver.exists(ANDROID_LOGIN_ENTRY.phone.high)) return true;
     if (await driver.exists(ANDROID_LOGIN_ENTRY.phone.low)) return true;
+    return false;
+  };
+
+  const onLoginPage = async (): Promise<boolean> => {
+    await app['refreshActivity']();
+    if (/\.LoginActivity$/i.test(app['activity'] ?? '')) return true;
+    if (await onLoginHome()) return true;
+    // 中间页也算已进入登录链路，调用方（ensureAndroidLoginHome）会再退回主页
     if (await driver.exists(LOC.passwordInput)) return true;
     if (await driver.exists(LOC.phoneInput)) return true;
+    if (await driver.exists(LOC.otpInput)) return true;
     return false;
   };
 
@@ -581,6 +609,8 @@ async function scrollUntilExists(app: AppBaseClass, locator: Locator, maxSwipes 
 
 /** 已登录则退出，并打开登录主页（三方入口可见） */
 export async function ensureAndroidLoginHome(app: AppBaseClass): Promise<void> {
+  // 先清掉遗留的手机号/密码页（常见于上次用例中断），避免卡在 MainActivity+enter_phone_number
+  await escapeAndroidLoginSubpages(app);
   await app['closePopups']();
   let gate = await enterAndroidMeGate(app);
   if (gate === 'logged-in') {
@@ -610,15 +640,7 @@ export async function ensureAndroidLoginHome(app: AppBaseClass): Promise<void> {
   if (gate !== 'logged-out') {
     throw new Error(`未能打开登录页，状态=${gate}`);
   }
-  // 若落在手机号/密码中间页则 back 到登录主页
-  for (let i = 0; i < 3; i++) {
-    if (await app['driver'].exists(LOC.passwordInput) || (await app['driver'].exists(LOC.phoneInput))) {
-      await app['driver'].back();
-      await sleep(600);
-      continue;
-    }
-    break;
-  }
+  await escapeAndroidLoginSubpages(app);
   // LoginActivity 刚出来时按钮可能尚未挂上，等到至少一个登录入口可见
   const entryDeadline = Date.now() + 10_000;
   while (Date.now() < entryDeadline) {

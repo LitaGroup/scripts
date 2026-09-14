@@ -67,6 +67,7 @@
 
 - **前置**：设备系统已登录 Google；脚本会先退出 App 登录态再进登录页
 - **退出后**：若落到访客首页，会再点底部「我的」进入登录页
+- **中间页**：若停在手机号/密码/OTP 页（`enter_phone_number` 等），会先点 `iv_back` 退回登录主页再点 Google
 - **步骤**：点 `iv_low_google_login` / `rl_google_login` → 账号选择页点已登账号（可选 `SCRIPT_GOOGLE_EMAIL`）→ 如有 Continue/同意则点 → 回主页「我的」
 - **期望**：`mePage` 或数字 `user_no`
 - **脚本**：`projects/app/android-lite/login-google.android.lite.test.ts`（`core/` 下有同名入口）
