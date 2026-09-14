@@ -98,9 +98,10 @@ export class AppiumResource {
     return this.sessionId !== null;
   }
 
-  /** 创建会话，返回 sessionId */
+  /** 创建会话，返回 sessionId（每次按最新 resolveAppiumUrl，避免脏环境指到 172.20.1.79） */
   async createSession(capabilities: AppiumCapabilities): Promise<string> {
     if (this.sessionId) throw new Error('Appium 会话已存在，请先 deleteSession()');
+    this.baseUrl = resolveAppiumUrl();
     return await this.createSessionOnce(capabilities);
   }
 

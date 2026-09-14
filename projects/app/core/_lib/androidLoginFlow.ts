@@ -612,8 +612,8 @@ async function softExists(app: AppBaseClass, locator: Locator): Promise<boolean>
     return await app['driver'].exists(locator);
   } catch (e) {
     const msg = (e as Error).message || String(e);
-    // API 35 XPath mSealed 等：不当作元素存在，也不中断登录
-    if (/mSealed|enforceXPath1|xpath/i.test(msg)) {
+    // API 35 / Custom Tab：mSealed、AccessibilityNodeInfo 等，不当存在也不中断
+    if (/mSealed|AccessibilityNodeInfo|UiAutomator2Exception|enforceXPath1|xpath|stale/i.test(msg)) {
       app['log'](`定位忽略异常: ${msg.slice(0, 160)}`);
       return false;
     }
@@ -628,7 +628,11 @@ async function softClick(app: AppBaseClass, locator: Locator): Promise<boolean> 
     return true;
   } catch (e) {
     const msg = (e as Error).message || String(e);
-    if (/mSealed|enforceXPath1|xpath|stale|not found|could not be located/i.test(msg)) {
+    if (
+      /mSealed|AccessibilityNodeInfo|UiAutomator2Exception|enforceXPath1|xpath|stale|not found|could not be located/i.test(
+        msg,
+      )
+    ) {
       app['log'](`点击忽略异常: ${msg.slice(0, 160)}`);
       return false;
     }
@@ -699,15 +703,14 @@ async function scrollUntilExists(app: AppBaseClass, locator: Locator, maxSwipes 
 
 /** 登录主页入口是否可见（手机号 / Google / Facebook 任一） */
 async function androidLoginEntriesVisible(app: AppBaseClass): Promise<boolean> {
-  const driver = app['driver'];
   return (
-    (await driver.exists(ANDROID_LOGIN_ENTRY.facebook.high)) ||
-    (await driver.exists(ANDROID_LOGIN_ENTRY.facebook.low)) ||
-    (await driver.exists(ANDROID_LOGIN_ENTRY.google.high)) ||
-    (await driver.exists(ANDROID_LOGIN_ENTRY.google.low)) ||
-    (await driver.exists(ANDROID_LOGIN_ENTRY.phone.high)) ||
-    (await driver.exists(ANDROID_LOGIN_ENTRY.phone.low)) ||
-    (await driver.exists(LOC.loginClose))
+    (await softExists(app, ANDROID_LOGIN_ENTRY.facebook.high)) ||
+    (await softExists(app, ANDROID_LOGIN_ENTRY.facebook.low)) ||
+    (await softExists(app, ANDROID_LOGIN_ENTRY.google.high)) ||
+    (await softExists(app, ANDROID_LOGIN_ENTRY.google.low)) ||
+    (await softExists(app, ANDROID_LOGIN_ENTRY.phone.high)) ||
+    (await softExists(app, ANDROID_LOGIN_ENTRY.phone.low)) ||
+    (await softExists(app, LOC.loginClose))
   );
 }
 
@@ -1110,20 +1113,16 @@ function resolveFacebookName(app: AppBaseClass, account?: AppAccount): string {
 
 async function tapFacebookContinueIfPresent(app: AppBaseClass): Promise<boolean> {
   for (const loc of FB.continueButtons) {
-    if (!(await app['driver'].exists(loc))) continue;
+    if (!(await softExists(app, loc))) continue;
     app['log'](`点 Facebook 确认按钮: ${loc[0]}=${loc[1]}`);
-    try {
-      await app['driver'].click(loc);
+    if (await softClick(app, loc)) {
       await sleep(1_200);
       return true;
-    } catch (e) {
-      // Custom Tab / 授权页可能在 exists→click 间已关闭并回到 App
-      await app['refreshActivity']();
-      if (/\.MainActivity$/i.test(app['activity'] ?? '')) {
-        app['log'](`Continue 点击时页面已回主页，视为授权完成（${(e as Error).message}）`);
-        return true;
-      }
-      app['log'](`Continue 点击失败，继续重试: ${(e as Error).message}`);
+    }
+    await app['refreshActivity']();
+    if (/\.MainActivity$/i.test(app['activity'] ?? '')) {
+      app['log']('Continue 点击时页面已回主页，视为授权完成');
+      return true;
     }
   }
   return false;
@@ -1138,14 +1137,13 @@ export async function confirmFacebookOnPicker(
   preferredName = '',
   timeoutMs = 35_000,
 ): Promise<void> {
-  const driver = app['driver'];
   const deadline = Date.now() + timeoutMs;
   let tapped = false;
 
   while (Date.now() < deadline) {
     await app['refreshActivity']();
     if (/\.MainActivity$/i.test(app['activity'] ?? '')) {
-      if ((await driver.exists(LOC.tabMe)) || (await driver.exists(LOC.mePage))) {
+      if ((await softExists(app, LOC.tabMe)) || (await softExists(app, LOC.mePage))) {
         app['log']('已回到 MainActivity，视为 Facebook 授权完成');
         return;
       }
@@ -1153,22 +1151,18 @@ export async function confirmFacebookOnPicker(
 
     if (preferredName && !tapped) {
       const byName = by.textContains(preferredName);
-      if (await driver.exists(byName)) {
+      if (await softExists(app, byName)) {
         app['log'](`点选 Facebook 账号/文案: ${preferredName}`);
         const clickable = by.xpath(
           `//*[contains(@text,${JSON.stringify(preferredName)})]/ancestor-or-self::*[@clickable='true'][1]`,
         );
-        try {
-          if (await driver.exists(clickable)) await driver.click(clickable);
-          else await driver.click(byName);
+        if ((await softClick(app, clickable)) || (await softClick(app, byName))) {
           tapped = true;
           await sleep(1_200);
           continue;
-        } catch (e) {
-          await app['refreshActivity']();
-          if (/\.MainActivity$/i.test(app['activity'] ?? '')) return;
-          app['log'](`点选账号失败: ${(e as Error).message}`);
         }
+        await app['refreshActivity']();
+        if (/\.MainActivity$/i.test(app['activity'] ?? '')) return;
       }
     }
 
@@ -1180,18 +1174,15 @@ export async function confirmFacebookOnPicker(
       continue;
     }
 
-    if (!tapped && (await driver.exists(FB.accountClickable))) {
+    if (!tapped && (await softExists(app, FB.accountClickable))) {
       app['log']('点选 Facebook 可点账号行');
-      try {
-        await driver.click(FB.accountClickable);
+      if (await softClick(app, FB.accountClickable)) {
         tapped = true;
         await sleep(1_200);
         continue;
-      } catch (e) {
-        await app['refreshActivity']();
-        if (/\.MainActivity$/i.test(app['activity'] ?? '')) return;
-        app['log'](`点选账号行失败: ${(e as Error).message}`);
       }
+      await app['refreshActivity']();
+      if (/\.MainActivity$/i.test(app['activity'] ?? '')) return;
     }
 
     await sleep(500);
@@ -1209,7 +1200,7 @@ export async function confirmFacebookOnPicker(
 
 /**
  * Facebook 三方登录：登录主页 → 点 Facebook → 授权页 Continue → 回「我的」。
- * 结构对齐 loginWithGoogle：统一门控 + 授权页容错 + 最终以「我的」判定。
+ * 结构对齐 loginWithGoogle（等待循环内不主动 dismiss Custom Tab，否则会退回登录页点不到 Continue）。
  * 前置：设备已登录 Facebook（App 或浏览器会话）；优先点 Continue，不填账密。
  */
 export async function loginWithFacebook(app: AppBaseClass, account?: AppAccount): Promise<void> {
@@ -1221,10 +1212,9 @@ export async function loginWithFacebook(app: AppBaseClass, account?: AppAccount)
   await tapFacebookLoginEntry(app);
   await sleep(1_000);
 
-  // 等授权页或直接回主页（与 Google 选账号等待同结构）
+  // 等授权页或直接回主页（对齐 Google：此处不要 dismissForeignAuthUi，FB 走 Custom Tab）
   const waitPickerDeadline = Date.now() + 20_000;
   while (Date.now() < waitPickerDeadline) {
-    await dismissForeignAuthUi(app);
     await app['refreshActivity']();
     if (/\.MainActivity$/i.test(app['activity'] ?? '') && (await softExists(app, LOC.tabMe))) {
       app['log']('点 Facebook 后已直接进入主页（可能已有授权缓存）');
@@ -1246,7 +1236,6 @@ export async function loginWithFacebook(app: AppBaseClass, account?: AppAccount)
   try {
     await confirmFacebookOnPicker(app, name);
   } catch (e) {
-    // 授权阶段异常时，若已回主页则以「我的」为准（对齐 Google）
     await app['refreshActivity']();
     if (
       /\.MainActivity$/i.test(app['activity'] ?? '') ||
