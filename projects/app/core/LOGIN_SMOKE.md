@@ -45,12 +45,13 @@
         ├─ 弹出登录页 → 走登录流程
         └─ 未弹出（已登录「我的」）
               → 设置 → 退出登录（**不等 postLogout 回调**）
-              → 固定等 5s → **重启 App**（terminate + activate）
+              → 等自动回到首页 MainActivity
+              → **重启 App**（terminate + activate，不卸载 / 不清数据）
               → 点「我的」→ LoginActivity → 走登录流程
 登录完成 → 进入「我的」→ **整单通过**
 ```
 
-> **判定**：最终进入已登录「我的」即通过。已登录时退出不依赖 Settings 回首页；点退出后等 5s 重启再进登录。Chrome/Facebook Custom Tab 会先 `back` 回 Lite。
+> **判定**：最终进入已登录「我的」即通过。已登录时：点退出 → 等自动回首页 → 重启 → 点「我的」进登录；不做 clearApp。Chrome/Facebook Custom Tab 会先 `back` 回 Lite。
 
 | ID | 标题 | P | iOS 脚本 | Android 脚本 |
 |----|------|---|----------|--------------|
