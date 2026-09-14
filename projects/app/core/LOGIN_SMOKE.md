@@ -45,8 +45,8 @@
         ├─ 弹出登录页 → 走登录流程
         └─ 未弹出（已登录「我的」）
               → 设置 → 退出登录（App：postLogout 后回 MainActivity 首页，不直接进登录）
-              → 等底栏出现 → **5s 内**点「我的」tab
-              → LoginFragment → LoginActivity → 走登录流程
+              → 等 Activity=MainActivity（不做首页 exists 扫入口，防卡死）
+              → 立刻点「我的」tab（找不到则坐标点右下角）→ LoginActivity → 走登录流程
 登录完成 → 进入「我的」→ **整单通过**
 ```
 

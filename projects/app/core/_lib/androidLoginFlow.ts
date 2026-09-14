@@ -729,6 +729,25 @@ async function waitAndroidLoginEntries(app: AppBaseClass, timeoutMs = 10_000): P
   app['log']('登录入口尚未全部可见，继续后续点击');
 }
 
+/** 点击底部「我的」tab；id 找不到时按屏幕右下角坐标点（5 tab 最右侧） */
+async function tapAndroidMeTab(app: AppBaseClass): Promise<void> {
+  const driver = app['driver'];
+  try {
+    if (await driver.waitFor(LOC.tabMe, 2_000, 250)) {
+      app['log']('点击「我的」tab（navigation_user_center）');
+      await driver.click(LOC.tabMe);
+      return;
+    }
+  } catch (e) {
+    app['log'](`tabMe 点击异常，改坐标: ${((e as Error).message || String(e)).slice(0, 120)}`);
+  }
+  const { width, height } = await driver.windowRect();
+  const x = Math.round(width * 0.9);
+  const y = Math.round(height * 0.94);
+  app['log'](`坐标点击「我的」tab (${x},${y})`);
+  await driver.execute('mobile: clickGesture', [{ x, y }]);
+}
+
 /**
  * 在已登录「我的」页：设置 → 退出登录 → 等回首页 → 点「我的」拉起登录。
  *
@@ -736,6 +755,8 @@ async function waitAndroidLoginEntries(app: AppBaseClass, timeoutMs = 10_000): P
  * - SettingsActivity.onClickLogout：postLogout 后 start MainActivity(HOME)（不会直接进登录）
  * - MainActivity.navigateToFragmentCheckLogin：未登录点「我的」→ LoginFragment → LoginActivity
  * - home.android.lite.test.ts logoutIfNeeded：ensureState(home) 后再 enterMeTab
+ *
+ * 注意：回首页等待阶段只看 Activity，避免在首页动画页上大量 exists 探测导致卡死。
  */
 async function logoutAndroidFromMe(app: AppBaseClass): Promise<void> {
   const driver = app['driver'];
@@ -755,80 +776,66 @@ async function logoutAndroidFromMe(app: AppBaseClass): Promise<void> {
     throw new Error('设置页未找到退出登录 logoutLayout / logout_tv');
   }
   await driver.click(logoutTarget);
-  app['log']('已点退出登录：等待 postLogout 完成并回到 MainActivity 首页');
+  app['log']('已点退出登录：等待回到 MainActivity 首页（只盯 Activity，避免首页 exists 卡死）');
 
-  // 1) 等回首页（网络 logout 可能数秒；Settings 上无底栏，此时点「我的」无效）
-  const homeDeadline = Date.now() + 25_000;
+  // 1) 只等 Activity 离开 Settings → MainActivity / LoginActivity（postLogout 可能数秒）
+  const homeDeadline = Date.now() + 30_000;
   let onHome = false;
   let lastAct = '';
+  let lastLogAt = 0;
   while (Date.now() < homeDeadline) {
-    await app['refreshActivity']();
-    lastAct = app['activity'] ?? '';
-    if (/\.LoginActivity$/i.test(lastAct) || (await androidLoginEntriesVisible(app))) {
+    lastAct = await app['refreshActivity']();
+    if (/\.LoginActivity$/i.test(lastAct)) {
       app['log']('退出后已进入登录页');
       return;
     }
-    if (
-      /\.MainActivity$/i.test(lastAct) &&
-      ((await softExists(app, LOC.tabMe)) || (await softExists(app, LOC.tabHome)))
-    ) {
+    if (/\.MainActivity$/i.test(lastAct)) {
       onHome = true;
-      app['log'](`退出后已回到首页 Activity=${lastAct}`);
+      app['log'](`退出后已回到首页 Activity=${lastAct}，准备点「我的」`);
       break;
     }
-    await sleep(400);
+    if (Date.now() - lastLogAt > 2_000) {
+      app['log'](`退出中… 当前 Activity=${lastAct || '(空)'}`);
+      lastLogAt = Date.now();
+    }
+    await sleep(300);
   }
 
   if (!onHome) {
-    if (await isAndroidUnauthenticatedLoginScreen(app)) {
-      app['log']('退出后已在登录页');
-      return;
-    }
-    throw new Error(`退出登录后未回到首页（底栏不可见），Activity: ${lastAct || '(未知)'}`);
+    throw new Error(`退出登录后未回到 MainActivity，Activity: ${lastAct || '(未知)'}`);
   }
 
-  // 2) 5s 内点到「我的」tab（对齐用户约定；LoginFragment 再启 LoginActivity）
-  app['log']('退出后停在首页 → 5s 内点击「我的」tab 拉起登录页');
-  const tapMeDeadline = Date.now() + 5_000;
-  let tappedMe = false;
-  while (Date.now() < tapMeDeadline) {
-    if (await isAndroidUnauthenticatedLoginScreen(app)) {
-      app['log']('点「我的」后已弹出登录页，继续登录流程');
-      return;
-    }
-    if (await softExists(app, LOC.tabMe)) {
-      app['log']('点击底部「我的」tab（navigation_user_center）');
-      await driver.click(LOC.tabMe);
-      tappedMe = true;
-      break;
-    }
-    if (await softExists(app, LOC.tabHome)) {
-      await driver.click(LOC.tabHome);
-      await sleep(300);
-    }
-    await sleep(200);
-  }
-
-  if (!tappedMe && !(await isAndroidUnauthenticatedLoginScreen(app))) {
-    throw new Error(`退出后 5s 内未能点击「我的」tab，Activity: ${app['activity'] || '(未知)'}`);
-  }
-
-  // 3) 等待 LoginFragment → LoginActivity（源码 DELAY_START_ACTIVITY + 启动）
-  const loginDeadline = Date.now() + 10_000;
+  // 2) 立刻点「我的」拉起 LoginFragment → LoginActivity（可多试几次）
+  app['log']('首页已就绪 → 点击「我的」tab 拉起登录页');
+  const loginDeadline = Date.now() + 15_000;
+  let taps = 0;
   while (Date.now() < loginDeadline) {
-    if (await isAndroidUnauthenticatedLoginScreen(app)) {
-      app['log']('点「我的」后已弹出登录页，继续登录流程');
+    lastAct = await app['refreshActivity']();
+    if (/\.LoginActivity$/i.test(lastAct)) {
+      app['log']('点「我的」后已进入 LoginActivity，继续登录流程');
       return;
     }
-    // 仍停在首页则再点一次「我的」
-    if (await softExists(app, LOC.tabMe)) {
-      await driver.click(LOC.tabMe);
+    // 登录入口已可见（仍可能 Activity 短暂还是 Main）
+    if (await androidLoginEntriesVisible(app)) {
+      app['log']('点「我的」后已出现登录入口，继续登录流程');
+      return;
     }
-    await sleep(400);
+    await tapAndroidMeTab(app);
+    taps += 1;
+    // 给 LoginFragment 启 LoginActivity 一点时间（源码 DELAY 50ms + 启动）
+    const settleUntil = Date.now() + 2_500;
+    while (Date.now() < settleUntil) {
+      lastAct = await app['refreshActivity']();
+      if (/\.LoginActivity$/i.test(lastAct)) {
+        app['log']('点「我的」后已进入 LoginActivity，继续登录流程');
+        return;
+      }
+      await sleep(250);
+    }
   }
 
   throw new Error(
-    `退出登录后点「我的」未弹出登录页，Activity: ${app['activity'] || '(未知)'}`,
+    `退出登录后点「我的」未弹出登录页（taps=${taps}），Activity: ${lastAct || app['activity'] || '(未知)'}`,
   );
 }
 
