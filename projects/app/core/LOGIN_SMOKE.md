@@ -76,16 +76,11 @@
 
 ### SM-LOGIN-06 要点（Android Facebook）
 
-- **脚本**：`projects/app/core/login-facebook.android.lite.test.ts`（平台 test/50；与 `android-lite/` 副本同逻辑）
-- **前置**：设备 Facebook App 或 Chrome 已登录 Facebook
-- **流程**：统一门控 → 点 Facebook → **留在 Custom Tab 点 Continue**（不要先 back 关掉授权页）→ 回「我的」
-- **通过**：已登录「我的」（`mePage` / `user_no`）
-
+- **脚本**：平台 [test/50](http://project.cinta.team/projects/60/tests/50) → `projects/app/core/login-facebook.android.lite.test.ts`（与 `android-lite/` 副本同逻辑）
 - **门控**：见上文「统一登录门控」
 - **前置**：设备 Facebook App 或 Chrome 已登录 Facebook
-- **步骤**：点 `rl_facebook_login` / `iv_low_facebook_login` → 授权页点 **Continue as / Continue**（可选 `SCRIPT_FACEBOOK_NAME`）→ 「我的」
+- **步骤**：点 `rl_facebook_login` / `iv_low_facebook_login` → **留在 Custom Tab** 点 Continue as / Continue（可选 `SCRIPT_FACEBOOK_NAME`；勿先 back 关掉授权页）→ 「我的」
 - **期望**：`mePage` 或数字 `user_no`
-- **脚本**：`projects/app/android-lite/login-facebook.android.lite.test.ts`（`core/` 下有同名入口）
 
 ### SM-LOGIN-07 要点（Android Google）
 
