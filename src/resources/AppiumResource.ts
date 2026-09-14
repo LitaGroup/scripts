@@ -3,7 +3,7 @@
  *
  * - 服务地址：SCRIPT_APPIUM_URL 或 APPIUM_HOST，默认 http://127.0.0.1:4723/
  *   localhost 会规范成 127.0.0.1（避免 Node 走 IPv6 ::1 导致 fetch failed）
- *   本机连不上时回退内部服务器 http://172.20.1.79:4723/
+ * - 不再自动回退 172.20.1.79（该地址在执行机上通常不可达，会导致误报 fetch failed）
  * - 仅实现脚本所需的最小指令集：会话管理、元素查找/点击/输入、页面源码、截图等。
  */
 
@@ -27,7 +27,8 @@ export type Locator = [using: string, value: string];
 const ELEMENT_KEY = 'element-6066-11e4-a52e-4f735466cecf';
 
 const DEFAULT_APPIUM_URL = 'http://127.0.0.1:4723/';
-const INTERNAL_APPIUM_URL = 'http://172.20.1.79:4723/';
+/** @deprecated 历史内网地址，执行机不可达；若环境变量仍指向它则改用本机 */
+const DEPRECATED_INTERNAL_APPIUM_HOST = '172.20.1.79';
 
 /** localhost → 127.0.0.1，避免 Node fetch 解析到 ::1 而 Appium 只监听 IPv4 */
 export function normalizeAppiumUrl(raw: string): string {
@@ -40,21 +41,20 @@ export function normalizeAppiumUrl(raw: string): string {
 }
 
 export function resolveAppiumUrl(): string {
-  return normalizeAppiumUrl(
+  const raw =
     process.env.SCRIPT_APPIUM_URL ||
-      process.env.APPIUM_URL ||
-      process.env.APPIUM_HOST ||
-      DEFAULT_APPIUM_URL,
-  );
-}
-
-function isLoopbackAppium(url: string): boolean {
+    process.env.APPIUM_URL ||
+    process.env.APPIUM_HOST ||
+    DEFAULT_APPIUM_URL;
+  const url = normalizeAppiumUrl(raw);
   try {
-    const host = new URL(url).hostname;
-    return host === '127.0.0.1' || host === 'localhost' || host === '::1';
+    if (new URL(url).hostname === DEPRECATED_INTERNAL_APPIUM_HOST) {
+      return DEFAULT_APPIUM_URL;
+    }
   } catch {
-    return false;
+    return DEFAULT_APPIUM_URL;
   }
+  return url;
 }
 
 function xpathLiteral(s: string): string {
@@ -98,21 +98,11 @@ export class AppiumResource {
     return this.sessionId !== null;
   }
 
-  /** 创建会话，返回 sessionId */
+  /** 创建会话，返回 sessionId（每次按最新 resolveAppiumUrl，避免脏环境指到 172.20.1.79） */
   async createSession(capabilities: AppiumCapabilities): Promise<string> {
     if (this.sessionId) throw new Error('Appium 会话已存在，请先 deleteSession()');
-    try {
-      return await this.createSessionOnce(capabilities);
-    } catch (e) {
-      const msg = (e as Error).message;
-      const canFallback =
-        isLoopbackAppium(this.baseUrl) &&
-        this.baseUrl !== INTERNAL_APPIUM_URL &&
-        /请求失败|fetch failed|ECONNREFUSED|AbortError/i.test(msg);
-      if (!canFallback) throw e;
-      this.baseUrl = INTERNAL_APPIUM_URL;
-      return await this.createSessionOnce(capabilities);
-    }
+    this.baseUrl = resolveAppiumUrl();
+    return await this.createSessionOnce(capabilities);
   }
 
   private async createSessionOnce(capabilities: AppiumCapabilities): Promise<string> {

@@ -24,7 +24,7 @@ Script collection: automated test scripts (`*.test.ts`), online health-check scr
    - Test env: direct connection (host/account/password), **read-write**, for test scenarios.
    - Prod env: via API proxy, **read-only**, for queries and checks.
    - Implemented: `APIProdResource` (prod API; fixed host `https://api.cinta.team/`; `l-user-token` from `config.json`; SQL-query endpoint `admin-ai/v1/query/execute`; known DBs in `databases.ts`), `MySQLProdResource` (prod MySQL via API proxy; **read-only** — client-side guard rejects write/DDL/multi-statement).
-   - `AppiumResource` (APP automation): zero-dependency W3C WebDriver/Appium HTTP client over global `fetch`; server URL from env `SCRIPT_APPIUM_URL` (default `http://127.0.0.1:4723/`; internal fallback `http://172.20.1.79:4723/`); session lifecycle, `exists/waitFor/click(auto-retries stale/transient-missing)/input(W3C key-actions typing)/textOf/isDisplayed/source/back/screenshotBase64/hideKeyboard(BACK-key fallback when ineffective, e.g. password fields)/isKeyboardShown/swipeUp/swipeDown/swipeInElement/currentActivity`; locator helpers `by.id/accessibilityId/xpath/text/textContains` (cross-platform attribute matching).
+   - `AppiumResource` (APP automation): zero-dependency W3C WebDriver/Appium HTTP client over global `fetch`; server URL from env `SCRIPT_APPIUM_URL` (default `http://127.0.0.1:4723/`; env pointing at deprecated `172.20.1.79` is rewritten to loopback); session lifecycle, `exists/waitFor/click(auto-retries stale/transient-missing)/input(W3C key-actions typing)/textOf/isDisplayed/source/back/screenshotBase64/hideKeyboard(BACK-key fallback when ineffective, e.g. password fields)/isKeyboardShown/swipeUp/swipeDown/swipeInElement/currentActivity`; locator helpers `by.id/accessibilityId/xpath/text/textContains` (cross-platform attribute matching).
    - Planned: `MySQLTestResource` (test, DB-password direct).
 2. **Service layer** (`src/services/`) — env-aware business implementations. Construct with `'prod' | 'test'`; host auto-selected (`api.cinta.team` / `api.test.cinta.team`).
    - `ServiceBase` (abstract): holds `env`; exposes `api` (env-routed `APIProdResource`) and `sqlQuery(database, sql)` (read-only-guarded via `MySQLProdResource`).
@@ -64,7 +64,7 @@ Script collection: automated test scripts (`*.test.ts`), online health-check scr
 
 ### APP script conventions (Appium)
 - Env vars:
-  - `SCRIPT_APPIUM_URL` — Appium server URL, default `http://127.0.0.1:4723/` (internal fallback `http://172.20.1.79:4723/`)
+  - `SCRIPT_APPIUM_URL` — Appium server URL, default `http://127.0.0.1:4723/` (deprecated `172.20.1.79` is ignored / rewritten to loopback)
   - `SCRIPT_ENV` — `PROD`（default，线上 release）/ `TEST`（测网 debug）
   - `SCRIPT_CONFIG` — optional path to a JSON data config file providing accounts/passwords (see `config.app.example.json`)
 - Writing cases: to obtain element IDs/locators or check the current page Activity, use emulator/device commands instead of guessing, e.g.:

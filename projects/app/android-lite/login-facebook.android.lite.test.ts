@@ -1,6 +1,9 @@
 /**
  * Android Lite Facebook 登录冒烟：SM-LOGIN-06
- * 通过标准：到达已登录「我的」页即整单通过。
+ *
+ * 通过标准：到达已登录「我的」页（mePage / user_no）即整单通过。
+ * 门控与授权均在「执行登录」步骤内完成（与 login-google 同结构），
+ * 避免前置步骤 fail 导致最终已进「我的」仍判未通过。
  */
 import { AppBaseClass, type AppAccount } from '../../../src/base/AppBaseClass.ts';
 import { ANDROID_LITE_PACKAGE, ANDROID_LOC as LOC } from '../core/_lib/androidLocators.ts';

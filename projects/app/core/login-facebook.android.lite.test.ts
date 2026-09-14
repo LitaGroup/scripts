@@ -1,4 +1,4 @@
-/** core 入口副本 → android-lite/login-facebook.android.lite.test.ts */
+/** core 入口副本 → android-lite/login-facebook.android.lite.test.ts（平台 test/50 指向本路径） */
 import { AppBaseClass, type AppAccount } from '../../../src/base/AppBaseClass.ts';
 import { ANDROID_LITE_PACKAGE, ANDROID_LOC as LOC } from './_lib/androidLocators.ts';
 import {

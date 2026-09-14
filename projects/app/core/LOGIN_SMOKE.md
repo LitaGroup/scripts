@@ -40,16 +40,18 @@
 
 ```text
 启动并关弹窗
-  ├─ 已在登录页（未登录 / LoginActivity 或入口可见）
-  │     → 直接走对应登录流程
-  └─ 不在登录页
-        → 点底部「我的」
-              ├─ 弹出登录页 → 走对应登录流程
-              └─ 未弹出（已登录「我的」）→ 设置 → 退出登录 → 再进登录页 → 走登录流程
-登录完成 → 进入「我的」→ **整单通过**（前置门控/入口检查失败但最终进「我的」时，以最终结果为准；脚本已合并为单步登录判定）
+  ├─ 已在登录页（未登录）→ 直接走对应登录流程
+  └─ 不在登录页 → 点底部「我的」
+        ├─ 弹出登录页 → 走登录流程
+        └─ 未弹出（已登录「我的」）
+              → 设置 → 退出登录（**不等 postLogout 回调**）
+              → 等自动回到首页 MainActivity
+              → **重启 App**（terminate + activate，不卸载 / 不清数据）
+              → 点「我的」→ LoginActivity → 走登录流程
+登录完成 → 进入「我的」→ **整单通过**
 ```
 
-> **判定**：`[done].status=success` 当且仅当最终进入已登录「我的」；中间若卡在 Chrome/Facebook Custom Tab 会先 `back` 回 Lite。
+> **判定**：最终进入已登录「我的」即通过。已登录时：点退出 → 等自动回首页 → 重启 → 点「我的」进登录；不做 clearApp。Chrome/Facebook Custom Tab 会先 `back` 回 Lite。
 
 | ID | 标题 | P | iOS 脚本 | Android 脚本 |
 |----|------|---|----------|--------------|
@@ -73,6 +75,11 @@
 - **期望**：手机号入口必现；≥1 个三方入口；Android 不应出现 Apple
 
 ### SM-LOGIN-06 要点（Android Facebook）
+
+- **脚本**：`projects/app/core/login-facebook.android.lite.test.ts`（平台 test/50；与 `android-lite/` 副本同逻辑）
+- **前置**：设备 Facebook App 或 Chrome 已登录 Facebook
+- **流程**：统一门控 → 点 Facebook → **留在 Custom Tab 点 Continue**（不要先 back 关掉授权页）→ 回「我的」
+- **通过**：已登录「我的」（`mePage` / `user_no`）
 
 - **门控**：见上文「统一登录门控」
 - **前置**：设备 Facebook App 或 Chrome 已登录 Facebook
