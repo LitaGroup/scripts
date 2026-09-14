@@ -1061,25 +1061,26 @@ export async function loginWithGoogle(app: AppBaseClass, account?: AppAccount): 
 export async function tapFacebookLoginEntry(app: AppBaseClass): Promise<void> {
   const driver = app['driver'];
   const e = ANDROID_LOGIN_ENTRY.facebook;
-  if (await driver.exists(e.high)) {
+  // 与 Google 入口一致：高优 / 低优 / 文案，再轻滑重试
+  if (await softExists(app, e.high)) {
     await driver.click(e.high);
     return;
   }
-  if (await driver.exists(e.low)) {
+  if (await softExists(app, e.low)) {
     await driver.click(e.low);
     return;
   }
-  if (await driver.exists(e.text)) {
+  if (await softExists(app, e.text)) {
     await driver.click(e.text);
     return;
   }
   await driver.swipeUp(0.35);
   await sleep(500);
-  if (await driver.exists(e.high)) {
+  if (await softExists(app, e.high)) {
     await driver.click(e.high);
     return;
   }
-  if (await driver.exists(e.low)) {
+  if (await softExists(app, e.low)) {
     await driver.click(e.low);
     return;
   }
@@ -1208,6 +1209,7 @@ export async function confirmFacebookOnPicker(
 
 /**
  * Facebook 三方登录：登录主页 → 点 Facebook → 授权页 Continue → 回「我的」。
+ * 结构对齐 loginWithGoogle：统一门控 + 授权页容错 + 最终以「我的」判定。
  * 前置：设备已登录 Facebook（App 或浏览器会话）；优先点 Continue，不填账密。
  */
 export async function loginWithFacebook(app: AppBaseClass, account?: AppAccount): Promise<void> {
@@ -1217,29 +1219,45 @@ export async function loginWithFacebook(app: AppBaseClass, account?: AppAccount)
 
   await ensureAndroidLoginHome(app);
   await tapFacebookLoginEntry(app);
-  await sleep(1_500);
+  await sleep(1_000);
 
-  const waitDeadline = Date.now() + 20_000;
-  while (Date.now() < waitDeadline) {
+  // 等授权页或直接回主页（与 Google 选账号等待同结构）
+  const waitPickerDeadline = Date.now() + 20_000;
+  while (Date.now() < waitPickerDeadline) {
+    await dismissForeignAuthUi(app);
     await app['refreshActivity']();
-    if (/\.MainActivity$/i.test(app['activity'] ?? '') && (await app['driver'].exists(LOC.tabMe))) {
+    if (/\.MainActivity$/i.test(app['activity'] ?? '') && (await softExists(app, LOC.tabMe))) {
       app['log']('点 Facebook 后已直接进入主页（可能已有授权缓存）');
       await finishOnMeTab(app);
       return;
     }
-    // 已出现 Continue / 账号页
     let hasContinue = false;
     for (const loc of FB.continueButtons) {
-      if (await app['driver'].exists(loc)) {
+      if (await softExists(app, loc)) {
         hasContinue = true;
         break;
       }
     }
-    if (hasContinue || (name && (await app['driver'].exists(by.textContains(name))))) break;
+    if (hasContinue || (name && (await softExists(app, by.textContains(name))))) break;
+    await tapFacebookContinueIfPresent(app);
     await sleep(500);
   }
 
-  await confirmFacebookOnPicker(app, name);
+  try {
+    await confirmFacebookOnPicker(app, name);
+  } catch (e) {
+    // 授权阶段异常时，若已回主页则以「我的」为准（对齐 Google）
+    await app['refreshActivity']();
+    if (
+      /\.MainActivity$/i.test(app['activity'] ?? '') ||
+      (await isAndroidLoggedInMe(app)) ||
+      (await softExists(app, LOC.tabMe))
+    ) {
+      app['log'](`Facebook 授权异常但已回 App，按「我的」页判定: ${(e as Error).message.slice(0, 120)}`);
+    } else {
+      throw e;
+    }
+  }
   await app['closePopups']();
   await finishOnMeTab(app);
 }
