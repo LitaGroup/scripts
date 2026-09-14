@@ -740,6 +740,163 @@ async function waitAndroidLoginEntries(app: AppBaseClass, timeoutMs = 10_000): P
   app['log']('登录入口尚未全部可见，继续后续点击');
 }
 
+/** dumpsys 焦点 Activity，纠偏 Facebook Custom Tab 后 Appium getCurrentActivity 过期 */
+async function dumpsysFocusedActivity(app: AppBaseClass): Promise<string> {
+  try {
+    const out = await app['driver'].execute('mobile: shell', [
+      {
+        command: 'dumpsys',
+        args: ['window'],
+        timeout: 6_000,
+      },
+    ]);
+    const text = typeof out === 'string' ? out : String(out ?? '');
+    const line =
+      text.split('\n').find((l) => /mCurrentFocus=/.test(l)) ||
+      text.split('\n').find((l) => /mFocusedApp=/.test(l)) ||
+      '';
+    const m = line.match(/\/([A-Za-z0-9_.]+)/);
+    return m?.[1] ?? '';
+  } catch {
+    return '';
+  }
+}
+
+async function clickAndroidLogoutIfVisible(app: AppBaseClass): Promise<boolean> {
+  if (await softExists(app, LOC.logoutLayout)) {
+    await app['driver'].click(LOC.logoutLayout);
+    return true;
+  }
+  if (await softExists(app, LOC.logout)) {
+    await app['driver'].click(LOC.logout);
+    return true;
+  }
+  return false;
+}
+
+/**
+ * 点完退出后：进登录页即返回。
+ * Facebook 退出常停在 Settings 转圈，且 getCurrentActivity 可能仍报 Settings 而画面已是首页。
+ */
+async function afterLogoutOpenAndroidLoginPage(
+  app: AppBaseClass,
+  opts: { restartIfStuck?: boolean } = {},
+): Promise<void> {
+  const deadline = Date.now() + 40_000;
+  let lastAct = '';
+  let lastLogAt = 0;
+  let lastTapAt = 0;
+  let lastLogoutRetry = Date.now();
+  let lastDumpsysAt = 0;
+  let dumpsysAct = '';
+
+  const isLoginAct = (act: string): boolean =>
+    /(?:^|[./])LoginActivity$/i.test(act);
+  const isHomeAct = (act: string): boolean =>
+    /(?:^|[./])MainActivity$/i.test(act) && !/CustomTabMainActivity/i.test(act);
+
+  const onLogin = async (act: string): Promise<boolean> =>
+    isLoginAct(act) || (await isAndroidUnauthenticatedLoginScreen(app));
+
+  const looksLikeHome = async (act: string): Promise<boolean> => {
+    if (isHomeAct(act)) return true;
+    if (await softExists(app, LOC.tabMe)) return true;
+    if (await softExists(app, LOC.tabHome)) return true;
+    return false;
+  };
+
+  while (Date.now() < deadline) {
+    lastAct = await app['refreshActivity']();
+    if (/\.SettingsActivity$/i.test(lastAct) && Date.now() - lastDumpsysAt > 1_500) {
+      dumpsysAct = await dumpsysFocusedActivity(app);
+      lastDumpsysAt = Date.now();
+      if (dumpsysAct) app['log'](`dumpsys 焦点: ${dumpsysAct}（Appium=${lastAct}）`);
+    }
+    // Appium 报 Settings 时以 dumpsys 为准；dumpsys 已是首页/登录则覆盖过期的 Settings
+    let act = lastAct;
+    if (isHomeAct(dumpsysAct) || isLoginAct(dumpsysAct)) act = dumpsysAct;
+    else if (/\.SettingsActivity$/i.test(lastAct) && dumpsysAct) act = dumpsysAct;
+
+    if (await onLogin(act)) {
+      app['log']('已进入登录页，可继续下一登录方式');
+      await escapeAndroidLoginSubpages(app);
+      await waitAndroidLoginEntries(app);
+      return;
+    }
+
+    if (await looksLikeHome(act)) {
+      if (Date.now() - lastTapAt >= 700) {
+        app['log'](`已回首页（Appium=${lastAct || '(空)'} dumpsys=${dumpsysAct || '-'}）→ 立即点「我的」`);
+        await tapAndroidMeTab(app);
+        lastTapAt = Date.now();
+        await sleep(400);
+        await app['closePopups']();
+      } else {
+        await sleep(200);
+      }
+      continue;
+    }
+
+    if (/\.SettingsActivity$/i.test(lastAct) || /SettingsActivity/i.test(dumpsysAct)) {
+      // Facebook LoginManager.logOut 可能卡住进度圈：隔几秒再点一次退出
+      if (Date.now() - lastLogoutRetry > 3_000) {
+        app['log']('仍在设置页 → 再点一次退出登录');
+        await app['closePopups']();
+        if (await clickAndroidLogoutIfVisible(app)) {
+          lastLogoutRetry = Date.now();
+        } else if (Date.now() - lastTapAt >= 700) {
+          // UiAutomator 可能已失效：坐标点底栏「我的」，万一其实已在首页
+          app['log']('设置页看不到退出按钮 → 坐标点「我的」试探是否已在首页');
+          await tapAndroidMeTab(app);
+          lastTapAt = Date.now();
+        }
+      }
+    }
+
+    if (Date.now() - lastLogAt > 2_000) {
+      app['log'](`等待退出完成… Activity=${lastAct || '(空)'} dumpsys=${dumpsysAct || '-'}`);
+      lastLogAt = Date.now();
+    }
+    await sleep(250);
+  }
+
+  app['log'](
+    `退出等待结束（Appium=${lastAct || '(空)'} dumpsys=${dumpsysAct || '-'}）→ 强制点「我的」进登录`,
+  );
+  if (await isAndroidUnauthenticatedLoginScreen(app)) {
+    await escapeAndroidLoginSubpages(app);
+    await waitAndroidLoginEntries(app);
+    return;
+  }
+  try {
+    const gate = await enterAndroidMeGate(app, 15_000);
+    if (gate === 'logged-out') {
+      await escapeAndroidLoginSubpages(app);
+      await waitAndroidLoginEntries(app);
+      return;
+    }
+  } catch (e) {
+    app['log'](`enterAndroidMeGate: ${((e as Error).message || String(e)).slice(0, 160)}`);
+  }
+
+  if (opts.restartIfStuck) {
+    app['log']('仍未进登录 → 重启 App（terminate + activate）');
+    await app['terminateApp']();
+    await sleep(800);
+    await app['activateApp']();
+    await sleep(1_500);
+    await app['closePopups']();
+    await dismissForeignAuthUi(app);
+    if (await isAndroidUnauthenticatedLoginScreen(app)) return;
+    const gate = await enterAndroidMeGate(app, 20_000);
+    if (gate === 'logged-out') return;
+  }
+
+  throw new Error(
+    `退出登录后未能打开登录页，Activity: ${lastAct || '(未知)'} dumpsys=${dumpsysAct || '-'}`,
+  );
+}
+
 /** 立即点底部「我的」：优先坐标（免首页动画 exists 等待），再回退 id 点击 */
 async function tapAndroidMeTab(app: AppBaseClass): Promise<void> {
   const driver = app['driver'];
@@ -797,60 +954,8 @@ export async function logoutAndroidThenOpenLoginPage(app: AppBaseClass): Promise
     throw new Error('设置页未找到退出登录 logoutLayout / logout_tv');
   }
   await driver.click(logoutTarget);
-  app['log']('已点退出：等回首页后立刻点「我的」（不在首页空等）');
-
-  const deadline = Date.now() + 30_000;
-  let lastAct = '';
-  let lastLogAt = 0;
-  let lastTapAt = 0;
-  let sawMain = false;
-
-  while (Date.now() < deadline) {
-    lastAct = await app['refreshActivity']();
-
-    if (/\.LoginActivity$/i.test(lastAct) || (await isAndroidUnauthenticatedLoginScreen(app))) {
-      app['log']('已进入登录页，可继续下一登录方式');
-      await escapeAndroidLoginSubpages(app);
-      await waitAndroidLoginEntries(app);
-      return;
-    }
-
-    if (/\.MainActivity$/i.test(lastAct)) {
-      sawMain = true;
-      // 首页出现即点，不等 tabMe exists / 不先 enterAndroidMeGate 空转
-      if (Date.now() - lastTapAt >= 700) {
-        app['log'](`已回首页 ${lastAct} → 立即点「我的」拉起登录`);
-        await tapAndroidMeTab(app);
-        lastTapAt = Date.now();
-        await sleep(500);
-        await app['closePopups']();
-      } else {
-        await sleep(200);
-      }
-      continue;
-    }
-
-    if (Date.now() - lastLogAt > 2_000) {
-      app['log'](`等待退出完成… Activity=${lastAct || '(空)'}`);
-      lastLogAt = Date.now();
-    }
-    await sleep(200);
-  }
-
-  if (sawMain) {
-    // 最后再走一遍门控（含坐标点），尽量救回
-    app['log']('首页点「我的」后仍未进登录页 → 再走 enterAndroidMeGate');
-    const gate = await enterAndroidMeGate(app, 12_000);
-    if (gate === 'logged-out') {
-      await escapeAndroidLoginSubpages(app);
-      await waitAndroidLoginEntries(app);
-      return;
-    }
-  }
-
-  throw new Error(
-    `退出登录后未能打开登录页（卡在首页/其它页），Activity: ${lastAct || '(未知)'}`,
-  );
+  app['log']('已点退出：等回首页后立刻点「我的」（不在首页空等；设置页会 dumpsys 纠偏）');
+  await afterLogoutOpenAndroidLoginPage(app, { restartIfStuck: true });
 }
 
 /**
@@ -879,70 +984,7 @@ async function logoutAndroidFromMe(app: AppBaseClass): Promise<void> {
   }
   await driver.click(logoutTarget);
   app['log']('已点退出登录：不等 postLogout；回首页后立刻点「我的」或再重启');
-
-  const homeDeadline = Date.now() + 25_000;
-  let lastAct = '';
-  let lastLogAt = 0;
-  let lastTapAt = 0;
-  let firstMainAt = 0;
-  while (Date.now() < homeDeadline) {
-    lastAct = await app['refreshActivity']();
-    if (/\.LoginActivity$/i.test(lastAct) || (await isAndroidUnauthenticatedLoginScreen(app))) {
-      app['log']('退出后已进入登录页');
-      return;
-    }
-    if (/\.MainActivity$/i.test(lastAct)) {
-      if (!firstMainAt) firstMainAt = Date.now();
-      if (Date.now() - lastTapAt >= 700) {
-        app['log'](`已自动回到首页 ${lastAct} → 立刻点「我的」（不空等）`);
-        await tapAndroidMeTab(app);
-        lastTapAt = Date.now();
-        await sleep(500);
-        await app['closePopups']();
-      } else {
-        await sleep(200);
-      }
-      // 首页连点约 4s 仍未进登录 → 走重启兜底
-      if (Date.now() - firstMainAt > 4_000) break;
-      continue;
-    }
-    if (Date.now() - lastLogAt > 2_000) {
-      app['log'](`等待回首页… Activity=${lastAct || '(空)'}`);
-      lastLogAt = Date.now();
-    }
-    await sleep(200);
-  }
-
-  if (!firstMainAt && !/\.MainActivity$/i.test(lastAct)) {
-    throw new Error(`退出登录后未自动回到首页，Activity: ${lastAct || '(未知)'}`);
-  }
-
-  if (await isAndroidUnauthenticatedLoginScreen(app)) {
-    app['log']('点「我的」后已在登录页，无需重启');
-    return;
-  }
-
-  app['log']('首页点「我的」未进登录 → 重启 App（terminate + activate），不卸载');
-  await app['terminateApp']();
-  await sleep(800);
-  await app['activateApp']();
-  await sleep(1_500);
-  await app['closePopups']();
-  await dismissForeignAuthUi(app);
-
-  if (await isAndroidUnauthenticatedLoginScreen(app)) {
-    app['log']('重启后已在登录页，继续登录流程');
-    return;
-  }
-
-  app['log']('重启后点「我的」拉起登录页');
-  const gate = await enterAndroidMeGate(app, 20_000);
-  if (gate !== 'logged-out') {
-    throw new Error(
-      `重启后点「我的」未弹出登录页，状态=${gate}，Activity=${app['activity'] || '(未知)'}`,
-    );
-  }
-  app['log']('已弹出登录页，继续登录流程');
+  await afterLogoutOpenAndroidLoginPage(app, { restartIfStuck: true });
 }
 
 /**
