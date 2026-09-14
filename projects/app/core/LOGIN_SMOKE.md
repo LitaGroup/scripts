@@ -44,13 +44,13 @@
   └─ 不在登录页 → 点底部「我的」
         ├─ 弹出登录页 → 走登录流程
         └─ 未弹出（已登录「我的」）
-              → 设置 → 退出登录
-              → 若落到首页：不要停在首页，**5s 内**点「我的」tab 弹出登录页
-              → 走登录流程
+              → 设置 → 退出登录（App：postLogout 后回 MainActivity 首页，不直接进登录）
+              → 等底栏出现 → **5s 内**点「我的」tab
+              → LoginFragment → LoginActivity → 走登录流程
 登录完成 → 进入「我的」→ **整单通过**
 ```
 
-> **判定**：最终进入已登录「我的」即通过。退出后落首页须在 5s 内再点「我的」进登录页；Chrome/Facebook Custom Tab 会先 `back` 回 Lite。
+> **判定**：最终进入已登录「我的」即通过。退出后必先回首页再点「我的」进登录（与 `home.android.lite` / `MainActivity.navigateToFragmentCheckLogin` 一致）；Chrome/Facebook Custom Tab 会先 `back` 回 Lite。
 
 | ID | 标题 | P | iOS 脚本 | Android 脚本 |
 |----|------|---|----------|--------------|

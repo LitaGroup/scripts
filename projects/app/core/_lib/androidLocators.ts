@@ -118,6 +118,8 @@ export const ANDROID_LOC = {
   meUid: id('user_no'),
   meName: id('user_name'),
   settingEntry: id('setting_layout'),
+  /** SettingsActivity 退出行容器（onClickLogout 挂在 logoutLayout） */
+  logoutLayout: id('logoutLayout'),
   logout: id('logout_tv'),
 
   loginClose: id('close_button'),
