@@ -1,7 +1,7 @@
-/**
- * Android Lite IM 私聊冒烟：打开会话、发文本、发表情、默认礼物连送 3 次、列表摘要
+ * Android Lite IM 私聊冒烟：打开会话、发文本、发表情、默认礼物连送、入口检查、列表摘要
  *
  * 用例：SM-IM-03～05 / 12～15 / 23（见 IM_SMOKE.md）
+ * 顺序：同会话内 03→04→13→14→12/15/23，最后回列表做 05（不重进私聊）
  * 前置：建议先跑 im-conversation-list（含 SM-IM-00 造数），本脚本也会尝试造数
  *
  * 运行：
@@ -184,7 +184,44 @@ class AndroidImPrivateChatSmoke extends AppBaseClass {
       };
     });
 
-    // —— SM-IM-05 列表摘要 ——
+    // —— SM-IM-12/15/23：仍在私聊页做入口检查，避免回列表后再重进 ——
+    await this.check('SM-IM-12 更多/关注入口可见性', async () => {
+      const more = await this.driver.exists(IM.chatMore);
+      const follow = await this.driver.exists(IM.chatFollow);
+      return {
+        expect: 'ivMore 或 chatFollowTv 至少其一',
+        real: `more=${more} follow=${follow}`,
+        pass: more || follow,
+      };
+    });
+
+    await this.act('SM-IM-15 展开加号/图片入口', async () => {
+      if (await this.driver.exists(IM.chatAdd)) {
+        await this.driver.click(IM.chatAdd);
+        await sleep(600);
+      }
+    });
+
+    await this.check('SM-IM-15 图片入口可见（可无）', async () => {
+      const pic = await this.driver.exists(IM.chatPicture);
+      return {
+        expect: 'img_bottom_picture（可无）',
+        real: pic ? 'visible' : 'missing',
+        pass: true,
+      };
+    });
+
+    await this.check('SM-IM-23 音视频通话入口（仅检查）', async () => {
+      const voice = await this.driver.exists(IM.chatVoiceCall);
+      const video = await this.driver.exists(IM.chatVideoCall);
+      return {
+        expect: 'voice_call 或 video 入口（可无）',
+        real: `voice=${voice} video=${video}`,
+        pass: true,
+      };
+    });
+
+    // —— SM-IM-05 列表摘要（最后回列表，不再重进私聊） ——
     await this.act('SM-IM-05 返回会话列表', async () => {
       await backToMainFromChat(this);
       await enterMessageTab(this);
@@ -243,66 +280,6 @@ class AndroidImPrivateChatSmoke extends AppBaseClass {
           : `not found; seen=[${seen.slice(0, 5).join(' | ')}]`,
         pass: matched.length > 0,
       };
-    });
-
-    await this.act('再次进入私聊（入口检查）', async () => {
-      if (await isInPrivateChatUi(this)) {
-        this.log('已在私聊页，跳过再次打开');
-        return;
-      }
-      await enterMessageTab(this);
-      try {
-        await openConversationByIndex(this, this.privateIndex);
-      } catch {
-        this.privateIndex = await findFirstPrivateConversationIndex(this);
-        await openConversationByIndex(this, this.privateIndex);
-      }
-      await this.waitForActivity(ANDROID_IM_ACT.chat, 12_000);
-      if (!(await this.driver.exists(IM.chatInput))) {
-        await this.driver.back().catch(() => undefined);
-        await sleep(600);
-      }
-      await this.waitForElement(IM.chatInput, 'input_message', 12_000);
-    });
-
-    await this.check('SM-IM-12 更多/关注入口可见性', async () => {
-      const more = await this.driver.exists(IM.chatMore);
-      const follow = await this.driver.exists(IM.chatFollow);
-      return {
-        expect: 'ivMore 或 chatFollowTv 至少其一',
-        real: `more=${more} follow=${follow}`,
-        pass: more || follow,
-      };
-    });
-
-    await this.act('SM-IM-15 展开加号/图片入口', async () => {
-      if (await this.driver.exists(IM.chatAdd)) {
-        await this.driver.click(IM.chatAdd);
-        await sleep(600);
-      }
-    });
-
-    await this.check('SM-IM-15 图片入口可见（可无）', async () => {
-      const pic = await this.driver.exists(IM.chatPicture);
-      return {
-        expect: 'img_bottom_picture（可无）',
-        real: pic ? 'visible' : 'missing',
-        pass: true,
-      };
-    });
-
-    await this.check('SM-IM-23 音视频通话入口（仅检查）', async () => {
-      const voice = await this.driver.exists(IM.chatVoiceCall);
-      const video = await this.driver.exists(IM.chatVideoCall);
-      return {
-        expect: 'voice_call 或 video 入口（可无）',
-        real: `voice=${voice} video=${video}`,
-        pass: true,
-      };
-    });
-
-    await this.act('返回主界面', async () => {
-      await backToMainFromChat(this);
     });
   }
 }
