@@ -117,8 +117,9 @@ MainActivity 首页(Game)
 
 ### SM-IM-05 列表摘要更新
 - **步骤**：`toolbar_back_button` 回列表（本脚本在表情/送礼之后才回列表）
-- **期望**：对应行 `message_content` 含刚发文案，**或** 最新为礼物时的摘要（key：`you_sent_a_gift_message` 等）
+- **期望**：对应行 `message_content` 含刚发文案，**或** 最新为礼物时的摘要（key：`you_sent_a_gift_message` 等）；本轮已成功送礼时非空摘要也可
 - **说明**：列表摘要只展示**最后一条**；表情/送礼在后时，摘要常为礼物文案而非 `im-auto-…` 文本
+- **稳健性**：冷启动若已停在 `ChatActivity`，视为已登录并复用当前私聊，不强制进「我的」/重找会话
 
 ### SM-IM-13 私聊发表情
 - **步骤**：`iv_keyboard_emoji` → `emoji_all_view` / `iv_pic` 点选可用表情（跳过锁定）

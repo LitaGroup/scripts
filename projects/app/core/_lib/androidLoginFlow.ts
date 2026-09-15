@@ -212,6 +212,16 @@ export async function enterAndroidMeGate(
 
   await dismissForeignAuthUi(app);
 
+  // 已在聊天页（上次用例残留）→ 能聊就说明已登录，勿硬闯「我的」
+  await app['refreshActivity']();
+  if (/\.ui\.chat\.ChatActivity$/i.test(app['activity'] ?? '')) {
+    const chatInput = by.id(`${ANDROID_LITE_PACKAGE}:id/input_message`);
+    if (await softExists(app, chatInput)) {
+      app['log']('当前已在 ChatActivity（输入框可见）→ 视为已登录，跳过进「我的」');
+      return 'logged-in';
+    }
+  }
+
   const onLoginHome = async (): Promise<boolean> => {
     if (await softExists(app, LOC.loginClose)) return true;
     if (await softExists(app, ANDROID_LOGIN_ENTRY.facebook.high)) return true;

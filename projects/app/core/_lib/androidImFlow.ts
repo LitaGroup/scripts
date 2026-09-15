@@ -24,6 +24,15 @@ export function imSeedCount(app: AppBaseClass): number {
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : 3;
 }
 
+/** 是否已在可用的私聊页（有输入区） */
+export async function isInPrivateChatUi(app: AppBaseClass): Promise<boolean> {
+  await app['refreshActivity']();
+  if (!(await app['isActivity'](ANDROID_IM_ACT.chat))) return false;
+  if (!(await app['driver'].exists(IM.chatInput))) return false;
+  // 群聊也有 input，但私聊冒烟可接受；若需严格可再排除群特征
+  return true;
+}
+
 export async function enterMessageTab(app: AppBaseClass, timeoutMs = 20_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
