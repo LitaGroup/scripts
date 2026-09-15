@@ -908,6 +908,77 @@ abstract class VoiceRoomSampleBase extends AppBaseClass {
     return 'logged-in';
   }
 
+  /** 是否已在语音房列表页（RoomListFragment） */
+  protected async isOnRoomListPage(): Promise<boolean> {
+    return (
+      (await this.driver.exists(by.id(ID.partyTitle))) ||
+      (await this.driver.exists(by.id(ID.partyTitleArea))) ||
+      (await this.driver.exists(by.id(ID.searchEntry))) ||
+      (await this.driver.exists(by.id(`${APP_PACKAGE}:id/roomViewpager`))) ||
+      (await this.driver.exists(by.id(`${APP_PACKAGE}:id/roomTitleLayoutLayout`)))
+    );
+  }
+
+  /**
+   * 确保顶部选中 Party（非 Live/Game）。
+   * 源码 RoomListFragment.changeTabSelected：
+   * - Party → img_search_room VISIBLE
+   * - Live  → img_search_room GONE
+   * - Game  → layout_options GONE
+   */
+  protected async ensurePartySubTab(): Promise<void> {
+    await this.closePopups();
+    // 已有搜索入口：已在 Party
+    if (await this.driver.exists(by.id(ID.searchEntry))) return;
+
+    if (await this.driver.exists(by.id(ID.partyTitleArea))) {
+      await this.driver.click(by.id(ID.partyTitleArea));
+    } else if (await this.driver.exists(by.id(ID.partyTitle))) {
+      await this.driver.click(by.id(ID.partyTitle));
+    } else if (await this.driver.exists(by.text('Party'))) {
+      await this.driver.click(by.text('Party'));
+    } else if (await this.driver.exists(by.text('派对'))) {
+      await this.driver.click(by.text('派对'));
+    } else {
+      return;
+    }
+    await sleep(600);
+  }
+
+  /** 等待进入房间列表，并切到 Party 使搜索入口可见 */
+  protected async waitForRoomListReady(timeoutMs = 15_000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      await this.closePopups();
+      if (await this.isOnRoomListPage()) {
+        await this.ensurePartySubTab();
+        if (await this.driver.exists(by.id(ID.searchEntry))) return;
+        // 列表已出但搜索仍无：再点一次 Party
+        await this.ensurePartySubTab();
+        if (await this.driver.exists(by.id(ID.searchEntry))) return;
+        // Party 页也可能搜索稍晚：有列表+Party 标题也算就绪（后续步骤可再等）
+        if (await this.driver.exists(by.id(ID.partyTitle)) || (await this.driver.exists(by.id(ID.partyRoomList)))) {
+          // 再给搜索一点时间
+          const searchDeadline = Date.now() + 3_000;
+          while (Date.now() < searchDeadline) {
+            if (await this.driver.exists(by.id(ID.searchEntry))) return;
+            await sleep(300);
+          }
+          // 仍无搜索但已在列表：不硬失败（可能 Live 配置异常），抛更明确错误
+          if (await this.driver.exists(by.id(ID.partyRoomList)) || (await this.driver.exists(by.id(ID.partyRoomItem)))) {
+            this.log('已在房间列表但 img_search_room 未出现（可能仍停在 Live/Game）');
+            return;
+          }
+        }
+      }
+      await sleep(400);
+    }
+    await this.refreshActivity();
+    throw new Error(
+      `未进入语音房列表页（RoomListFragment），当前 Activity: ${this.activity || '(未知)'}`,
+    );
+  }
+
   /** 进入 Party tab（房间列表） */
   protected async openPartyTab(): Promise<void> {
     await this.clickBottomVoiceRoomTab();
@@ -924,21 +995,28 @@ abstract class VoiceRoomSampleBase extends AppBaseClass {
       await this.driver.back();
       await sleep(800);
     }
-    // 已在派对页（有搜索入口或 Party 标题）则无需再点底部 tab
-    if (await this.driver.exists(by.id(ID.searchEntry)) || (await this.driver.exists(by.id(ID.partyTitle)))) {
+
+    // 已在列表页：切到 Party 即可（勿因 partyTitle 存在就直接 return——Live 下无搜索按钮）
+    if (await this.isOnRoomListPage()) {
+      await this.ensurePartySubTab();
+      if (await this.driver.exists(by.id(ID.searchEntry))) return;
+      await this.waitForRoomListReady(8_000);
       return;
     }
+
     if (!(await this.hasBottomTabs())) {
       await this.ensureMainWithBottomTabs(15_000);
     }
     // 等配置下发后 tabView 从 gone → visible（MainActivity.initNavigation）
     const tabDeadline = Date.now() + 12_000;
     while (Date.now() < tabDeadline && !(await this.driver.exists(by.id(ID.tabParty)))) {
-      if (await this.driver.exists(by.id(ID.searchEntry))) return;
+      if (await this.isOnRoomListPage()) {
+        await this.waitForRoomListReady(8_000);
+        return;
+      }
       await sleep(400);
     }
     if (!(await this.driver.exists(by.id(ID.tabParty)))) {
-      // room_list!=2 时根本不会挂 Party tab
       if (await this.driver.exists(by.id(ID.tabBar)) || (await this.driver.exists(by.id(ID.tabHome)))) {
         throw new Error(
           '底部导航已显示，但无 Party tab（navigation_voice_room）。源码：仅 room_list==2 时 MainActivity 才会 addItem',
@@ -946,25 +1024,36 @@ abstract class VoiceRoomSampleBase extends AppBaseClass {
       }
       await this.assertExists(by.id(ID.tabParty), '底部语音房 tab');
     }
-    await this.driver.click(by.id(ID.tabParty));
-    await this.waitForElement(by.id(ID.searchEntry), '语音房搜索入口', 10_000);
+
+    // 点击底部语音房 tab；未进入列表则重试一次
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      await this.driver.click(by.id(ID.tabParty));
+      this.log(`已点击底部语音房 tab（attempt=${attempt}）`);
+      try {
+        await this.waitForRoomListReady(attempt === 1 ? 10_000 : 12_000);
+        return;
+      } catch (e) {
+        if (attempt === 2) throw e;
+        this.log(`进列表未就绪，重点 tab: ${e instanceof Error ? e.message : String(e)}`);
+        await this.closePopups();
+        await sleep(500);
+      }
+    }
   }
 
   /** 2. 点击派对 Tab（顶部 Party 标题，相对 Live 等） */
   protected async clickPartyTitleTab(): Promise<void> {
     await this.closePopups();
-    if (await this.driver.exists(by.id(ID.partyTitleArea))) {
-      await this.driver.click(by.id(ID.partyTitleArea));
-    } else if (await this.driver.exists(by.id(ID.partyTitle))) {
-      await this.driver.click(by.id(ID.partyTitle));
-    } else if (await this.driver.exists(by.text('Party'))) {
-      await this.driver.click(by.text('Party'));
-    } else if (await this.driver.exists(by.text('派对'))) {
-      await this.driver.click(by.text('派对'));
-    }
-    await sleep(500);
+    await this.ensurePartySubTab();
+    // 成功标准：搜索入口可见，或至少 Party 列表可见
+    if (await this.driver.exists(by.id(ID.searchEntry))) return;
+    await this.waitForRoomListReady(8_000);
     if (!(await this.driver.exists(by.id(ID.searchEntry)))) {
-      await this.waitForElement(by.id(ID.searchEntry), '派对页搜索入口', 8_000);
+      // 列表已在但搜索仍无：再点 Party 一次
+      await this.ensurePartySubTab();
+      if (!(await this.driver.exists(by.id(ID.searchEntry)))) {
+        await this.waitForElement(by.id(ID.searchEntry), '派对页搜索入口', 5_000);
+      }
     }
   }
 
