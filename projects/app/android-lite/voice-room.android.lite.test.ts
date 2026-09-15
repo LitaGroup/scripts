@@ -105,11 +105,19 @@ const FALLBACK_COUNTRY_CODE = '86';
 /** 测试环境默认语音房展示号 */
 const DEFAULT_ROOM_NO = '2000';
 
+/**
+ * 关键 resource-id（包名:id/xxx）。
+ * 权威来源：/Users/jason/StudioProjects/lita-lite-android 布局与 MainActivity。
+ * 定位异常时优先查源码，勿猜 id。
+ */
 const ID = {
-  // 主页 / 登录
+  // 主页 / 登录 — activity_main.xml + values/ids.xml + LitaTabItemView(id=viewId)
   tabHome: `${APP_PACKAGE}:id/navigation_home`,
   tabMe: `${APP_PACKAGE}:id/navigation_user_center`,
+  /** 仅当全局配置 room_list==2 时才会 addItem；见 MainActivity.initNavigation */
   tabParty: `${APP_PACKAGE}:id/navigation_voice_room`,
+  tabBar: `${APP_PACKAGE}:id/tabView`,
+  bottomNavShell: `${APP_PACKAGE}:id/fl_bottom_all_view`,
   meUid: `${APP_PACKAGE}:id/user_no`,
   mePage: `${APP_PACKAGE}:id/layout_options`,
   loginPage: `${APP_PACKAGE}:id/rl_facebook_login`,
@@ -123,7 +131,7 @@ const ID = {
   popupActivity: `${APP_PACKAGE}:id/vp_banner`,
   popupActivityClose: `${APP_PACKAGE}:id/img_close`,
 
-  // Party / 搜索
+  // Party / 搜索 — fragment_room_list.xml / fragment_voice_room_list_d.xml / item_voice_room2.xml
   searchEntry: `${APP_PACKAGE}:id/img_search_room`,
   searchEt: `${APP_PACKAGE}:id/searchEt`,
   searchResultRv: `${APP_PACKAGE}:id/searchResultRv`,
@@ -135,16 +143,20 @@ const ID = {
   partyTitle: `${APP_PACKAGE}:id/partyListTitleTv`,
   partyTitleArea: `${APP_PACKAGE}:id/partyTitleAllView`,
   partyRoomList: `${APP_PACKAGE}:id/roomListRecyclerView`,
+  /** 真实房间卡片（banner 是 HomeBannerView，无此 id） */
   partyRoomItem: `${APP_PACKAGE}:id/roomListDRootLayout`,
   partyRoomCover: `${APP_PACKAGE}:id/img_cover`,
   partyRoomName: `${APP_PACKAGE}:id/tv_room_name`,
+  /** layout_hot_room_list_header.xml，文案 Popular rooms */
   hotRoomTitle: `${APP_PACKAGE}:id/tv_room_title`,
 
-  // 房内
+  // 房内 — activity_fun_voice_room.xml / view_voice_room_bottom2.xml
   roomIdText: `${APP_PACKAGE}:id/roomIdTextView`,
   roomTitle: `${APP_PACKAGE}:id/tv_title`,
   roomMember: `${APP_PACKAGE}:id/rl_room_member`,
   bottomView: `${APP_PACKAGE}:id/bottomView`,
+  bottomLayout: `${APP_PACKAGE}:id/bottomLayout`,
+  /** TextView「Type…」，非 ImageView */
   chatEntry: `${APP_PACKAGE}:id/iv_message`,
   chatInput: `${APP_PACKAGE}:id/input_view`,
   chatPanel: `${APP_PACKAGE}:id/ll_send_message_all_view`,
@@ -160,6 +172,7 @@ const ID = {
   seatChoiceRegular: `${APP_PACKAGE}:id/commonSecondTv`,
   seatChoiceBoss: `${APP_PACKAGE}:id/commonFirstTv`,
   seatChoiceCancel: `${APP_PACKAGE}:id/commonCancelTv`,
+  /** PAGImageView，常不在无障碍树，需坐标热区 */
   giftEntry: `${APP_PACKAGE}:id/iv_gift`,
   giftRoot: `${APP_PACKAGE}:id/sendGiftRootLayout`,
   giftItem: `${APP_PACKAGE}:id/itemGiftLayout`,
@@ -186,6 +199,9 @@ const ACT = {
 
 /** 任一语音房 Activity */
 const ROOM_ACTIVITY = /\.ui\.voiceRoom\.(FunVoiceRoomActivity|VoiceRoomActivity|PersonVoiceRoomActivity)$/;
+
+/** Party 横幅/H5 活动页（误点列表 banner 时会进入，无底部 tab） */
+const WEB_ACTIVITY = /\.ui\.view\.web\.WebActivity$/;
 
 /** 系统权限弹窗 Activity（进房后常弹麦克风/通知权限，会挡住底部栏） */
 const PERMISSION_ACTIVITY = /permission\.ui\.GrantPermissionsActivity$|com\.android\.permissioncontroller/;
@@ -614,6 +630,11 @@ abstract class VoiceRoomSampleBase extends AppBaseClass {
         await this.clickPermissionAllow();
         return;
       }
+      if (await this.isActivity(WEB_ACTIVITY)) {
+        await this.driver.back();
+        await sleep(500);
+        return;
+      }
       await this.dismissRoomSheetsOnce();
       if (await this.driver.exists(by.id(`${APP_PACKAGE}:id/shareChannelRv`))) {
         await this.driver.back();
@@ -685,6 +706,13 @@ abstract class VoiceRoomSampleBase extends AppBaseClass {
         if (!(await this.clickPermissionAllow())) await sleep(400);
         continue;
       }
+      // 进房链路误开 H5：先 back，再等语音房
+      if (WEB_ACTIVITY.test(act)) {
+        this.log('房内准备时遇到 WebActivity，back 关闭');
+        await this.driver.back();
+        await sleep(800);
+        continue;
+      }
       if (!ROOM_ACTIVITY.test(act)) {
         await sleep(300);
         continue;
@@ -698,9 +726,7 @@ abstract class VoiceRoomSampleBase extends AppBaseClass {
       } catch {
         // ignore
       }
-      if (await this.driver.exists(by.id(ID.chatEntry))) return;
-      if (await this.driver.exists(by.id(ID.onMicMute))) return;
-      if (await this.driver.exists(by.id(ID.applyMic))) return;
+      if (await this.hasRoomChrome()) return;
       if (await this.driver.exists(by.id(ID.giftSend))) {
         // 礼物面板挡着底部：点面板上方内容区关闭（约 35%，避开顶栏）
         if (!blankTapDone) {
@@ -753,24 +779,115 @@ abstract class VoiceRoomSampleBase extends AppBaseClass {
     ]);
   }
 
-  /** 退出语音房：back 一次；仍在房内则直接杀进程冷启 */
+  /** 房内主控件是否已可见（房间号 / 聊天入口 / 底部栏 / 麦位等） */
+  protected async hasRoomChrome(): Promise<boolean> {
+    const ids = [
+      ID.roomIdText,
+      ID.chatEntry,
+      ID.bottomView,
+      ID.bottomLayout,
+      ID.onMicMute,
+      ID.applyMic,
+      ID.seatAvatar,
+      ID.roomMember,
+      ID.roomTitle,
+    ];
+    for (const id of ids) {
+      try {
+        if (await this.driver.exists(by.id(id))) return true;
+      } catch {
+        // continue
+      }
+    }
+    // iv_message 文案兜底（Type…）
+    try {
+      if (await this.driver.exists(by.textContains('Type'))) return true;
+    } catch {
+      // ignore
+    }
+    return false;
+  }
+
+  /** 底部导航是否已就绪（tabView 初始 gone，等全局配置后才显示） */
+  protected async hasBottomTabs(): Promise<boolean> {
+    if (await this.driver.exists(by.id(ID.tabParty))) return true;
+    if (await this.driver.exists(by.id(ID.tabHome))) return true;
+    if (await this.driver.exists(by.id(ID.tabMe))) return true;
+    // tabView 可见即说明导航已 init（party 可能因 room_list!=2 未挂）
+    if (await this.driver.exists(by.id(ID.tabBar))) return true;
+    return false;
+  }
+
+  /** 从 WebActivity / 搜索页 / 异常栈回到带底部 tab 的主壳 */
+  protected async ensureMainWithBottomTabs(timeoutMs = 20_000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    let coldStartTried = false;
+    while (Date.now() < deadline) {
+      await this.closePopups();
+      const act = await this.refreshActivity();
+
+      if (PERMISSION_ACTIVITY.test(act)) {
+        await this.clickPermissionAllow();
+        continue;
+      }
+
+      // 已能看到底部 tab：成功
+      if (await this.hasBottomTabs()) {
+        return;
+      }
+
+      if (WEB_ACTIVITY.test(act) || ROOM_ACTIVITY.test(act) || act.includes(ACT.search)) {
+        this.log(`ensureMain: 从 ${act} back 退出`);
+        await this.driver.back();
+        await sleep(1_000);
+        continue;
+      }
+
+      // 其它非主页：多 back 几次
+      if (!act.includes(ACT.main) && !act.includes(ACT.splash)) {
+        await this.driver.back();
+        await sleep(800);
+        continue;
+      }
+
+      if (!coldStartTried) {
+        coldStartTried = true;
+        this.log('ensureMain: 未见底部 tab，冷启 APP');
+        await this.terminateApp();
+        await sleep(1_000);
+        await this.activateApp();
+        await sleep(2_500);
+        continue;
+      }
+
+      await sleep(500);
+    }
+    throw new Error('未能回到带底部导航的主页（可能仍在 WebActivity/语音房）');
+  }
+
+  /** 退出语音房：back；仍在房内/Web 则 ensureMain */
   protected async leaveRoomToMain(): Promise<void> {
+    if (await this.isActivity(WEB_ACTIVITY)) {
+      this.log('当前在 WebActivity，先退出');
+      await this.driver.back();
+      await sleep(1_000);
+    }
     if (await this.isActivity(ROOM_ACTIVITY)) {
       await this.driver.back();
       await sleep(1_200);
     }
-    if (await this.isActivity(ROOM_ACTIVITY)) {
-      this.log('back 未能退出语音房，terminateApp 后重新打开');
+    if (await this.isActivity(ROOM_ACTIVITY) || (await this.isActivity(WEB_ACTIVITY))) {
+      this.log('back 未能退出语音房/Web，走 ensureMainWithBottomTabs');
+    }
+    try {
+      await this.ensureMainWithBottomTabs(18_000);
+    } catch (e) {
+      this.log(`ensureMain 失败，terminate 重试: ${e instanceof Error ? e.message : String(e)}`);
       await this.terminateApp();
       await sleep(1_000);
       await this.activateApp();
-      await sleep(2_000);
-    }
-    if (await this.isActivity(ROOM_ACTIVITY)) {
-      await this.terminateApp();
-      await sleep(800);
-      await this.activateApp();
-      await sleep(2_000);
+      await sleep(2_500);
+      await this.ensureMainWithBottomTabs(15_000);
     }
   }
 
@@ -800,15 +917,35 @@ abstract class VoiceRoomSampleBase extends AppBaseClass {
   /** 1. 点击底部标签栏「语音房」 */
   protected async clickBottomVoiceRoomTab(): Promise<void> {
     await this.closePopups();
-    if (await this.isActivity(ROOM_ACTIVITY)) await this.leaveRoomToMain();
+    if (await this.isActivity(WEB_ACTIVITY) || (await this.isActivity(ROOM_ACTIVITY))) {
+      await this.leaveRoomToMain();
+    }
     if (await this.isActivity(ACT.search)) {
       await this.driver.back();
       await sleep(800);
     }
+    // 已在派对页（有搜索入口或 Party 标题）则无需再点底部 tab
     if (await this.driver.exists(by.id(ID.searchEntry)) || (await this.driver.exists(by.id(ID.partyTitle)))) {
       return;
     }
-    await this.assertExists(by.id(ID.tabParty), '底部语音房 tab');
+    if (!(await this.hasBottomTabs())) {
+      await this.ensureMainWithBottomTabs(15_000);
+    }
+    // 等配置下发后 tabView 从 gone → visible（MainActivity.initNavigation）
+    const tabDeadline = Date.now() + 12_000;
+    while (Date.now() < tabDeadline && !(await this.driver.exists(by.id(ID.tabParty)))) {
+      if (await this.driver.exists(by.id(ID.searchEntry))) return;
+      await sleep(400);
+    }
+    if (!(await this.driver.exists(by.id(ID.tabParty)))) {
+      // room_list!=2 时根本不会挂 Party tab
+      if (await this.driver.exists(by.id(ID.tabBar)) || (await this.driver.exists(by.id(ID.tabHome)))) {
+        throw new Error(
+          '底部导航已显示，但无 Party tab（navigation_voice_room）。源码：仅 room_list==2 时 MainActivity 才会 addItem',
+        );
+      }
+      await this.assertExists(by.id(ID.tabParty), '底部语音房 tab');
+    }
     await this.driver.click(by.id(ID.tabParty));
     await this.waitForElement(by.id(ID.searchEntry), '语音房搜索入口', 10_000);
   }
@@ -923,19 +1060,15 @@ abstract class VoiceRoomSampleBase extends AppBaseClass {
     await this.pickRandomOnlineRoomAndEnter();
   }
 
-  /** Party 列表随机点一个在线房间进入（搜不到指定房时的兜底） */
-  protected async pickRandomOnlineRoomAndEnter(): Promise<void> {
+  /** Party 列表随机点一个在线房间进入（搜不到指定房时的兜底；误点 banner→Web 时自动重试） */
+  protected async pickRandomOnlineRoomAndEnter(maxAttempts = 3): Promise<void> {
     if (await this.isActivity(ROOM_ACTIVITY)) {
       try {
         await this.prepareRoomUi(6_000);
-        if (
-          (await this.driver.exists(by.id(ID.chatEntry))) ||
-          (await this.driver.exists(by.id(ID.onMicMute))) ||
-          (await this.driver.exists(by.id(ID.applyMic)))
-        ) {
+        if (await this.hasRoomChrome()) {
           const text = await this.readRoomIdText(3_000);
           if (text) this.rememberRoomNoFromText(text);
-          this.log(text ? `已在语音房（${text}），无需重进` : '已在语音房且底部栏可见，无需重进');
+          this.log(text ? `已在语音房（${text}），无需重进` : '已在语音房且主控件可见，无需重进');
           return;
         }
       } catch {
@@ -944,54 +1077,87 @@ abstract class VoiceRoomSampleBase extends AppBaseClass {
       await this.leaveRoomToMain();
     }
 
-    await this.openPartyTab();
-    await this.closePopups(2);
+    let lastError: Error | null = null;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        await this.openPartyTab();
+        await this.closePopups(2);
 
-    const itemLocator = by.id(ID.partyRoomItem);
-    const deadline = Date.now() + 20_000;
-    let count = 0;
-    while (Date.now() < deadline) {
-      if (await this.driver.exists(by.id(ID.partyRoomList)) || (await this.driver.exists(itemLocator))) {
-        count = (await this.driver.findElements(itemLocator)).length;
-        if (count > 0) break;
-        count = (await this.driver.findElements(by.id(ID.partyRoomCover))).length;
-        if (count > 0) break;
+        const itemLocator = by.id(ID.partyRoomItem);
+        const deadline = Date.now() + 20_000;
+        let count = 0;
+        while (Date.now() < deadline) {
+          if (await this.driver.exists(by.id(ID.partyRoomList)) || (await this.driver.exists(itemLocator))) {
+            count = (await this.driver.findElements(itemLocator)).length;
+            if (count > 0) break;
+            count = (await this.driver.findElements(by.id(ID.partyRoomCover))).length;
+            if (count > 0) break;
+          }
+          await sleep(500);
+        }
+        if (count <= 0) {
+          throw new Error('Party 语音房列表为空，无法随机进入在线房间');
+        }
+
+        // 优先点真实房间卡片 roomListDRootLayout，避免点到顶部 banner 开 WebActivity
+        const useCover = !(await this.driver.exists(itemLocator));
+        const pickId = useCover ? ID.partyRoomCover : ID.partyRoomItem;
+        const visible = (await this.driver.findElements(by.id(pickId))).length;
+        // 跳过第 1 个（常为 banner/运营位），从后面随机
+        const start = visible > 1 ? 2 : 1;
+        const pick = start + Math.floor(Math.random() * (visible - start + 1));
+        this.log(`兜底进房 attempt=${attempt}/${maxAttempts}：列表 ${visible} 个，点第 ${pick} 个`);
+
+        try {
+          const nameLoc = by.xpath(`(//*[@resource-id='${ID.partyRoomName}'])[${pick}]`);
+          if (await this.driver.exists(nameLoc)) {
+            this.log(`选中房间名: ${(await this.driver.textOf(nameLoc)).trim()}`);
+          }
+        } catch {
+          // ignore
+        }
+
+        await this.driver.click(by.xpath(`(//*[@resource-id='${pickId}'])[${pick}]`));
+        await sleep(1_200);
+
+        if (await this.isActivity(WEB_ACTIVITY)) {
+          this.log('点击后进入 WebActivity（疑似 banner），back 后换房重试');
+          await this.driver.back();
+          await sleep(800);
+          lastError = new Error('误点 banner 进入 WebActivity');
+          continue;
+        }
+
+        await this.waitForActivity(ROOM_ACTIVITY, 15_000);
+        await this.grantAppRuntimePermissions();
+        await this.prepareRoomUi(12_000);
+        if (!(await this.hasRoomChrome())) {
+          await this.waitRoomInteractive(12_000);
+        }
+        const entered = await this.readRoomIdText(4_000);
+        if (entered) {
+          this.rememberRoomNoFromText(entered);
+          this.log(`已进入语音房：${entered}`);
+        } else {
+          this.log('已进入语音房（房间号暂未读到，主控件已可见）');
+        }
+        return;
+      } catch (e) {
+        lastError = e instanceof Error ? e : new Error(String(e));
+        this.log(`兜底进房 attempt=${attempt} 失败: ${lastError.message}`);
+        try {
+          if (await this.isActivity(WEB_ACTIVITY) || (await this.isActivity(ROOM_ACTIVITY))) {
+            await this.leaveRoomToMain();
+          } else if (await this.isActivity(ACT.search)) {
+            await this.driver.back();
+            await sleep(600);
+          }
+        } catch {
+          // ignore recovery errors
+        }
       }
-      await sleep(500);
     }
-    if (count <= 0) {
-      throw new Error('Party 语音房列表为空，无法随机进入在线房间');
-    }
-
-    const useCover = !(await this.driver.exists(itemLocator));
-    const pickId = useCover ? ID.partyRoomCover : ID.partyRoomItem;
-    const visible = (await this.driver.findElements(by.id(pickId))).length;
-    const pick = Math.floor(Math.random() * visible) + 1;
-    this.log(`从 Party 列表 ${visible} 个在线房中随机选择第 ${pick} 个`);
-
-    try {
-      const nameLoc = by.xpath(`(//*[@resource-id='${ID.partyRoomName}'])[${pick}]`);
-      if (await this.driver.exists(nameLoc)) {
-        this.log(`选中房间名: ${(await this.driver.textOf(nameLoc)).trim()}`);
-      }
-    } catch {
-      // ignore
-    }
-
-    await this.driver.click(by.xpath(`(//*[@resource-id='${pickId}'])[${pick}]`));
-    await this.waitForActivity(ROOM_ACTIVITY, 15_000);
-    await this.grantAppRuntimePermissions();
-    await this.prepareRoomUi(10_000);
-    if (!(await this.driver.exists(by.id(ID.chatEntry))) && !(await this.driver.exists(by.id(ID.roomIdText)))) {
-      await this.waitRoomInteractive(10_000);
-    }
-    const entered = await this.readRoomIdText(4_000);
-    if (entered) {
-      this.rememberRoomNoFromText(entered);
-      this.log(`已进入语音房：${entered}`);
-    } else {
-      this.log('已进入语音房（房间号暂未读到，底部控件已可见）');
-    }
+    throw lastError ?? new Error('Party 列表随机进房失败');
   }
 
   /** 搜索房间号并进入；找不到在线结果时返回 false（不抛错） */
@@ -1054,7 +1220,7 @@ abstract class VoiceRoomSampleBase extends AppBaseClass {
     return '';
   }
 
-  /** 等待房内可操作（房间号或底部聊天入口出现）；期间消化权限弹窗 */
+  /** 等待房内可操作（房间号或底部聊天入口出现）；期间消化权限弹窗 / Web 页 */
   protected async waitRoomInteractive(timeoutMs = 20_000): Promise<void> {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
@@ -1063,19 +1229,22 @@ abstract class VoiceRoomSampleBase extends AppBaseClass {
           await this.clickPermissionAllow();
           continue;
         }
-        if (await this.driver.exists(by.id(ID.roomIdText)) || await this.driver.exists(by.id(ID.chatEntry))) {
-          return;
+        if (await this.isActivity(WEB_ACTIVITY)) {
+          this.log('等待房内控件时遇到 WebActivity，back');
+          await this.driver.back();
+          await sleep(800);
+          continue;
         }
+        if (await this.hasRoomChrome()) return;
         await this.dismissRoomOverlayOnce();
-        if (await this.driver.exists(by.id(ID.roomIdText)) || await this.driver.exists(by.id(ID.chatEntry))) {
-          return;
-        }
+        if (await this.hasRoomChrome()) return;
       } catch (e) {
         throw new Error(`等待房内控件失败: ${e instanceof Error ? e.message : String(e)}`);
       }
       await sleep(500);
     }
-    throw new Error('已进入语音房 Activity，但房内主控件未出现（房间号/聊天入口）');
+    const act = await this.refreshActivity();
+    throw new Error(`已进入语音房 Activity，但房内主控件未出现（房间号/聊天入口）；当前 Activity: ${act}`);
   }
 
   /** 关闭房内新手引导 / 分享弹层等遮罩 */
@@ -1093,99 +1262,137 @@ abstract class VoiceRoomSampleBase extends AppBaseClass {
     await this.closePopups();
   }
 
-  /** 断言已在目标房间 */
-  protected async assertInTargetRoom(roomNo = this.roomNo): Promise<{ expect: string; real: string; pass: boolean }> {
-    // 不在此跑重型 prepare（太慢）；仅处理权限后读房间号
+  /**
+   * 断言已在目标房间。
+   * roomNo 传空串 / undefined 表示「任意在线房即可」（列表兜底场景）。
+   */
+  protected async assertInTargetRoom(roomNo?: string): Promise<{ expect: string; real: string; pass: boolean }> {
+    const expectNo = roomNo === undefined ? this.roomNo : roomNo;
     if (await this.isActivity(PERMISSION_ACTIVITY)) await this.clickPermissionAllow();
+    if (await this.isActivity(WEB_ACTIVITY)) {
+      return {
+        expect: expectNo ? `房间号含 ${expectNo}` : '已进入在线语音房',
+        real: '当前在 WebActivity（非语音房）',
+        pass: false,
+      };
+    }
     const text = await this.readRoomIdText(5_000);
     if (!text) {
-      // 进房后房间号偶发晚出：底部栏可见也算进房成功的弱断言
-      if (await this.driver.exists(by.id(ID.chatEntry)) || await this.driver.exists(by.id(ID.onMicMute))) {
-        const expectLabel = roomNo ? `房间号含 ${roomNo}` : '已进入在线语音房';
-        return { expect: expectLabel, real: '底部栏可见(房间号暂未读到)', pass: true };
+      if (await this.hasRoomChrome()) {
+        const expectLabel = expectNo ? `房间号含 ${expectNo}` : '已进入在线语音房';
+        return { expect: expectLabel, real: '主控件可见(房间号暂未读到)', pass: true };
       }
       return {
-        expect: roomNo ? `房间号含 ${roomNo}` : '已进入在线语音房',
+        expect: expectNo ? `房间号含 ${expectNo}` : '已进入在线语音房',
         real: '未找到 roomIdTextView',
         pass: false,
       };
     }
     this.rememberRoomNoFromText(text);
-    if (!roomNo) {
+    if (!expectNo) {
       return { expect: '已进入在线语音房', real: text, pass: true };
     }
-    return { expect: `房间号含 ${roomNo}`, real: text, pass: text.includes(roomNo) };
+    return { expect: `房间号含 ${expectNo}`, real: text, pass: text.includes(expectNo) };
   }
 
   /**
-   * 从派对「热门房间」下列表点进一个在线房（随机选可见条目）。
+   * 从派对「热门房间」下列表点进一个在线房（随机选可见条目；误点 banner 会重试）。
    * 前置：已在派对列表页（含热门房间区域）。
    */
-  protected async enterRoomFromHotList(): Promise<void> {
-    await this.closePopups(2);
+  protected async enterRoomFromHotList(maxAttempts = 3): Promise<void> {
+    let lastError: Error | null = null;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        await this.closePopups(2);
 
-    // 尽量确认「热门房间 / Popular rooms」区域可见
-    try {
-      if (await this.driver.exists(by.id(ID.hotRoomTitle))) {
-        this.log('已看到热门房间标题');
-      } else if (
-        (await this.driver.exists(by.textContains('Popular'))) ||
-        (await this.driver.exists(by.textContains('热门房间')))
-      ) {
-        this.log('已看到热门房间文案');
-      } else if (await this.driver.exists(by.id(ID.partyRoomList))) {
-        await this.driver.swipeInElement(by.id(ID.partyRoomList), 'up');
-        await sleep(400);
+        // 尽量确认「热门房间 / Popular rooms」区域可见
+        try {
+          if (await this.driver.exists(by.id(ID.hotRoomTitle))) {
+            this.log('已看到热门房间标题');
+          } else if (
+            (await this.driver.exists(by.textContains('Popular'))) ||
+            (await this.driver.exists(by.textContains('热门房间')))
+          ) {
+            this.log('已看到热门房间文案');
+          } else if (await this.driver.exists(by.id(ID.partyRoomList))) {
+            await this.driver.swipeInElement(by.id(ID.partyRoomList), 'up');
+            await sleep(400);
+          }
+        } catch {
+          // ignore
+        }
+
+        const itemLocator = by.id(ID.partyRoomItem);
+        const deadline = Date.now() + 20_000;
+        let count = 0;
+        while (Date.now() < deadline) {
+          if (await this.driver.exists(by.id(ID.partyRoomList)) || (await this.driver.exists(itemLocator))) {
+            count = (await this.driver.findElements(itemLocator)).length;
+            if (count > 0) break;
+            count = (await this.driver.findElements(by.id(ID.partyRoomCover))).length;
+            if (count > 0) break;
+          }
+          await sleep(500);
+        }
+        if (count <= 0) {
+          throw new Error('热门房间下语音房列表为空');
+        }
+
+        const useCover = !(await this.driver.exists(itemLocator));
+        const pickId = useCover ? ID.partyRoomCover : ID.partyRoomItem;
+        const visible = (await this.driver.findElements(by.id(pickId))).length;
+        const start = visible > 1 ? 2 : 1;
+        const pick = start + Math.floor(Math.random() * (visible - start + 1));
+        this.log(`热门列表进房 attempt=${attempt}/${maxAttempts}：可见 ${visible}，点第 ${pick} 个`);
+
+        try {
+          const nameLoc = by.xpath(`(//*[@resource-id='${ID.partyRoomName}'])[${pick}]`);
+          if (await this.driver.exists(nameLoc)) {
+            this.log(`选中房间名: ${(await this.driver.textOf(nameLoc)).trim()}`);
+          }
+        } catch {
+          // ignore
+        }
+
+        await this.driver.click(by.xpath(`(//*[@resource-id='${pickId}'])[${pick}]`));
+        await sleep(1_200);
+
+        if (await this.isActivity(WEB_ACTIVITY)) {
+          this.log('热门列表点击后进入 WebActivity，back 后换房重试');
+          await this.driver.back();
+          await sleep(800);
+          lastError = new Error('误点 banner 进入 WebActivity');
+          continue;
+        }
+
+        await this.waitForActivity(ROOM_ACTIVITY, 15_000);
+        await this.grantAppRuntimePermissions();
+        await this.prepareRoomUi(12_000);
+        if (!(await this.hasRoomChrome())) {
+          await this.waitRoomInteractive(12_000);
+        }
+        const entered = await this.readRoomIdText(4_000);
+        if (entered) {
+          this.rememberRoomNoFromText(entered);
+          this.log(`已从热门列表进入语音房：${entered}`);
+        } else {
+          this.log('已从热门列表进入语音房（房间号暂未读到）');
+        }
+        return;
+      } catch (e) {
+        lastError = e instanceof Error ? e : new Error(String(e));
+        this.log(`热门列表进房 attempt=${attempt} 失败: ${lastError.message}`);
+        try {
+          if (await this.isActivity(WEB_ACTIVITY) || (await this.isActivity(ROOM_ACTIVITY))) {
+            await this.leaveRoomToMain();
+            await this.openPartyTab();
+          }
+        } catch {
+          // ignore
+        }
       }
-    } catch {
-      // ignore
     }
-
-    const itemLocator = by.id(ID.partyRoomItem);
-    const deadline = Date.now() + 20_000;
-    let count = 0;
-    while (Date.now() < deadline) {
-      if (await this.driver.exists(by.id(ID.partyRoomList)) || (await this.driver.exists(itemLocator))) {
-        count = (await this.driver.findElements(itemLocator)).length;
-        if (count > 0) break;
-        count = (await this.driver.findElements(by.id(ID.partyRoomCover))).length;
-        if (count > 0) break;
-      }
-      await sleep(500);
-    }
-    if (count <= 0) {
-      throw new Error('热门房间下语音房列表为空');
-    }
-
-    const useCover = !(await this.driver.exists(itemLocator));
-    const pickId = useCover ? ID.partyRoomCover : ID.partyRoomItem;
-    const visible = (await this.driver.findElements(by.id(pickId))).length;
-    const pick = Math.floor(Math.random() * visible) + 1;
-    this.log(`热门房间列表 ${visible} 个可见房中选择第 ${pick} 个`);
-
-    try {
-      const nameLoc = by.xpath(`(//*[@resource-id='${ID.partyRoomName}'])[${pick}]`);
-      if (await this.driver.exists(nameLoc)) {
-        this.log(`选中房间名: ${(await this.driver.textOf(nameLoc)).trim()}`);
-      }
-    } catch {
-      // ignore
-    }
-
-    await this.driver.click(by.xpath(`(//*[@resource-id='${pickId}'])[${pick}]`));
-    await this.waitForActivity(ROOM_ACTIVITY, 15_000);
-    await this.grantAppRuntimePermissions();
-    await this.prepareRoomUi(10_000);
-    if (!(await this.driver.exists(by.id(ID.chatEntry))) && !(await this.driver.exists(by.id(ID.roomIdText)))) {
-      await this.waitRoomInteractive(10_000);
-    }
-    const entered = await this.readRoomIdText(4_000);
-    if (entered) {
-      this.rememberRoomNoFromText(entered);
-      this.log(`已从热门列表进入语音房：${entered}`);
-    } else {
-      this.log('已从热门列表进入语音房（房间号暂未读到）');
-    }
+    throw lastError ?? new Error('热门房间列表进房失败');
   }
 
   /** 打开公屏输入框（底部 Type… / iv_message） */
@@ -1797,9 +2004,9 @@ class VoiceRoomTest extends VoiceRoomSampleBase {
             await this.pickRandomOnlineRoomAndEnter();
           });
 
-          await this.check(
-            this.roomNo ? `3.1 目标：已进入语音房 ${this.roomNo}` : '3.1 目标：点击语音房可以进入',
-            async () => this.assertInTargetRoom(),
+          // 兜底进的是任意在线房，不再要求仍是 preferred(2000)
+          await this.check('3.1 目标：已进入在线语音房（列表兜底）', async () =>
+            this.assertInTargetRoom(''),
           );
         }
       }
@@ -1807,7 +2014,9 @@ class VoiceRoomTest extends VoiceRoomSampleBase {
 
     // ---------- 3.2 进入语音房发送消息（热门列表进房 → 输入 → 发送） ----------
     await this.act('3.2.1 点击底部标签栏「语音房」', async () => {
-      if (await this.isActivity(ROOM_ACTIVITY)) await this.leaveRoomToMain();
+      if (await this.isActivity(WEB_ACTIVITY) || (await this.isActivity(ROOM_ACTIVITY))) {
+        await this.leaveRoomToMain();
+      }
       await this.clickBottomVoiceRoomTab();
     });
 
