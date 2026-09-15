@@ -1,11 +1,11 @@
 # 登录冒烟用例（iOS Lita + Android Lite）
 
-> **iOS**：`lita-ios-v2`，bundleId `but.lita.ios`，flavor=`lita`（脚本在 `projects/app/core/`）  
-> **Android**：`lita-lite-android`，package `com.litalite.android`，flavor=`lite`（脚本只在 `projects/app/android-lite/`）  
+> **iOS**：`lita-ios-v2`，bundleId `but.lita.ios`，flavor=`lita`（脚本在 `projects/app/android-lite/`，文件名仍为 `*.ios.lita.test.ts`）  
+> **Android**：`lita-lite-android`，package `com.litalite.android`，flavor=`lite`（脚本在 `projects/app/android-lite/`）  
 > 账号：`config.app.json` → `SCRIPT_ENV=PROD`（默认）用 `accounts.prod`；`SCRIPT_ENV=TEST` 用 `accounts.test`  
 > 定位与流程：`projects/app/core/_lib/`  
 > Android 包：PROD 装 **release**，TEST 装 **debug**（同 applicationId，需覆盖安装）  
-> **平台导入**：Android Lite 用例以 `android-lite/*.test.ts` 为准；`core/` 不再放 Android Lite 测试副本。
+> **平台导入**：登录/IM 等用例脚本统一放在 `android-lite/`；`core/` 只保留 `_lib`、文档与兼容 check。
 
 ---
 
@@ -56,8 +56,8 @@
 
 | ID | 标题 | P | iOS 脚本 | Android 脚本 |
 |----|------|---|----------|--------------|
-| SM-LOGIN-01 | 登录页入口可见 | P0 | `login-entries.ios.lita.test.ts`（`core/`） | `android-lite/login-entries.android.lite.test.ts` |
-| SM-LOGIN-02 | 手机号+密码进「我的」 | P0 | `login-phone-password.ios.lita.test.ts`（`core/`） | `android-lite/login-phone-password.android.lite.test.ts` |
+| SM-LOGIN-01 | 登录页入口可见 | P0 | `android-lite/login-entries.ios.lita.test.ts` | `android-lite/login-entries.android.lite.test.ts` |
+| SM-LOGIN-02 | 手机号+密码进「我的」 | P0 | `android-lite/login-phone-password.ios.lita.test.ts` | `android-lite/login-phone-password.android.lite.test.ts` |
 | SM-LOGIN-03 | 新设备 OTP | P0 | 含在 02（`SCRIPT_OTP`） | 含在 02（查库 / `SCRIPT_OTP`） |
 | SM-LOGIN-04 | WhatsApp 可关闭 | P1 | 状态机 | 状态机 |
 | SM-LOGIN-05 | 无密码仅 OTP | P1 | 半自动 | 半自动 |
@@ -128,13 +128,13 @@ export SCRIPT_APPIUM_URL=http://127.0.0.1:4723/
 # 测网：export SCRIPT_ENV=TEST（debug 包 + accounts.test + OTP 1234）
 # 可选覆盖：export SCRIPT_OTP=xxxx
 
-# iOS（模拟器名按本机修改；iOS 仍常用 SCRIPT_OTP）
+# iOS（脚本在 android-lite/，文件名 *.ios.lita.test.ts）
 SCRIPT_IOS_DEVICE="iPhone 17" SCRIPT_OTP=1234 \
-  node --experimental-strip-types projects/app/core/login-phone-password.ios.lita.test.ts
+  node --experimental-strip-types projects/app/android-lite/login-phone-password.ios.lita.test.ts
 SCRIPT_IOS_DEVICE="iPhone 17" \
-  node --experimental-strip-types projects/app/core/login-entries.ios.lita.test.ts
+  node --experimental-strip-types projects/app/android-lite/login-entries.ios.lita.test.ts
 
-# Android（正式路径：android-lite/；平台导入也只认此目录下的 *.android.lite.test.ts）
+# Android（正式路径：android-lite/）
 node --experimental-strip-types projects/app/android-lite/login-phone-password.android.lite.test.ts
 node --experimental-strip-types projects/app/android-lite/login-entries.android.lite.test.ts
 # Google：设备需已登录 Google；可选 SCRIPT_GOOGLE_EMAIL

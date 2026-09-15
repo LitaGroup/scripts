@@ -58,7 +58,7 @@ SCRIPT_DEVICE_UDID=<adb-serial>
 
 ## 登录冒烟（android-lite）
 
-正式登录用例在 `projects/app/android-lite/`（文档 `../core/LOGIN_SMOKE.md`）。`core/` 只保留 `_lib` / iOS 脚本，不再放 Android Lite `*.test.ts` 副本，避免平台双份导入。
+正式登录用例在 `projects/app/android-lite/`（含 Android / iOS；文档 `../core/LOGIN_SMOKE.md`）。`core/` 只保留 `_lib` / 文档，不再放正式 `*.test.ts`。
 
 ```bash
 SCRIPT_CONFIG=config.app.json \

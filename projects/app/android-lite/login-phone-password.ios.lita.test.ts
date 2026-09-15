@@ -9,11 +9,11 @@
  *   SCRIPT_APPIUM_URL=http://127.0.0.1:4723/ \
  *   SCRIPT_IOS_DEVICE="iPhone 17" \
  *   SCRIPT_OTP=1234 \
- *   node --experimental-strip-types projects/app/core/login-phone-password.ios.lita.test.ts
+ *   node --experimental-strip-types projects/app/android-lite/login-phone-password.ios.lita.test.ts
  */
 import { AppBaseClass, type AppAccount } from '../../../src/base/AppBaseClass.ts';
-import { IOS_BUNDLE_ID } from './_lib/iosLocators.ts';
-import { iosLitaCapabilities, loginWithPhonePassword, registerIosLoginStates } from './_lib/iosLoginFlow.ts';
+import { IOS_BUNDLE_ID } from '../core/_lib/iosLocators.ts';
+import { iosLitaCapabilities, loginWithPhonePassword, registerIosLoginStates } from '../core/_lib/iosLoginFlow.ts';
 
 class IosPhonePasswordLoginSmoke extends AppBaseClass {
   constructor() {

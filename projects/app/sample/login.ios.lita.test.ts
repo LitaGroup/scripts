@@ -3,7 +3,7 @@
  * 逻辑已抽到 core/_lib；本文件保持 sample 入口兼容。
  *
  * 正式冒烟请用：
- *   projects/app/core/login-phone-password.ios.lita.test.ts
+ *   projects/app/android-lite/login-phone-password.ios.lita.test.ts
  *   projects/app/core/LOGIN_SMOKE.md
  *
  * 运行：

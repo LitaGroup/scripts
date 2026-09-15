@@ -8,14 +8,14 @@
  *   SCRIPT_CONFIG=config.app.json \
  *   SCRIPT_APPIUM_URL=http://127.0.0.1:4723/ \
  *   SCRIPT_IOS_DEVICE="iPhone 17" \
- *   node --experimental-strip-types projects/app/core/login-entries.ios.lita.test.ts
+ *   node --experimental-strip-types projects/app/android-lite/login-entries.ios.lita.test.ts
  *
  * 可选：SCRIPT_FORCE_LOGOUT=1 时若已登录则尝试关登录页失败后跳过入口检查并报 fail（需人工退登）
  */
 import { AppBaseClass } from '../../../src/base/AppBaseClass.ts';
 import { sleep } from '../../../src/resources/AppiumResource.ts';
-import { IOS_BUNDLE_ID, IOS_LOC as LOC, IOS_LOGIN_ENTRY } from './_lib/iosLocators.ts';
-import { iosLitaCapabilities, registerIosLoginStates } from './_lib/iosLoginFlow.ts';
+import { IOS_BUNDLE_ID, IOS_LOC as LOC, IOS_LOGIN_ENTRY } from '../core/_lib/iosLocators.ts';
+import { iosLitaCapabilities, registerIosLoginStates } from '../core/_lib/iosLoginFlow.ts';
 
 type EntryKey = keyof typeof IOS_LOGIN_ENTRY;
 

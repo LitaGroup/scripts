@@ -1,7 +1,7 @@
 # iOS 自动测试跑通流程（登录样例）
 
 对应脚本：
-- 正式冒烟：`projects/app/core/login-phone-password.ios.lita.test.ts`、`login-entries.ios.lita.test.ts`
+- 正式冒烟：`projects/app/android-lite/login-phone-password.ios.lita.test.ts`、`login-entries.ios.lita.test.ts`
 - 用例文档：`projects/app/core/LOGIN_SMOKE.md`
 - Sample 入口：`projects/app/sample/login.ios.lita.test.ts`（共用 `core/_lib`）
 
@@ -103,7 +103,7 @@ SCRIPT_CONFIG=config.app.json \
 SCRIPT_APPIUM_URL=http://127.0.0.1:4723/ \
 SCRIPT_IOS_DEVICE="iPhone 17" \
 SCRIPT_OTP=1234 \
-node --experimental-strip-types projects/app/core/login-phone-password.ios.lita.test.ts
+node --experimental-strip-types projects/app/android-lite/login-phone-password.ios.lita.test.ts
 ```
 
 可选环境变量：
@@ -150,7 +150,7 @@ iOS 登录页图标按钮常**没有** accessibilityId，样例里 `LOC.*` 用�
 ① Xcode 安装 LitaDev 到模拟器
 ② appium 起服务（4723）
 ③ 填 config.app.json 账号
-④ node --experimental-strip-types core/login-phone-password.ios.lita.test.ts
+④ node --experimental-strip-types android-lite/login-phone-password.ios.lita.test.ts
 ⑤ 失败 → dump/Inspector 改 core/_lib/iosLocators.ts → 再跑
 ⑥ [done] success → 流程跑通
 ```
