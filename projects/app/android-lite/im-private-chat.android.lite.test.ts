@@ -24,7 +24,7 @@ import {
   sendChatText,
   uniqueImText,
 } from '../core/_lib/androidImFlow.ts';
-import { sourceHasAndroidStringKeys } from '../core/_lib/androidAppStrings.ts';
+import { sourceHasAndroidStringKeys, resolveAndroidStrings } from '../core/_lib/androidAppStrings.ts';
 import {
   androidLiteCapabilities,
   ensureAndroidLoggedIn,
@@ -160,31 +160,45 @@ class AndroidImPrivateChatSmoke extends AppBaseClass {
       };
     });
 
-    // —— SM-IM-05 列表摘要（文本） ——
+    // —— SM-IM-05 列表摘要：流程里表情/礼物在后，摘要多为最新一条（礼物），故文案或礼物摘要均算过 ——
     await this.act('SM-IM-05 返回会话列表', async () => {
       await backToMainFromChat(this);
       await enterMessageTab(this);
     });
 
-    await this.check('SM-IM-05 列表摘要含刚发文案', async () => {
+    await this.check('SM-IM-05 列表摘要已更新', async () => {
+      const giftCopies = await resolveAndroidStrings(this, [
+        'you_sent_a_gift_message',
+        'send_gift_sender_chat_message',
+      ]);
       const contents = await this.driver.findElements(IM.rowContent);
+      const seen: string[] = [];
       let matched = '';
+      let how = '';
       for (let i = 1; i <= contents.length; i++) {
         const loc = conversationContentLocator(i);
         if (!(await this.driver.exists(loc))) continue;
         const text = (await this.driver.textOf(loc)).trim();
-        if (text.includes(this.lastSent) || text.includes(this.lastSent.slice(0, 12))) {
+        if (text) seen.push(text.slice(0, 80));
+        if (
+          this.lastSent &&
+          (text.includes(this.lastSent) || text.includes(this.lastSent.slice(0, 12)))
+        ) {
           matched = text;
+          how = 'text';
+          break;
+        }
+        if (giftCopies.some((g) => g && text.includes(g))) {
+          matched = text;
+          how = 'gift';
           break;
         }
       }
-      if (!matched && (await this.driver.exists(IM.rowContent))) {
-        const text = (await this.driver.textOf(IM.rowContent)).trim();
-        if (text.includes(this.lastSent) || text.includes(this.lastSent.slice(0, 12))) matched = text;
-      }
       return {
-        expect: `任一 message_content 含 ${this.lastSent}`,
-        real: matched || '(not found in list)',
+        expect: `message_content 含刚发文案或礼物摘要 key（you_sent_a_gift_message 等）`,
+        real: matched
+          ? `hit=${how} text=${matched}`
+          : `not found; seen=[${seen.slice(0, 5).join(' | ')}]`,
         pass: matched.length > 0,
       };
     });

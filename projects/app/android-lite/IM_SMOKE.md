@@ -54,7 +54,7 @@ MainActivity 首页(Game)
 | SM-IM-02 | 会话列表基础元素可见 | P0 | list | ✅ |
 | SM-IM-03 | 打开一条已有私聊 | P0 | private | ✅ |
 | SM-IM-04 | 私聊发送文本并回显 | P0 | private | ✅ |
-| SM-IM-05 | 返回后列表摘要更新 | P0 | private | ✅ |
+| SM-IM-05 | 返回后列表摘要更新 | P0 | private | ✅ 文案或礼物摘要（因表情/送礼在后） |
 | SM-IM-06 | 打开一条群聊（family） | P0 | group | ✅（无群则 skip） |
 | SM-IM-07 | 群聊发送文本并回显 | P0 | group | ✅ |
 | SM-IM-08 | IM 断连提示 | P1 | list | 半自动 |
@@ -116,8 +116,9 @@ MainActivity 首页(Game)
 - **期望**：`message_list` 内出现该文案（≤20s）
 
 ### SM-IM-05 列表摘要更新
-- **步骤**：`toolbar_back_button` 回列表
-- **期望**：对应行 `message_content` 含刚发文案
+- **步骤**：`toolbar_back_button` 回列表（本脚本在表情/送礼之后才回列表）
+- **期望**：对应行 `message_content` 含刚发文案，**或** 最新为礼物时的摘要（key：`you_sent_a_gift_message` 等）
+- **说明**：列表摘要只展示**最后一条**；表情/送礼在后时，摘要常为礼物文案而非 `im-auto-…` 文本
 
 ### SM-IM-13 私聊发表情
 - **步骤**：`iv_keyboard_emoji` → `emoji_all_view` / `iv_pic` 点选可用表情（跳过锁定）
