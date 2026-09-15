@@ -18,11 +18,11 @@
  *       5. 点击发送
  *   3.4 语音房送礼（在上麦前：需麦上有其他用户）：
  *       1. 点击右下角礼物 icon，调起礼物架
- *       2. 选择价格 ≤ 账户余额的礼物
+ *       2. 选择最便宜礼物，数量设为 1
  *       3. 点击面板上方陪玩师头像，选中收礼人（送礼按钮点亮）
  *       4. 点击送礼按钮
  *       目标：送礼成功 / 公屏消息列表展示该送礼信息
- *   3.3 语音房上麦
+ *   3.3 语音房上麦（固定 0 号麦位）
  *
  * 说明：本文件为服务端正式环境唯一识别入口，公共能力已内联于此，勿再拆成 helpers。
  *
@@ -31,7 +31,7 @@
  *     node projects/app/android-lite/voice-room.android.lite.test.ts
  *
  * 可选：
- *   --room-no=2000           优先进房号（默认 2000；搜不到则列表随机）
+ *   --room-no=11100101       优先进房号（默认 11100101；搜不到则列表随机 Fun 房）
  *   --message=hello          公屏文案（默认 vr-<timestamp>）
  *   --skip-enter             已在目标房内时跳过 3.1 进房
  *   SCRIPT_CONFIG=config.app.json
@@ -102,8 +102,8 @@ const FALLBACK_PHONE = '18810242906';
 const FALLBACK_PASSWORD = '123456';
 const FALLBACK_COUNTRY_CODE = '86';
 
-/** 测试环境默认语音房展示号 */
-const DEFAULT_ROOM_NO = '2000';
+/** 测试环境默认语音房展示号（娱乐房） */
+const DEFAULT_ROOM_NO = '11100101';
 
 /**
  * 关键 resource-id（包名:id/xxx）。
@@ -184,6 +184,9 @@ const ID = {
   giftSelectedAvatar: `${APP_PACKAGE}:id/giftSelectedAvatarIv`,
   giftSend: `${APP_PACKAGE}:id/sendGiftSubmitTv`,
   giftCombo: `${APP_PACKAGE}:id/giftComboView`,
+  giftCountLayout: `${APP_PACKAGE}:id/sendGiftCountLayout`,
+  giftCountTv: `${APP_PACKAGE}:id/sendGiftCountTv`,
+  giftCountOption: `${APP_PACKAGE}:id/giftCountTv`,
   giftMsgName: `${APP_PACKAGE}:id/tv_gift_name`,
   giftMsgCount: `${APP_PACKAGE}:id/tv_gift_count`,
   guideLayout: `${APP_PACKAGE}:id/guideLayout`,
@@ -248,8 +251,8 @@ const RUNTIME_PERMISSIONS = [
 ];
 
 /**
- * 解析优先进房房间号：`--room-no` / `SCRIPT_ROOM_NO`，默认 2000。
- * 搜不到时由 enterVoiceRoom 回退到 Party 列表随机进房。
+ * 解析优先进房房间号：`--room-no` / `SCRIPT_ROOM_NO`，默认 11100101。
+ * 搜不到时由 enterVoiceRoom 回退到 Party 列表 Fun 房。
  */
 function parseRoomNo(): string {
   for (const a of process.argv.slice(2)) {
@@ -279,7 +282,7 @@ function parseMessage(fallback = `auto-msg-${Date.now()}`): string {
  * 子类实现 runCase()；构造时传入 total（不含创建会话那一步）。
  */
 abstract class VoiceRoomSampleBase extends AppBaseClass {
-  /** 优先进房房间号（默认 2000）；搜不到改走列表随机后会回填实际房号 */
+  /** 优先进房房间号（默认 11100101）；搜不到改走列表随机后会回填实际房号 */
   protected roomNo: string;
   /** 显式传入已探测地址，避免平台注入的 localhost 走到旧版 AppiumResource */
   protected override readonly driver = new AppiumResource(process.env.SCRIPT_APPIUM_URL ?? 'http://127.0.0.1:4723/');
@@ -1265,7 +1268,7 @@ abstract class VoiceRoomSampleBase extends AppBaseClass {
   }
 
   /**
-   * 3.1 进房：优先搜索 roomNo（默认 2000）且须为娱乐房；否则 Party 列表进 Fun 房。
+   * 3.1 进房：优先搜索 roomNo（默认 11100101）且须为娱乐房；否则 Party 列表进 Fun 房。
    */
   protected async enterVoiceRoom(): Promise<void> {
     const preferred = this.roomNo || DEFAULT_ROOM_NO;
@@ -1688,32 +1691,24 @@ abstract class VoiceRoomSampleBase extends AppBaseClass {
   }
 
   /**
-   * 上麦：点除主持位/老板位外的嘉宾麦（第 1、2 麦优先，即列表第 3、4 个麦位）。
-   * 前两个麦位（主持 / 老板）禁止点击。
+   * 上麦：固定点 0 号麦位（列表第 1 个 ll_item_avatar，源码 micIndex=0）。
    */
   protected async takeMic(): Promise<'on-mic' | 'queued'> {
     await this.dismissGiftPanel();
     await this.prepareRoomUi(5_000);
     if (await this.driver.exists(by.id(ID.onMicMute))) return 'on-mic';
 
-    const clicked = await this.clickGuestMicSeat();
+    const clicked = await this.clickSeatZero();
     if (!clicked) {
-      // 嘉宾麦不可点时再兜底 Join（仍避免点主持/老板位）
       await this.dismissGiftPanel();
       await this.prepareRoomUi(3_000);
       if (await this.driver.exists(by.id(ID.onMicMute))) return 'on-mic';
-      if (await this.driver.exists(by.id(ID.applyMic))) {
-        await this.driver.click(by.id(ID.applyMic));
-        await sleep(500);
-      } else if (await this.driver.exists(by.text('Join'))) {
-        await this.driver.click(by.text('Join'));
-        await sleep(500);
-      } else if (!(await this.clickGuestMicSeat())) {
-        throw new Error('未找到可上麦的嘉宾麦位（已跳过主持位/老板位）');
+      if (!(await this.clickSeatZero())) {
+        throw new Error('未找到 0 号麦位（ll_item_avatar 第 1 个）');
       }
     }
 
-    // 座位类型弹窗：选 Regular，绝不选 Boss
+    // 座位类型弹窗：选 Regular（若出现）
     if (await this.driver.exists(by.id(ID.seatChoiceRegular))) {
       await this.driver.click(by.id(ID.seatChoiceRegular));
       await sleep(500);
@@ -1739,55 +1734,30 @@ abstract class VoiceRoomSampleBase extends AppBaseClass {
   }
 
   /**
-   * 点击嘉宾麦位上麦。
-   * Fun 房列表：index0=主持、index1=老板，其余为嘉宾麦；只点第 3 个起（优先第 1、2 嘉宾麦）。
+   * 点击 0 号麦位上麦。
+   * 源码 AppConstant.VOICE_ROOM_HOST_INDEX = 0，对应麦位列表第 1 个 ll_item_avatar。
    */
-  protected async clickGuestMicSeat(): Promise<boolean> {
-    const seats = await this.driver.findElements(by.id(ID.seatItem));
-    const total = seats.length;
-    if (total <= 2) {
-      this.log(`麦位不足 ${total} 个，无法避开主持/老板位`);
+  protected async clickSeatZero(): Promise<boolean> {
+    await this.waitForElement(by.id(ID.seatItem), '麦位列表', 8_000);
+    const seat0 = by.xpath(`(//*[@resource-id='${ID.seatItem}'])[1]`);
+    if (!(await this.driver.exists(seat0))) {
+      this.log('未找到 0 号麦位（列表第 1 个）');
       return false;
     }
-
-    // 1-based xpath：优先嘉宾第 1、2 麦（列表第 3、4 个），再往后；空麦优先
-    const candidates: number[] = [];
-    for (let i = 3; i <= total; i++) candidates.push(i);
-
-    const tryClick = async (idx: number, preferEmpty: boolean): Promise<boolean> => {
-      const seatXp = `(//*[@resource-id='${ID.seatItem}'])[${idx}]`;
-      const seatLoc = by.xpath(seatXp);
-      if (!(await this.driver.exists(seatLoc))) return false;
-
-      const hostTag = by.xpath(`${seatXp}//*[@resource-id='${ID.seatHostTag}']`);
-      const bossTag = by.xpath(`${seatXp}//*[@resource-id='${ID.seatBossTag}']`);
-      if (await this.driver.exists(hostTag) || (await this.driver.exists(bossTag))) {
-        this.log(`跳过麦位 #${idx}（主持/老板标签）`);
-        return false;
-      }
-
-      const avatar = by.xpath(`${seatXp}//*[@resource-id='${ID.seatAvatar}']`);
-      const occupied = await this.driver.exists(avatar);
-      if (preferEmpty && occupied) return false;
-
-      this.log(`尝试嘉宾麦 #${idx}（列表第 ${idx} 个，occupied=${occupied}）`);
-      try {
-        await this.driver.click(seatLoc);
-        await sleep(500);
-        return true;
-      } catch (e) {
-        this.log(`点击麦位 #${idx} 失败: ${e instanceof Error ? e.message : String(e)}`);
-        return false;
-      }
-    };
-
-    // 先空麦（第 1、2 嘉宾麦优先），再任意嘉宾麦
-    for (const preferEmpty of [true, false]) {
-      for (const idx of candidates) {
-        if (await tryClick(idx, preferEmpty)) return true;
-      }
+    this.log('点击 0 号麦位上麦');
+    try {
+      await this.driver.click(seat0);
+      await sleep(500);
+      return true;
+    } catch (e) {
+      this.log(`点击 0 号麦位失败: ${e instanceof Error ? e.message : String(e)}`);
+      return false;
     }
-    return false;
+  }
+
+  /** @deprecated 保留兼容；现统一走 clickSeatZero */
+  protected async clickGuestMicSeat(): Promise<boolean> {
+    return this.clickSeatZero();
   }
 
   private async isGiftEmptyMic(): Promise<boolean> {
@@ -1889,7 +1859,7 @@ abstract class VoiceRoomSampleBase extends AppBaseClass {
     return Number.POSITIVE_INFINITY;
   }
 
-  /** 2. 选择价格 ≤ 账户余额的礼物 */
+  /** 2. 选择最便宜且价格 ≤ 余额的礼物，并确保数量为 1 */
   protected async selectAffordableGift(): Promise<void> {
     await this.waitForElement(by.id(ID.giftItem), '礼物列表项', 8_000);
     const balance = await this.readGiftBalance();
@@ -1918,10 +1888,9 @@ abstract class VoiceRoomSampleBase extends AppBaseClass {
 
     let pick = bestIdx;
     if (affordable.length > 0) {
-      // 选可负担里最便宜的，降低余额不足风险
       affordable.sort((a, b) => a.price - b.price);
       pick = affordable[0].idx;
-      this.log(`选择可负担礼物 #${pick}，价格=${affordable[0].price}，余额=${balance}`);
+      this.log(`选择最便宜可负担礼物 #${pick}，价格=${affordable[0].price}，余额=${balance}`);
     } else if (priceEls.length > 0) {
       this.log(`无可负担礼物，回退最低价礼物 #${pick}，价格=${bestPrice}`);
     } else {
@@ -1941,6 +1910,46 @@ abstract class VoiceRoomSampleBase extends AppBaseClass {
       ]);
     }
     await sleep(400);
+    await this.ensureGiftSendCountOne();
+  }
+
+  /** 送礼数量固定为 1（x 1） */
+  protected async ensureGiftSendCountOne(): Promise<void> {
+    const isOne = async (): Promise<boolean> => {
+      if (!(await this.driver.exists(by.id(ID.giftCountTv)))) return false;
+      const t = (await this.driver.textOf(by.id(ID.giftCountTv))).replace(/\s/g, '');
+      return t === 'x1' || t === '1' || t.endsWith('x1');
+    };
+    if (await isOne()) {
+      this.log('送礼数量已是 1');
+      return;
+    }
+    if (!(await this.driver.exists(by.id(ID.giftCountLayout)))) {
+      this.log('无数量选择控件，按默认数量发送');
+      return;
+    }
+    await this.driver.click(by.id(ID.giftCountLayout));
+    await sleep(400);
+    // 弹层选项文案一般为 "x 1"
+    const opt =
+      (await this.driver.exists(by.xpath(`//*[@resource-id='${ID.giftCountOption}' and contains(@text,'1')]`)))
+        ? by.xpath(`//*[@resource-id='${ID.giftCountOption}' and contains(@text,'1')]`)
+        : by.textContains('x 1');
+    if (await this.driver.exists(opt)) {
+      await this.driver.click(opt);
+      await sleep(300);
+      this.log('已选择送礼数量 x 1');
+    } else {
+      this.log('未找到数量选项 x 1，关闭数量面板');
+      try {
+        const win = await this.driver.windowRect();
+        await this.driver.execute('mobile: clickGesture', [
+          { x: Math.round(win.width / 2), y: Math.round(win.height * 0.4) },
+        ]);
+      } catch {
+        // ignore
+      }
+    }
   }
 
   /** 3. 点击面板上方陪玩师头像，选中收礼人（送礼按钮随之点亮） */
@@ -2230,7 +2239,7 @@ class VoiceRoomTest extends VoiceRoomSampleBase {
             await this.pickRandomOnlineRoomAndEnter();
           });
 
-          // 兜底进的是任意在线房，不再要求仍是 preferred(2000)
+          // 兜底进的是任意 Fun 房，不再要求仍是 preferred
           await this.check('3.1 目标：已进入在线语音房（列表兜底）', async () =>
             this.assertInTargetRoom(''),
           );
@@ -2296,7 +2305,7 @@ class VoiceRoomTest extends VoiceRoomSampleBase {
       };
     });
 
-    await this.act('3.4-2 选择价格 ≤ 账户余额的礼物', async () => {
+    await this.act('3.4-2 选择最便宜礼物并设数量为 1', async () => {
       if (this.giftResult === 'empty-mic') {
         this.skip('麦上无可收礼用户（需其他麦上用户）');
       }
@@ -2341,7 +2350,7 @@ class VoiceRoomTest extends VoiceRoomSampleBase {
     });
 
     // ---------- 3.3 语音房上麦 ----------
-    await this.act('3.3 申请上麦（点嘉宾第1/2麦，跳过主持/老板位）', async () => {
+    await this.act('3.3 申请上麦（0 号麦位）', async () => {
       this.micResult = await this.takeMic();
       this.log(`上麦结果: ${this.micResult}`);
     });
