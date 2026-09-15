@@ -108,8 +108,8 @@ MainActivity 首页(Game)
 
 ### SM-IM-03 打开私聊
 - **前置**：至少 1 条私聊（SM-IM-00）
-- **步骤**：点一条无私聊 `groupId` 的行
-- **期望**：`ChatActivity`；`input_message` 可见；`toolbar_player_name` 非空（`send_button` 可能在输入前隐藏，不强制）
+- **步骤**：点一条无私聊 `groupId` 的行（或冷启动已在私聊则复用）
+- **期望**：`ChatActivity`；`input_message` 可见；`iv_gift` 或表情入口可见。`toolbar_player_name` 标题可选（特效昵称/晚加载时可能为空，不强制）
 
 ### SM-IM-04 私聊发文本回显
 - **步骤**：输入 `im-auto-<ts>` → `send_button`
