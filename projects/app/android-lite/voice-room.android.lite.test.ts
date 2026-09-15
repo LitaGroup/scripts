@@ -7,13 +7,13 @@
  *       3. 点击右上角搜索按钮
  *       4. 输入已开放房间 id
  *       5. 触发搜索
- *       6. 点击搜索结果进入语音房
- *       目标：可搜到房间 / 结果展示房间信息 / 可进入语音房
- *       （搜不到默认房时回退 Party 列表随机进房）
+ *       6. 点击搜索结果进入「娱乐房」FunVoiceRoomActivity（type=fun；禁止订单房）
+ *       目标：可搜到房间 / 结果展示房间信息 / 可进入娱乐房
+ *       （搜不到默认房或进到订单房时回退 Party 列表点 Fun 标签房）
  *   3.2 进入语音房发送消息：
  *       1. 点击底部标签栏「语音房」
  *       2. 点击派对 Tab
- *       3. 点击热门房间下的房间列表进入语音房
+ *       3. 点击热门房间下的 Fun 标签房间进入娱乐房
  *       4. 点击输入框，输入任意内容
  *       5. 点击发送
  *   3.4 语音房送礼（在上麦前：需麦上有其他用户）：
@@ -149,6 +149,8 @@ const ID = {
   partyRoomName: `${APP_PACKAGE}:id/tv_room_name`,
   /** layout_hot_room_list_header.xml，文案 Popular rooms */
   hotRoomTitle: `${APP_PACKAGE}:id/tv_room_title`,
+  /** view_voice_room_type.xml：Fun / Order 等类型标签文案 */
+  roomTypeTag: `${APP_PACKAGE}:id/tv_room_type`,
 
   // 房内 — activity_fun_voice_room.xml / view_voice_room_bottom2.xml
   roomIdText: `${APP_PACKAGE}:id/roomIdTextView`,
@@ -197,8 +199,20 @@ const ACT = {
   roomPerson: '.ui.voiceRoom.PersonVoiceRoomActivity',
 };
 
-/** 任一语音房 Activity */
+/** 任一语音房 Activity（退房/探测用） */
 const ROOM_ACTIVITY = /\.ui\.voiceRoom\.(FunVoiceRoomActivity|VoiceRoomActivity|PersonVoiceRoomActivity)$/;
+
+/** 娱乐房 FunVoiceRoomActivity（roomType=fun/fun1，或 orders+tagType=fun） */
+const FUN_ROOM_ACTIVITY = /\.ui\.voiceRoom\.FunVoiceRoomActivity$/;
+
+/** 订单房 VoiceRoomActivity（roomType=orders 且 tagType≠fun）— 本用例禁止进入 */
+const ORDER_ROOM_ACTIVITY = /\.ui\.voiceRoom\.VoiceRoomActivity$/;
+
+/** 列表类型标签：Fun（多语言）；源码 fun_label / VoiceRoomListTagAdapter */
+const FUN_TAG_TEXTS = ['Fun', '乐趣', '樂趣', '재미', 'ファン', 'Vui', 'บันเทิง'];
+
+/** 列表类型标签：Order/派单 — 对应 tagType=game，进订单房 */
+const ORDER_TAG_TEXTS = ['Order', '派单'];
 
 /** Party 横幅/H5 活动页（误点列表 banner 时会进入，无底部 tab） */
 const WEB_ACTIVITY = /\.ui\.view\.web\.WebActivity$/;
@@ -808,6 +822,128 @@ abstract class VoiceRoomSampleBase extends AppBaseClass {
     return false;
   }
 
+  /** 是否已在娱乐房 FunVoiceRoomActivity */
+  protected async isInFunRoom(): Promise<boolean> {
+    return this.isActivity(FUN_ROOM_ACTIVITY);
+  }
+
+  /** 是否误入订单房 VoiceRoomActivity */
+  protected async isInOrderRoom(): Promise<boolean> {
+    return this.isActivity(ORDER_ROOM_ACTIVITY);
+  }
+
+  /**
+   * 进房后确认是娱乐房；订单房/个播房则退房并返回 false。
+   * 源码 VoiceRoomHelper：roomType fun/fun1 → FunVoiceRoomActivity；
+   * orders + tagType≠fun → VoiceRoomActivity（订单房，禁止）。
+   */
+  protected async ensureEnteredFunRoom(): Promise<boolean> {
+    const deadline = Date.now() + 12_000;
+    while (Date.now() < deadline) {
+      if (await this.isActivity(PERMISSION_ACTIVITY)) {
+        await this.clickPermissionAllow();
+        continue;
+      }
+      if (await this.isActivity(WEB_ACTIVITY)) {
+        await this.driver.back();
+        await sleep(600);
+        continue;
+      }
+      if (await this.isInFunRoom()) {
+        await this.grantAppRuntimePermissions();
+        await this.prepareRoomUi(8_000);
+        if (!(await this.hasRoomChrome())) {
+          try {
+            await this.waitRoomInteractive(8_000);
+          } catch {
+            // Activity 已对即可
+          }
+        }
+        const entered = await this.readRoomIdText(3_000);
+        if (entered) this.rememberRoomNoFromText(entered);
+        this.log(entered ? `已进入娱乐房 FunVoiceRoomActivity：${entered}` : '已进入娱乐房 FunVoiceRoomActivity');
+        return true;
+      }
+      if (await this.isInOrderRoom()) {
+        this.log('误入订单房 VoiceRoomActivity，退出重选娱乐房');
+        await this.leaveRoomToMain();
+        return false;
+      }
+      if (await this.isActivity(ACT.roomPerson)) {
+        this.log('误入个播房 PersonVoiceRoomActivity，退出重选娱乐房');
+        await this.leaveRoomToMain();
+        return false;
+      }
+      await sleep(400);
+    }
+    if (await this.isInFunRoom()) return true;
+    const act = await this.refreshActivity();
+    this.log(`等待娱乐房超时，当前 Activity: ${act}`);
+    if (await this.isActivity(ROOM_ACTIVITY)) await this.leaveRoomToMain();
+    return false;
+  }
+
+  /** 点列表中带 Fun 标签的房间；找不到返回 false */
+  protected async clickFunRoomFromList(): Promise<boolean> {
+    const itemId = ID.partyRoomItem;
+    if (!(await this.driver.exists(by.id(itemId)))) {
+      if (await this.driver.exists(by.id(ID.partyRoomCover))) {
+        const covers = await this.driver.findElements(by.id(ID.partyRoomCover));
+        const start = covers.length > 1 ? 2 : 1;
+        const pick = start + Math.floor(Math.random() * Math.max(covers.length - start + 1, 1));
+        await this.driver.click(by.xpath(`(//*[@resource-id='${ID.partyRoomCover}'])[${pick}]`));
+        this.log(`未找到 roomListDRootLayout，回退点 cover #${pick}`);
+        return true;
+      }
+      return false;
+    }
+
+    for (const funText of FUN_TAG_TEXTS) {
+      const cards = await this.driver.findElements(
+        by.xpath(
+          `//*[@resource-id='${itemId}'][.//*[@resource-id='${ID.roomTypeTag}' and @text='${funText}']]`,
+        ),
+      );
+      if (cards.length > 0) {
+        const pick = Math.floor(Math.random() * cards.length) + 1;
+        await this.driver.click(
+          by.xpath(
+            `(//*[@resource-id='${itemId}'][.//*[@resource-id='${ID.roomTypeTag}' and @text='${funText}']])[${pick}]`,
+          ),
+        );
+        this.log(`点击 Fun 标签房间（文案=${funText}，第 ${pick}/${cards.length} 个）`);
+        return true;
+      }
+    }
+
+    const allItems = await this.driver.findElements(by.id(itemId));
+    const candidates: number[] = [];
+    for (let i = 1; i <= allItems.length; i++) {
+      const itemXp = `(//*[@resource-id='${itemId}'])[${i}]`;
+      let isOrder = false;
+      for (const orderText of ORDER_TAG_TEXTS) {
+        if (
+          await this.driver.exists(
+            by.xpath(`${itemXp}//*[@resource-id='${ID.roomTypeTag}' and @text='${orderText}']`),
+          )
+        ) {
+          isOrder = true;
+          break;
+        }
+      }
+      if (!isOrder) candidates.push(i);
+    }
+    if (candidates.length > 0) {
+      const pick = candidates[Math.floor(Math.random() * candidates.length)];
+      await this.driver.click(by.xpath(`(//*[@resource-id='${itemId}'])[${pick}]`));
+      this.log(`点击非 Order 标签房间（索引 ${pick}，候选 ${candidates.length}）`);
+      return true;
+    }
+
+    this.log('列表可见房间均为 Order 标签，无法点娱乐房');
+    return false;
+  }
+
   /** 底部导航是否已就绪（tabView 初始 gone，等全局配置后才显示） */
   protected async hasBottomTabs(): Promise<boolean> {
     if (await this.driver.exists(by.id(ID.tabParty))) return true;
@@ -1112,18 +1248,14 @@ abstract class VoiceRoomSampleBase extends AppBaseClass {
     return { roomId, roomName };
   }
 
-  /** 6. 点击搜索结果并等待进房可操作 */
+  /** 6. 点击搜索结果并进入娱乐房（非 FunVoiceRoomActivity 则退房抛错） */
   protected async clickSearchResultAndEnter(hit: Locator): Promise<void> {
     await this.driver.click(hit);
-    await this.waitForActivity(ROOM_ACTIVITY, 15_000);
-    await this.grantAppRuntimePermissions();
-    await this.prepareRoomUi(10_000);
-    if (!(await this.driver.exists(by.id(ID.chatEntry))) && !(await this.driver.exists(by.id(ID.roomIdText)))) {
-      await this.waitRoomInteractive(10_000);
+    await sleep(800);
+    const ok = await this.ensureEnteredFunRoom();
+    if (!ok) {
+      throw new Error('搜索进房未进入 FunVoiceRoomActivity（可能是订单房 VoiceRoomActivity）');
     }
-    const entered = await this.readRoomIdText(4_000);
-    if (entered) this.rememberRoomNoFromText(entered);
-    this.log(entered ? `已进入语音房：${entered}` : '已进入语音房（房间号暂未读到，底部控件已可见）');
   }
 
   /** 从房内展示文案回填房间号（如 "ID 12345" / "12345"） */
@@ -1133,15 +1265,14 @@ abstract class VoiceRoomSampleBase extends AppBaseClass {
   }
 
   /**
-   * 3.1 进房：优先搜索 roomNo（默认 2000）；搜不到则从 Party 列表随机进一个在线房。
-   * （细粒度步骤见 VoiceRoomTest.runCase；此方法保留给兜底/复用）
+   * 3.1 进房：优先搜索 roomNo（默认 2000）且须为娱乐房；否则 Party 列表进 Fun 房。
    */
   protected async enterVoiceRoom(): Promise<void> {
     const preferred = this.roomNo || DEFAULT_ROOM_NO;
     const found = await this.trySearchAndEnterRoom(preferred);
     if (found) return;
 
-    this.log(`未找到在线房间 ${preferred}，改为从 Party 列表随机进入`);
+    this.log(`未找到在线娱乐房 ${preferred}，改为从 Party 列表进入 Fun 房`);
     if (await this.isActivity(ACT.search)) {
       await this.driver.back();
       await sleep(800);
@@ -1149,20 +1280,23 @@ abstract class VoiceRoomSampleBase extends AppBaseClass {
     await this.pickRandomOnlineRoomAndEnter();
   }
 
-  /** Party 列表随机点一个在线房间进入（搜不到指定房时的兜底；误点 banner→Web 时自动重试） */
-  protected async pickRandomOnlineRoomAndEnter(maxAttempts = 3): Promise<void> {
-    if (await this.isActivity(ROOM_ACTIVITY)) {
+  /** Party 列表随机进入在线「娱乐房」（FunVoiceRoomActivity；禁止订单房） */
+  protected async pickRandomOnlineRoomAndEnter(maxAttempts = 5): Promise<void> {
+    if (await this.isInFunRoom()) {
       try {
         await this.prepareRoomUi(6_000);
         if (await this.hasRoomChrome()) {
           const text = await this.readRoomIdText(3_000);
           if (text) this.rememberRoomNoFromText(text);
-          this.log(text ? `已在语音房（${text}），无需重进` : '已在语音房且主控件可见，无需重进');
+          this.log(text ? `已在娱乐房（${text}），无需重进` : '已在娱乐房，无需重进');
           return;
         }
       } catch {
         // fall through
       }
+    }
+    if (await this.isActivity(ROOM_ACTIVITY)) {
+      this.log('当前不在娱乐房或控件不可见，先退出再进 Fun 房');
       await this.leaveRoomToMain();
     }
 
@@ -1185,28 +1319,20 @@ abstract class VoiceRoomSampleBase extends AppBaseClass {
           await sleep(500);
         }
         if (count <= 0) {
-          throw new Error('Party 语音房列表为空，无法随机进入在线房间');
+          throw new Error('Party 语音房列表为空，无法进入娱乐房');
         }
 
-        // 优先点真实房间卡片 roomListDRootLayout，避免点到顶部 banner 开 WebActivity
-        const useCover = !(await this.driver.exists(itemLocator));
-        const pickId = useCover ? ID.partyRoomCover : ID.partyRoomItem;
-        const visible = (await this.driver.findElements(by.id(pickId))).length;
-        // 跳过第 1 个（常为 banner/运营位），从后面随机
-        const start = visible > 1 ? 2 : 1;
-        const pick = start + Math.floor(Math.random() * (visible - start + 1));
-        this.log(`兜底进房 attempt=${attempt}/${maxAttempts}：列表 ${visible} 个，点第 ${pick} 个`);
-
-        try {
-          const nameLoc = by.xpath(`(//*[@resource-id='${ID.partyRoomName}'])[${pick}]`);
-          if (await this.driver.exists(nameLoc)) {
-            this.log(`选中房间名: ${(await this.driver.textOf(nameLoc)).trim()}`);
+        this.log(`兜底进娱乐房 attempt=${attempt}/${maxAttempts}`);
+        const clicked = await this.clickFunRoomFromList();
+        if (!clicked) {
+          // 列表可能全是 Order：下滑换一批再试
+          if (await this.driver.exists(by.id(ID.partyRoomList))) {
+            await this.driver.swipeInElement(by.id(ID.partyRoomList), 'up');
+            await sleep(500);
           }
-        } catch {
-          // ignore
+          lastError = new Error('未找到 Fun 标签房间');
+          continue;
         }
-
-        await this.driver.click(by.xpath(`(//*[@resource-id='${pickId}'])[${pick}]`));
         await sleep(1_200);
 
         if (await this.isActivity(WEB_ACTIVITY)) {
@@ -1217,23 +1343,15 @@ abstract class VoiceRoomSampleBase extends AppBaseClass {
           continue;
         }
 
-        await this.waitForActivity(ROOM_ACTIVITY, 15_000);
-        await this.grantAppRuntimePermissions();
-        await this.prepareRoomUi(12_000);
-        if (!(await this.hasRoomChrome())) {
-          await this.waitRoomInteractive(12_000);
-        }
-        const entered = await this.readRoomIdText(4_000);
-        if (entered) {
-          this.rememberRoomNoFromText(entered);
-          this.log(`已进入语音房：${entered}`);
-        } else {
-          this.log('已进入语音房（房间号暂未读到，主控件已可见）');
+        const ok = await this.ensureEnteredFunRoom();
+        if (!ok) {
+          lastError = new Error('未进入 FunVoiceRoomActivity（可能点到订单房）');
+          continue;
         }
         return;
       } catch (e) {
         lastError = e instanceof Error ? e : new Error(String(e));
-        this.log(`兜底进房 attempt=${attempt} 失败: ${lastError.message}`);
+        this.log(`兜底进娱乐房 attempt=${attempt} 失败: ${lastError.message}`);
         try {
           if (await this.isActivity(WEB_ACTIVITY) || (await this.isActivity(ROOM_ACTIVITY))) {
             await this.leaveRoomToMain();
@@ -1242,27 +1360,31 @@ abstract class VoiceRoomSampleBase extends AppBaseClass {
             await sleep(600);
           }
         } catch {
-          // ignore recovery errors
+          // ignore
         }
       }
     }
-    throw lastError ?? new Error('Party 列表随机进房失败');
+    throw lastError ?? new Error('Party 列表未能进入娱乐房（FunVoiceRoomActivity）');
   }
 
-  /** 搜索房间号并进入；找不到在线结果时返回 false（不抛错） */
+  /** 搜索房间号并进入娱乐房；找不到或进到订单房时返回 false */
   protected async trySearchAndEnterRoom(roomNo = this.roomNo): Promise<boolean> {
     if (await this.isActivity(ROOM_ACTIVITY)) {
       try {
-        if (await this.driver.exists(by.id(ID.roomIdText))) {
-          const text = (await this.driver.textOf(by.id(ID.roomIdText))).trim();
-          if (text.includes(roomNo)) {
-            this.rememberRoomNoFromText(text);
-            this.log(`已在目标房 ${text}，无需搜索`);
+        if (await this.isInFunRoom()) {
+          if (await this.driver.exists(by.id(ID.roomIdText))) {
+            const text = (await this.driver.textOf(by.id(ID.roomIdText))).trim();
+            if (text.includes(roomNo)) {
+              this.rememberRoomNoFromText(text);
+              this.log(`已在目标娱乐房 ${text}，无需搜索`);
+              return true;
+            }
+          } else if (await this.hasRoomChrome()) {
+            this.log('已在娱乐房且主控件可见，无需搜索');
             return true;
           }
-        } else if (await this.driver.exists(by.id(ID.chatEntry))) {
-          this.log('已在语音房且底部栏可见，无需搜索');
-          return true;
+        } else if (await this.isInOrderRoom()) {
+          this.log('当前在订单房，先退出再搜娱乐房');
         }
       } catch {
         // fall through
@@ -1278,8 +1400,13 @@ abstract class VoiceRoomSampleBase extends AppBaseClass {
       this.log(`搜索无在线结果或不含房间号 ${roomNo}`);
       return false;
     }
-    await this.clickSearchResultAndEnter(hit);
-    return true;
+    try {
+      await this.clickSearchResultAndEnter(hit);
+      return true;
+    } catch (e) {
+      this.log(`搜索进房非娱乐房: ${e instanceof Error ? e.message : String(e)}`);
+      return false;
+    }
   }
 
   /** 搜索房间号并进入（仅点击在线结果）；找不到则抛错 */
@@ -1352,49 +1479,67 @@ abstract class VoiceRoomSampleBase extends AppBaseClass {
   }
 
   /**
-   * 断言已在目标房间。
-   * roomNo 传空串 / undefined 表示「任意在线房即可」（列表兜底场景）。
+   * 断言已在目标娱乐房（FunVoiceRoomActivity）。
+   * roomNo 传空串表示任意娱乐房即可。
    */
   protected async assertInTargetRoom(roomNo?: string): Promise<{ expect: string; real: string; pass: boolean }> {
     const expectNo = roomNo === undefined ? this.roomNo : roomNo;
     if (await this.isActivity(PERMISSION_ACTIVITY)) await this.clickPermissionAllow();
     if (await this.isActivity(WEB_ACTIVITY)) {
       return {
-        expect: expectNo ? `房间号含 ${expectNo}` : '已进入在线语音房',
+        expect: expectNo ? `娱乐房且房间号含 ${expectNo}` : '已进入娱乐房 FunVoiceRoomActivity',
         real: '当前在 WebActivity（非语音房）',
+        pass: false,
+      };
+    }
+    if (await this.isInOrderRoom()) {
+      return {
+        expect: expectNo ? `娱乐房且房间号含 ${expectNo}` : '已进入娱乐房 FunVoiceRoomActivity',
+        real: '当前在订单房 VoiceRoomActivity（禁止）',
+        pass: false,
+      };
+    }
+    if (!(await this.isInFunRoom())) {
+      const act = await this.refreshActivity();
+      return {
+        expect: expectNo ? `娱乐房且房间号含 ${expectNo}` : '已进入娱乐房 FunVoiceRoomActivity',
+        real: `当前非 FunVoiceRoomActivity: ${act}`,
         pass: false,
       };
     }
     const text = await this.readRoomIdText(5_000);
     if (!text) {
       if (await this.hasRoomChrome()) {
-        const expectLabel = expectNo ? `房间号含 ${expectNo}` : '已进入在线语音房';
-        return { expect: expectLabel, real: '主控件可见(房间号暂未读到)', pass: true };
+        const expectLabel = expectNo ? `娱乐房且房间号含 ${expectNo}` : '已进入娱乐房 FunVoiceRoomActivity';
+        return { expect: expectLabel, real: 'FunVoiceRoomActivity 主控件可见(房间号暂未读到)', pass: true };
       }
       return {
-        expect: expectNo ? `房间号含 ${expectNo}` : '已进入在线语音房',
-        real: '未找到 roomIdTextView',
+        expect: expectNo ? `娱乐房且房间号含 ${expectNo}` : '已进入娱乐房 FunVoiceRoomActivity',
+        real: 'FunVoiceRoomActivity 但未找到 roomIdTextView',
         pass: false,
       };
     }
     this.rememberRoomNoFromText(text);
     if (!expectNo) {
-      return { expect: '已进入在线语音房', real: text, pass: true };
+      return { expect: '已进入娱乐房 FunVoiceRoomActivity', real: text, pass: true };
     }
-    return { expect: `房间号含 ${expectNo}`, real: text, pass: text.includes(expectNo) };
+    return {
+      expect: `娱乐房且房间号含 ${expectNo}`,
+      real: text,
+      pass: text.includes(expectNo),
+    };
   }
 
   /**
-   * 从派对「热门房间」下列表点进一个在线房（随机选可见条目；误点 banner 会重试）。
-   * 前置：已在派对列表页（含热门房间区域）。
+   * 从派对「热门房间」下列表进入「娱乐房」FunVoiceRoomActivity（禁止订单房）。
+   * 前置：已在派对列表页。
    */
-  protected async enterRoomFromHotList(maxAttempts = 3): Promise<void> {
+  protected async enterRoomFromHotList(maxAttempts = 5): Promise<void> {
     let lastError: Error | null = null;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
         await this.closePopups(2);
 
-        // 尽量确认「热门房间 / Popular rooms」区域可见
         try {
           if (await this.driver.exists(by.id(ID.hotRoomTitle))) {
             this.log('已看到热门房间标题');
@@ -1427,23 +1572,16 @@ abstract class VoiceRoomSampleBase extends AppBaseClass {
           throw new Error('热门房间下语音房列表为空');
         }
 
-        const useCover = !(await this.driver.exists(itemLocator));
-        const pickId = useCover ? ID.partyRoomCover : ID.partyRoomItem;
-        const visible = (await this.driver.findElements(by.id(pickId))).length;
-        const start = visible > 1 ? 2 : 1;
-        const pick = start + Math.floor(Math.random() * (visible - start + 1));
-        this.log(`热门列表进房 attempt=${attempt}/${maxAttempts}：可见 ${visible}，点第 ${pick} 个`);
-
-        try {
-          const nameLoc = by.xpath(`(//*[@resource-id='${ID.partyRoomName}'])[${pick}]`);
-          if (await this.driver.exists(nameLoc)) {
-            this.log(`选中房间名: ${(await this.driver.textOf(nameLoc)).trim()}`);
+        this.log(`热门列表进娱乐房 attempt=${attempt}/${maxAttempts}`);
+        const clicked = await this.clickFunRoomFromList();
+        if (!clicked) {
+          if (await this.driver.exists(by.id(ID.partyRoomList))) {
+            await this.driver.swipeInElement(by.id(ID.partyRoomList), 'up');
+            await sleep(500);
           }
-        } catch {
-          // ignore
+          lastError = new Error('未找到 Fun 标签房间');
+          continue;
         }
-
-        await this.driver.click(by.xpath(`(//*[@resource-id='${pickId}'])[${pick}]`));
         await sleep(1_200);
 
         if (await this.isActivity(WEB_ACTIVITY)) {
@@ -1454,23 +1592,15 @@ abstract class VoiceRoomSampleBase extends AppBaseClass {
           continue;
         }
 
-        await this.waitForActivity(ROOM_ACTIVITY, 15_000);
-        await this.grantAppRuntimePermissions();
-        await this.prepareRoomUi(12_000);
-        if (!(await this.hasRoomChrome())) {
-          await this.waitRoomInteractive(12_000);
-        }
-        const entered = await this.readRoomIdText(4_000);
-        if (entered) {
-          this.rememberRoomNoFromText(entered);
-          this.log(`已从热门列表进入语音房：${entered}`);
-        } else {
-          this.log('已从热门列表进入语音房（房间号暂未读到）');
+        const ok = await this.ensureEnteredFunRoom();
+        if (!ok) {
+          lastError = new Error('未进入 FunVoiceRoomActivity（可能点到订单房）');
+          continue;
         }
         return;
       } catch (e) {
         lastError = e instanceof Error ? e : new Error(String(e));
-        this.log(`热门列表进房 attempt=${attempt} 失败: ${lastError.message}`);
+        this.log(`热门列表进娱乐房 attempt=${attempt} 失败: ${lastError.message}`);
         try {
           if (await this.isActivity(WEB_ACTIVITY) || (await this.isActivity(ROOM_ACTIVITY))) {
             await this.leaveRoomToMain();
@@ -1481,13 +1611,14 @@ abstract class VoiceRoomSampleBase extends AppBaseClass {
         }
       }
     }
-    throw lastError ?? new Error('热门房间列表进房失败');
+    throw lastError ?? new Error('热门房间列表未能进入娱乐房（FunVoiceRoomActivity）');
   }
 
-  /** 打开公屏输入框（底部 Type… / iv_message） */
+  /** 打开公屏输入框（底部 Type… / iv_message）— 须在娱乐房内 */
   protected async openChatInput(): Promise<void> {
-    if (!(await this.isActivity(ROOM_ACTIVITY))) {
-      throw new Error(`打开输入框前已不在语音房，当前 Activity: ${this.activity || '(未知)'}`);
+    if (!(await this.isInFunRoom())) {
+      const act = await this.refreshActivity();
+      throw new Error(`打开输入框前不在娱乐房 FunVoiceRoomActivity，当前: ${act || '(未知)'}`);
     }
     await this.prepareRoomUi(5_000);
     let opened = false;
@@ -2008,9 +2139,9 @@ class VoiceRoomTest extends VoiceRoomSampleBase {
     } else {
       const preferred = this.roomNo || DEFAULT_ROOM_NO;
 
-      // 已在目标房则直接复用，跳过搜索链路
+      // 已在目标娱乐房则直接复用，跳过搜索链路
       let alreadyIn = false;
-      if (await this.isActivity(ROOM_ACTIVITY)) {
+      if (await this.isInFunRoom()) {
         try {
           await this.prepareRoomUi(5_000);
           if (await this.driver.exists(by.id(ID.roomIdText))) {
@@ -2018,12 +2149,18 @@ class VoiceRoomTest extends VoiceRoomSampleBase {
             if (text.includes(preferred)) {
               this.rememberRoomNoFromText(text);
               alreadyIn = true;
-              this.log(`已在目标房 ${text}，跳过搜索进房`);
+              this.log(`已在目标娱乐房 ${text}，跳过搜索进房`);
             }
+          } else if (await this.hasRoomChrome()) {
+            alreadyIn = true;
+            this.log('已在娱乐房且主控件可见，跳过搜索进房');
           }
         } catch {
           // continue search flow
         }
+      } else if (await this.isInOrderRoom()) {
+        this.log('当前在订单房，先退出再进娱乐房');
+        await this.leaveRoomToMain();
       }
 
       if (alreadyIn) {
@@ -2117,7 +2254,7 @@ class VoiceRoomTest extends VoiceRoomSampleBase {
       await this.enterRoomFromHotList();
     });
 
-    await this.check('3.2 已从热门列表进入语音房', async () => this.assertInTargetRoom());
+    await this.check('3.2 已从热门列表进入娱乐房', async () => this.assertInTargetRoom(''));
 
     await this.act(`3.2.4 点击输入框并输入：${this.message}`, async () => {
       await this.openChatInput();
