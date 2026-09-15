@@ -74,9 +74,18 @@ export const ANDROID_IM_LOC = {
   giftItemIcon: id('itemGiftIconIv'),
   giftItemLayout: id('itemGiftLayout'),
   giftItemPrice: id('itemGiftPriceTv'),
+  giftItemName: id('itemGiftNameTv'),
   giftSendSubmit: id('sendGiftSubmitTv'),
+  giftSendPrice: id('sendGiftPriceTv'),
+  giftComboView: id('giftComboView'),
+  /** 普通礼物气泡 */
   giftBubbleItem: id('ll_gift_item'),
+  /** 盲盒/开出礼物气泡（默认货架常为此形态） */
+  giftBoxBubbleItem: id('ll_box_gift_item'),
   giftSelectPeople: id('selectGroupPeopleIv'),
+  /** Classic 等货架 Tab 文案（R.string.classic_label） */
+  giftTabTv: id('giftTabTv'),
+  giftSortIv: id('giftSortIv'),
   groupMemberDone: id('tv_done'),
   groupMemberList: id('rl_all_user_list_view'),
   atSelectorList: id('recyclerView'),

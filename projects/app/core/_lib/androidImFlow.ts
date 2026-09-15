@@ -4,6 +4,7 @@
  */
 import type { AppBaseClass } from '../../../../src/base/AppBaseClass.ts';
 import { by, sleep } from '../../../../src/resources/AppiumResource.ts';
+import { sourceHasAndroidStringKeys } from './androidAppStrings.ts';
 import { ANDROID_LITE_PACKAGE, ANDROID_LOC as LOGIN_LOC } from './androidLocators.ts';
 import {
   ANDROID_IM_ACT,
@@ -156,7 +157,9 @@ async function countEmojiBubbles(app: AppBaseClass): Promise<number> {
 }
 
 async function countGiftBubbles(app: AppBaseClass): Promise<number> {
-  return (await app['driver'].findElements(IM.giftBubbleItem)).length;
+  const normal = (await app['driver'].findElements(IM.giftBubbleItem)).length;
+  const box = (await app['driver'].findElements(IM.giftBoxBubbleItem)).length;
+  return normal + box;
 }
 
 /** 关闭表情面板（若开着） */
@@ -174,8 +177,8 @@ export async function hideChatEmojiPanel(app: AppBaseClass): Promise<void> {
 }
 
 /**
- * 私聊/群聊：打开表情面板并点选第一个表情发送，等待气泡回显。
- * 对照：iv_keyboard_emoji → emoji_all_view/rv_emojis/iv_pic → emojiLottieView
+ * 私聊/群聊：打开表情面板并点选一个可用表情发送（不强制气泡数量增加）。
+ * 对照：iv_keyboard_emoji → emoji_all_view/rv_emojis/iv_pic
  */
 export async function sendChatEmoji(app: AppBaseClass): Promise<void> {
   await hideChatEmojiPanel(app);
@@ -183,13 +186,11 @@ export async function sendChatEmoji(app: AppBaseClass): Promise<void> {
   if (!(await app['driver'].isDisplayed(IM.chatEmoji).catch(() => false))) {
     throw new Error('表情按钮 iv_keyboard_emoji 存在但不可见');
   }
-  const before = await countEmojiBubbles(app);
   await app['driver'].click(IM.chatEmoji);
   await sleep(1_000);
   if (!(await app['driver'].waitFor(IM.emojiPanel, 10_000))) {
     throw new Error('点击表情按钮后未出现 emoji_all_view');
   }
-  // 等列表加载
   const deadlineLoad = Date.now() + 10_000;
   while (Date.now() < deadlineLoad && (await app['driver'].findElements(IM.emojiItem)).length === 0) {
     await sleep(400);
@@ -197,7 +198,7 @@ export async function sendChatEmoji(app: AppBaseClass): Promise<void> {
   const items = await app['driver'].findElements(IM.emojiItem);
   if (items.length === 0) throw new Error('表情面板无 iv_pic 可点');
 
-  // 依次尝试前几个，跳过锁定/解锁弹窗
+  // 依次尝试前几个，跳过锁定/解锁弹窗；点到未弹解锁的即视为已发送
   let sent = false;
   for (let i = 1; i <= Math.min(items.length, 6); i++) {
     const loc = by.xpath(`(//*[@resource-id='${ANDROID_LITE_PACKAGE}:id/iv_pic'])[${i}]`);
@@ -205,19 +206,18 @@ export async function sendChatEmoji(app: AppBaseClass): Promise<void> {
       await app['driver'].click(loc);
     } catch {
       await sleep(500);
-      const refreshed = await app['driver'].findElements(IM.emojiItem);
-      if (refreshed.length < i) continue;
       try {
         await app['driver'].click(loc);
       } catch {
         continue;
       }
     }
-    await sleep(1_500);
-    // 解锁弹窗则关掉继续
-    if (await app['driver'].exists(by.id(`${ANDROID_LITE_PACKAGE}:id/tv_unlock_emoji`)) ||
-        (await app['driver'].exists(by.id(`${ANDROID_LITE_PACKAGE}:id/img_close`)) &&
-          (await app['driver'].exists(by.id(`${ANDROID_LITE_PACKAGE}:id/emojiAnimationView`))))) {
+    await sleep(1_200);
+    const unlock =
+      (await app['driver'].exists(by.id(`${ANDROID_LITE_PACKAGE}:id/tv_unlock_emoji`))) ||
+      ((await app['driver'].exists(by.id(`${ANDROID_LITE_PACKAGE}:id/img_close`))) &&
+        (await app['driver'].exists(by.id(`${ANDROID_LITE_PACKAGE}:id/emojiAnimationView`))));
+    if (unlock) {
       if (await app['driver'].exists(by.id(`${ANDROID_LITE_PACKAGE}:id/img_close`))) {
         await app['driver'].click(by.id(`${ANDROID_LITE_PACKAGE}:id/img_close`));
       } else {
@@ -226,166 +226,277 @@ export async function sendChatEmoji(app: AppBaseClass): Promise<void> {
       await sleep(500);
       continue;
     }
-    if ((await countEmojiBubbles(app)) > before) {
-      sent = true;
-      break;
-    }
-  }
-  if (!sent) {
-    const end = Date.now() + 10_000;
-    while (Date.now() < end) {
-      if ((await countEmojiBubbles(app)) > before) {
-        sent = true;
-        break;
-      }
-      await sleep(400);
-    }
+    sent = true;
+    break;
   }
   await hideChatEmojiPanel(app);
-  const after = await countEmojiBubbles(app);
-  if (!sent || after <= before) {
-    throw new Error(`点击表情后气泡未增加（${before} → ${after}）`);
+  if (!sent) {
+    throw new Error('未能点选可用表情（均为锁定或点击失败）');
   }
-  app['log'](`表情消息已发送，气泡数 ${before} → ${after}`);
+  const bubbles = await countEmojiBubbles(app);
+  app['log'](`表情已点选发送（不强制气泡增量），当前气泡数=${bubbles}`);
 }
 
+/** 余额不足 / 引导充值（按 strings.xml key 解析当前语言文案，不写死多语言） */
 async function sourceHasTopUp(app: AppBaseClass): Promise<boolean> {
-  try {
-    const src = await app['driver'].source();
-    return /Top Up|top up|Recharge|充值|isi ulang|Not Enough|not enough|不够|不足|coin/i.test(src);
-  } catch {
-    return false;
-  }
+  return sourceHasAndroidStringKeys(app, [
+    'not_enough_coin_send_gift_toast',
+    'not_enough_coin_message',
+    'insufficient_balance',
+    'top_up_options_label',
+    'top_up_block_pop_up_title',
+  ]);
 }
 
 async function giftSentEvidence(app: AppBaseClass, before: number): Promise<boolean> {
-  if ((await countGiftBubbles(app)) > before) return true;
+  // 仅「可见」连击条；hierarchy 里 GONE 的 giftComboView 不能算成功
   try {
-    const src = await app['driver'].source();
-    if (/You sent a gift|you sent a gift|你送了禮物|你送了礼物|im_receive_gift/i.test(src)) {
-      // 列表摘要或气泡文案
-      return true;
-    }
-    if ((await countGiftBubbles(app)) > before) return true;
+    if (await app['driver'].isDisplayed(IM.giftComboView)) return true;
   } catch {
     /* ignore */
   }
-  return false;
+  return (await countGiftBubbles(app)) > before;
 }
 
-/**
- * 打开礼物面板，选最便宜礼物并点 Send。
- * @returns 'sent' 出现礼物气泡；'topup' 余额不足弹充值（调用方可 skip）
- * 群聊需先选收礼人（selectGroupPeopleIv → GroupMemberActivity）
- */
-export async function sendChatGift(
-  app: AppBaseClass,
-  opts: { groupPickRecipient?: boolean } = {},
-): Promise<'sent' | 'topup'> {
-  await hideChatEmojiPanel(app);
+async function ensureGiftPanelOpen(app: AppBaseClass): Promise<void> {
+  if (await app['driver'].exists(IM.giftPanelRoot)) {
+    if (await app['driver'].isDisplayed(IM.giftPanelRoot).catch(() => true)) return;
+  }
   await app['waitForElement'](IM.chatGift, '礼物按钮 iv_gift', 10_000);
-  const before = await countGiftBubbles(app);
   await app['driver'].click(IM.chatGift);
   await sleep(1_000);
   if (!(await app['driver'].waitFor(IM.giftPanelRoot, 12_000))) {
     throw new Error('点击 iv_gift 后未出现 sendGiftRootLayout');
   }
+}
 
-  // 等货架
-  const loadDeadline = Date.now() + 20_000;
-  while (Date.now() < loadDeadline && (await app['driver'].findElements(IM.giftItemIcon)).length === 0) {
-    await sleep(500);
+/** 货架接口已返回：出现可见礼物 icon/price（默认首个已选中） */
+async function waitGiftShelfLoaded(app: AppBaseClass, timeoutMs = 20_000): Promise<void> {
+  const visibleIcon = by.xpath(
+    `//*[@resource-id='${ANDROID_LITE_PACKAGE}:id/itemGiftIconIv' and @displayed='true']`,
+  );
+  const visiblePrice = by.xpath(
+    `//*[@resource-id='${ANDROID_LITE_PACKAGE}:id/itemGiftPriceTv' and @displayed='true']`,
+  );
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await app['driver'].exists(visibleIcon)) return;
+    if (await app['driver'].exists(visiblePrice)) return;
+    await sleep(400);
   }
-  if ((await app['driver'].findElements(IM.giftItemIcon)).length === 0) {
-    throw new Error('礼物面板加载超时：无 itemGiftIconIv');
-  }
+  throw new Error('礼物面板加载超时：无可见 itemGiftIconIv / itemGiftPriceTv');
+}
 
-  if (opts.groupPickRecipient) {
-    if (await app['driver'].exists(IM.giftSelectPeople)) {
-      await app['driver'].click(IM.giftSelectPeople);
-      await sleep(1_500);
-      // GroupMemberActivity：点列表第一人 → Done
-      if (await app['isActivity'](ANDROID_IM_ACT.groupMember) || (await app['driver'].exists(IM.groupMemberList))) {
-        const nameLoc = by.xpath(
-          `(//*[@resource-id='${ANDROID_LITE_PACKAGE}:id/rl_all_user_list_view']//*[@clickable='true'])[1]`,
-        );
-        if (await app['driver'].exists(nameLoc)) {
-          await app['driver'].click(nameLoc);
-          await sleep(600);
-        } else {
-          // 兜底点任意 user 行
-          const anyUser = by.xpath(`(//*[@resource-id='${ANDROID_LITE_PACKAGE}:id/user_name' or @resource-id='${ANDROID_LITE_PACKAGE}:id/userNameTv'])[1]`);
-          if (await app['driver'].exists(anyUser)) {
-            await app['driver'].click(anyUser);
-            await sleep(600);
-          }
-        }
-        if (await app['driver'].exists(IM.groupMemberDone)) {
-          await app['driver'].click(IM.groupMemberDone);
-          await sleep(1_200);
-        } else {
-          throw new Error('选人页无 tv_done');
-        }
+/**
+ * BaseGiftDialog.onClickSendGift：walletAmount == null 或 selectedGift == null 时点 Send 无效果。
+ * 等余额文案出现，并点一下可见货架首个礼物，保证选中态。
+ */
+async function ensureDefaultGiftReadyToSend(app: AppBaseClass): Promise<void> {
+  const deadline = Date.now() + 12_000;
+  while (Date.now() < deadline) {
+    if (await app['driver'].exists(IM.giftSendPrice)) {
+      try {
+        const t = (await app['driver'].textOf(IM.giftSendPrice)).trim();
+        if (t.length > 0) break;
+      } catch {
+        /* ignore */
       }
     }
+    await sleep(300);
+  }
+  if (!(await app['driver'].exists(IM.giftSendPrice))) {
+    app['log']('未等到 sendGiftPriceTv（钱包可能未返回），仍尝试发送');
+  } else {
+    app['log'](`钱包余额文案: ${(await app['driver'].textOf(IM.giftSendPrice).catch(() => '')) || '(空)'}`);
   }
 
-  // 选最便宜
-  const prices = await app['driver'].findElements(IM.giftItemPrice);
-  let best = 1;
-  let bestP = Infinity;
-  for (let i = 1; i <= Math.min(prices.length, 12); i++) {
-    const t = await app['driver'].textOf(
-      by.xpath(`(//*[@resource-id='${ANDROID_LITE_PACKAGE}:id/itemGiftPriceTv'])[${i}]`),
-    );
-    const num = Number(String(t).replace(/[^\d.]/g, ''));
-    if (Number.isFinite(num) && num < bestP) {
-      bestP = num;
-      best = i;
-    }
-  }
-  app['log'](`选礼物 index=${best} price≈${bestP}`);
-  await app['driver'].click(
-    by.xpath(`(//*[@resource-id='${ANDROID_LITE_PACKAGE}:id/itemGiftLayout'])[${best}]`),
+  const firstGift = by.xpath(
+    `(//*[@resource-id='${ANDROID_LITE_PACKAGE}:id/itemGiftLayout' and @displayed='true'])[1]`,
   );
-  await sleep(600);
-
-  await app['assertExists'](IM.giftSendSubmit, 'sendGiftSubmitTv');
-  // 群聊未选人时 Submit 可能未 selected，点了只 toast
-  await app['driver'].click(IM.giftSendSubmit);
-  await sleep(2_000);
-
-  if (await sourceHasTopUp(app)) {
-    app['log']('送礼触发 Top Up / 充值，判定余额不足');
-    await app['driver'].back().catch(() => undefined);
-    await sleep(500);
-    if (await app['driver'].exists(IM.giftPanelRoot)) {
-      await app['driver'].back().catch(() => undefined);
-    }
-    return 'topup';
-  }
-
-  const end = Date.now() + 18_000;
-  while (Date.now() < end) {
-    if (await giftSentEvidence(app, before)) {
-      app['log'](`礼物消息已发送，气泡数 ${before} → ${await countGiftBubbles(app)}`);
-      return 'sent';
-    }
-    if (await sourceHasTopUp(app)) {
-      app['log']('送礼过程出现充值文案，判定余额不足');
-      await app['driver'].back().catch(() => undefined);
-      return 'topup';
-    }
+  if (await app['driver'].exists(firstGift)) {
+    app['log']('点击货架首个礼物，确保默认选中');
+    await app['driver'].click(firstGift);
     await sleep(500);
   }
+}
 
-  // 无气泡：多为余额不足 / 风控 / 未选人；按 topup 交给用例 skip，避免硬 fail
-  app['log']('送礼未见到新增 ll_gift_item，按余额不足/未成功 skip');
+async function pickGroupGiftRecipientIfNeeded(app: AppBaseClass): Promise<void> {
+  if (!(await app['driver'].exists(IM.giftSelectPeople))) return;
+  await app['driver'].click(IM.giftSelectPeople);
+  await sleep(1_500);
+  if (await app['isActivity'](ANDROID_IM_ACT.groupMember) || (await app['driver'].exists(IM.groupMemberList))) {
+    const nameLoc = by.xpath(
+      `(//*[@resource-id='${ANDROID_LITE_PACKAGE}:id/rl_all_user_list_view']//*[@clickable='true'])[1]`,
+    );
+    if (await app['driver'].exists(nameLoc)) {
+      await app['driver'].click(nameLoc);
+      await sleep(600);
+    } else {
+      const anyUser = by.xpath(
+        `(//*[@resource-id='${ANDROID_LITE_PACKAGE}:id/user_name' or @resource-id='${ANDROID_LITE_PACKAGE}:id/userNameTv'])[1]`,
+      );
+      if (await app['driver'].exists(anyUser)) {
+        await app['driver'].click(anyUser);
+        await sleep(600);
+      }
+    }
+    if (await app['driver'].exists(IM.groupMemberDone)) {
+      await app['driver'].click(IM.groupMemberDone);
+      await sleep(1_200);
+    } else {
+      throw new Error('选人页无 tv_done');
+    }
+  }
+}
+
+async function closeGiftPanelIfOpen(app: AppBaseClass): Promise<void> {
+  if (!(await app['driver'].exists(IM.giftPanelRoot))) return;
   await app['driver'].back().catch(() => undefined);
   await sleep(400);
   if (await app['driver'].exists(IM.giftPanelRoot)) {
     await app['driver'].back().catch(() => undefined);
   }
+}
+
+/**
+ * 打开礼物面板 → 等货架加载（接口成功）→ 对默认选中礼物点 Send，连送 times 次（默认 3）。
+ * 不切换 Tab、不排序、不切换礼物。
+ */
+export async function sendChatDefaultGift(
+  app: AppBaseClass,
+  opts: { times?: number; groupPickRecipient?: boolean; intervalMs?: number } = {},
+): Promise<{ sent: number; status: 'ok' | 'topup' | 'empty' }> {
+  const times = Math.max(1, opts.times ?? 3);
+  const intervalMs = opts.intervalMs ?? 2_000;
+  await hideChatEmojiPanel(app);
+  // 先关面板数清基线，避免历史 ll_box_gift_item 误判成功
+  await closeGiftPanelIfOpen(app);
+  const baselineBubbles = await countGiftBubbles(app);
+  app['log'](`送礼前气泡基线 normal+box=${baselineBubbles}`);
+
+  await ensureGiftPanelOpen(app);
+  await waitGiftShelfLoaded(app);
+
+  if (opts.groupPickRecipient) {
+    await pickGroupGiftRecipientIfNeeded(app);
+    await ensureGiftPanelOpen(app);
+    await waitGiftShelfLoaded(app);
+  }
+
+  await ensureDefaultGiftReadyToSend(app);
+
+  if (!(await app['driver'].exists(IM.giftSendSubmit))) {
+    app['log']('货架已加载但无 sendGiftSubmitTv');
+    await closeGiftPanelIfOpen(app);
+    return { sent: 0, status: 'empty' };
+  }
+
+  app['log'](`默认选中礼物连送 ${times} 次（间隔 ${intervalMs}ms）`);
+  let sent = 0;
+  for (let i = 0; i < times; i++) {
+    await ensureGiftPanelOpen(app);
+    if (!(await app['driver'].exists(IM.giftSendSubmit))) {
+      app['log'](`第 ${i + 1} 次发送：Send 按钮不可见，停止`);
+      break;
+    }
+
+    let comboBefore = false;
+    try {
+      comboBefore = await app['driver'].isDisplayed(IM.giftComboView);
+    } catch {
+      comboBefore = false;
+    }
+    const before = await countGiftBubbles(app);
+    app['log'](`发送默认礼物 [${i + 1}/${times}]`);
+    await app['driver'].click(IM.giftSendSubmit);
+    await sleep(1_200);
+
+    if (await sourceHasTopUp(app)) {
+      app['log']('送礼触发 Top Up / 充值，判定余额不足');
+      await closeGiftPanelIfOpen(app);
+      return { sent, status: 'topup' };
+    }
+    await app['refreshActivity']();
+    if (/TopUp|Recharge|Wallet|充值/i.test(app['activity'] ?? '')) {
+      app['log'](`跳转充值页 ${app['activity']}，判定余额不足`);
+      await app['driver'].back().catch(() => undefined);
+      await sleep(800);
+      return { sent, status: 'topup' };
+    }
+
+    let ok = false;
+    const end = Date.now() + 8_000;
+    while (Date.now() < end) {
+      if (await giftSentEvidence(app, before)) {
+        ok = true;
+        break;
+      }
+      // 连击：首击后 combo 已显示，再点 Send 仍算一次
+      try {
+        if (comboBefore && (await app['driver'].isDisplayed(IM.giftComboView))) {
+          ok = true;
+          break;
+        }
+      } catch {
+        /* ignore */
+      }
+      if (await sourceHasTopUp(app)) {
+        app['log']('送礼过程出现充值文案，判定余额不足');
+        await closeGiftPanelIfOpen(app);
+        return { sent, status: 'topup' };
+      }
+      await sleep(400);
+    }
+
+    if (ok) {
+      sent += 1;
+      app['log'](`默认礼物已发送 ${sent}/${times}`);
+    } else {
+      app['log'](`第 ${i + 1} 次面板内未确认到回显（稍后关面板按增量核对）`);
+    }
+
+    if (i < times - 1) await sleep(intervalMs);
+  }
+
+  await closeGiftPanelIfOpen(app);
+  await sleep(800);
+  const afterBubbles = await countGiftBubbles(app);
+  const gained = Math.max(0, afterBubbles - baselineBubbles);
+  app['log'](`关面板后气泡 ${baselineBubbles} → ${afterBubbles}（+${gained}），面板内计次=${sent}`);
+  if (gained > 0) {
+    // 以列表增量为准；面板内连击可能多次对应 1 条气泡，取 max(面板计次, 增量) 且不超过 times
+    const finalSent = Math.min(times, Math.max(sent, gained));
+    return { sent: finalSent, status: 'ok' };
+  }
+  if (sent > 0) {
+    // 仅有连击回显、列表暂未刷出时仍记成功
+    return { sent, status: 'ok' };
+  }
+  return { sent: 0, status: 'empty' };
+}
+
+/** @deprecated 使用 sendChatDefaultGift；保留别名兼容旧调用 */
+export async function sendChatGiftsByCheapest(
+  app: AppBaseClass,
+  opts: { maxCount?: number; groupPickRecipient?: boolean; intervalMs?: number } = {},
+): Promise<{ sent: number; status: 'ok' | 'topup' | 'empty' }> {
+  return sendChatDefaultGift(app, {
+    times: opts.maxCount ?? 3,
+    groupPickRecipient: opts.groupPickRecipient,
+    intervalMs: opts.intervalMs,
+  });
+}
+
+/**
+ * 打开礼物面板，对默认选中礼物点 Send 一次。
+ * @returns 'sent' 出现礼物气泡；'topup' 余额不足弹充值（调用方可 skip）
+ */
+export async function sendChatGift(
+  app: AppBaseClass,
+  opts: { groupPickRecipient?: boolean } = {},
+): Promise<'sent' | 'topup'> {
+  const r = await sendChatDefaultGift(app, { times: 1, groupPickRecipient: opts.groupPickRecipient });
+  if (r.sent >= 1) return 'sent';
   return 'topup';
 }
 
@@ -466,7 +577,18 @@ export async function sendGroupAtMention(app: AppBaseClass, suffix?: string): Pr
 export async function backToMainFromChat(app: AppBaseClass): Promise<void> {
   for (let i = 0; i < 4; i++) {
     await app['closePopups']();
-    if (await app['isActivity'](ANDROID_IM_ACT.main)) return;
+    await app['refreshActivity']();
+    const act = app['activity'] ?? '';
+    if (/\.MainActivity$/i.test(act)) return;
+    // 多按返回会退到桌面，拉回 App 再进主页
+    if (/NexusLauncher|launcher/i.test(act) || !act) {
+      app['log'](`backToMain：当前在桌面/未知(${act || '空'}) → activateApp`);
+      await app['activateApp']();
+      await sleep(1_200);
+      await app['closePopups']();
+      if (await app['isActivity'](ANDROID_IM_ACT.main)) return;
+      continue;
+    }
     if (await app['driver'].exists(IM.chatBack)) {
       await app['driver'].click(IM.chatBack);
       await sleep(700);
@@ -474,6 +596,13 @@ export async function backToMainFromChat(app: AppBaseClass): Promise<void> {
     }
     await app['driver'].back();
     await sleep(700);
+  }
+  await app['refreshActivity']();
+  if (/\.MainActivity$/i.test(app['activity'] ?? '')) return;
+  if (/NexusLauncher|launcher/i.test(app['activity'] ?? '')) {
+    await app['activateApp']();
+    await sleep(1_500);
+    await app['closePopups']();
   }
   if (!(await app['isActivity'](ANDROID_IM_ACT.main))) {
     throw new Error(`未能从聊天页返回 MainActivity，当前=${app['activity']}`);

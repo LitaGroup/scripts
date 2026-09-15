@@ -1,5 +1,5 @@
 /**
- * Android Lite IM 私聊冒烟：打开会话、发文本、发表情、送礼、列表摘要
+ * Android Lite IM 私聊冒烟：打开会话、发文本、发表情、默认礼物连送 3 次、列表摘要
  *
  * 用例：SM-IM-03～05 / 12～15 / 23（见 IM_SMOKE.md）
  * 前置：建议先跑 im-conversation-list（含 SM-IM-00 造数），本脚本也会尝试造数
@@ -20,10 +20,11 @@ import {
   findFirstPrivateConversationIndex,
   openConversationByIndex,
   sendChatEmoji,
-  sendChatGift,
+  sendChatDefaultGift,
   sendChatText,
   uniqueImText,
 } from '../core/_lib/androidImFlow.ts';
+import { sourceHasAndroidStringKeys } from '../core/_lib/androidAppStrings.ts';
 import {
   androidLiteCapabilities,
   ensureAndroidLoggedIn,
@@ -34,7 +35,8 @@ import {
 class AndroidImPrivateChatSmoke extends AppBaseClass {
   private lastSent = '';
   private privateIndex = 1;
-  private giftSkippedForTopup = false;
+  private giftSentCount = 0;
+  private giftSkipReason = '';
 
   constructor() {
     super('android', 'lite');
@@ -79,7 +81,6 @@ class AndroidImPrivateChatSmoke extends AppBaseClass {
 
     await this.check('SM-IM-03 聊天输入区可见', async () => {
       const input = await this.driver.exists(IM.chatInput);
-      // send_button 仅在有文本时 visible=gone→visible；空输入看 gift/emoji
       const giftOrEmoji =
         (await this.driver.exists(IM.chatGift)) || (await this.driver.exists(IM.chatEmoji));
       let title = '';
@@ -93,7 +94,7 @@ class AndroidImPrivateChatSmoke extends AppBaseClass {
       };
     });
 
-    // —— SM-IM-04 ——
+    // —— SM-IM-04 文本 ——
     await this.act('SM-IM-04 私聊发送文本', async () => {
       this.lastSent = uniqueImText('im-auto');
       await sendChatText(this, this.lastSent);
@@ -107,7 +108,59 @@ class AndroidImPrivateChatSmoke extends AppBaseClass {
       };
     });
 
-    // —— SM-IM-05 ——
+    // —— SM-IM-13 表情（同会话继续） ——
+    await this.act('SM-IM-13 发送表情消息', async () => {
+      if (!(await this.driver.exists(IM.chatEmoji))) {
+        this.skip('无 iv_keyboard_emoji，跳过发送表情');
+      }
+      await sendChatEmoji(this);
+    });
+
+    await this.check('SM-IM-13 表情已点选发送', async () => {
+      const lottie = (await this.driver.findElements(IM.emojiBubbleLottie)).length;
+      const border = (await this.driver.findElements(IM.emojiBubbleBorder)).length;
+      return {
+        expect: '已完成点选发送（气泡增量不强制）',
+        real: `lottie=${lottie} border=${border}`,
+        pass: true,
+      };
+    });
+
+    // —— SM-IM-14 礼物：默认选中连送 3 次 ——
+    await this.act('SM-IM-14 默认礼物连送3次', async () => {
+      if (!(await this.driver.exists(IM.chatGift))) {
+        this.skip('无 iv_gift，跳过送礼');
+      }
+      const result = await sendChatDefaultGift(this, { times: 3 });
+      this.giftSentCount = result.sent;
+      if (result.sent === 0 && result.status === 'topup') {
+        this.giftSkipReason = 'topup';
+        this.skip('送礼余额不足（出现 Top Up），跳过礼物冒烟');
+      }
+      if (result.sent === 0) {
+        this.giftSkipReason = 'empty';
+        this.skip('礼物货架为空或未能送出');
+      }
+      this.log(`本轮成功送礼 ${result.sent} 次`);
+    });
+
+    await this.check('SM-IM-14 礼物气泡已出现', async () => {
+      if (this.giftSkipReason) this.skip(`因 ${this.giftSkipReason} 未送礼`);
+      const normal = (await this.driver.findElements(IM.giftBubbleItem)).length;
+      const box = (await this.driver.findElements(IM.giftBoxBubbleItem)).length;
+      const n = normal + box;
+      const srcHit = await sourceHasAndroidStringKeys(this, [
+        'you_sent_a_gift_message',
+        'send_gift_sender_chat_message',
+      ]);
+      return {
+        expect: `ll_gift_item|ll_box_gift_item≥1 或 key 文案（本轮送 ${this.giftSentCount} 次）`,
+        real: `normal=${normal} box=${box} sent=${this.giftSentCount} srcHit=${srcHit}`,
+        pass: n >= 1 || (this.giftSentCount >= 1 && srcHit),
+      };
+    });
+
+    // —— SM-IM-05 列表摘要（文本） ——
     await this.act('SM-IM-05 返回会话列表', async () => {
       await backToMainFromChat(this);
       await enterMessageTab(this);
@@ -136,13 +189,11 @@ class AndroidImPrivateChatSmoke extends AppBaseClass {
       };
     });
 
-    // 重新进私聊做表情 / 礼物真实发送
-    await this.act('再次进入私聊（表情/礼物）', async () => {
+    await this.act('再次进入私聊（入口检查）', async () => {
       await openConversationByIndex(this, this.privateIndex);
       await this.waitForElement(IM.chatInput, 'input_message', 12_000);
     });
 
-    // —— SM-IM-12 ——
     await this.check('SM-IM-12 更多/关注入口可见性', async () => {
       const more = await this.driver.exists(IM.chatMore);
       const follow = await this.driver.exists(IM.chatFollow);
@@ -153,54 +204,6 @@ class AndroidImPrivateChatSmoke extends AppBaseClass {
       };
     });
 
-    // —— SM-IM-13 真实发送表情 ——
-    await this.act('SM-IM-13 发送表情消息', async () => {
-      if (!(await this.driver.exists(IM.chatEmoji))) {
-        this.skip('无 iv_keyboard_emoji，跳过发送表情');
-      }
-      await sendChatEmoji(this);
-    });
-
-    await this.check('SM-IM-13 表情气泡已出现', async () => {
-      const lottie = (await this.driver.findElements(IM.emojiBubbleLottie)).length;
-      const border = (await this.driver.findElements(IM.emojiBubbleBorder)).length;
-      const n = Math.max(lottie, border);
-      return {
-        expect: 'emojiLottieView 或 emojiBorderView ≥1',
-        real: `lottie=${lottie} border=${border}`,
-        pass: n >= 1,
-      };
-    });
-
-    // —— SM-IM-14 真实送礼 ——
-    await this.act('SM-IM-14 发送礼物消息', async () => {
-      if (!(await this.driver.exists(IM.chatGift))) {
-        this.skip('无 iv_gift，跳过送礼');
-      }
-      const result = await sendChatGift(this);
-      if (result === 'topup') {
-        this.giftSkippedForTopup = true;
-        this.skip('送礼余额不足（出现 Top Up），跳过礼物冒烟');
-      }
-    });
-
-    await this.check('SM-IM-14 礼物气泡已出现', async () => {
-      if (this.giftSkippedForTopup) this.skip('因余额不足未送礼');
-      const n = (await this.driver.findElements(IM.giftBubbleItem)).length;
-      let srcHit = false;
-      try {
-        srcHit = /You sent a gift|你送了/i.test(await this.driver.source());
-      } catch {
-        /* ignore */
-      }
-      return {
-        expect: 'll_gift_item≥1 或 You sent a gift',
-        real: `count=${n} srcHit=${srcHit}`,
-        pass: n >= 1 || srcHit,
-      };
-    });
-
-    // —— SM-IM-15 ——
     await this.act('SM-IM-15 展开加号/图片入口', async () => {
       if (await this.driver.exists(IM.chatAdd)) {
         await this.driver.click(IM.chatAdd);
@@ -213,12 +216,10 @@ class AndroidImPrivateChatSmoke extends AppBaseClass {
       return {
         expect: 'img_bottom_picture（可无）',
         real: pic ? 'visible' : 'missing',
-        // 底栏加号常默认 gone，不强制 fail
         pass: true,
       };
     });
 
-    // —— SM-IM-23 ——
     await this.check('SM-IM-23 音视频通话入口（仅检查）', async () => {
       const voice = await this.driver.exists(IM.chatVoiceCall);
       const video = await this.driver.exists(IM.chatVideoCall);

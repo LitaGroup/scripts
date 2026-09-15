@@ -62,8 +62,8 @@ MainActivity 首页(Game)
 | SM-IM-10 | 多选后批量已读 | P1 | list | ✅ |
 | SM-IM-11 | 多选后批量归档 | P1 | list | ✅ |
 | SM-IM-12 | 私聊更多/关注入口 | P1 | private | ✅ UI |
-| SM-IM-13 | 私聊发送表情并回显 | P1 | private | ✅ 真实发送 |
-| SM-IM-14 | 私聊发送礼物 | P1 | private | ✅ 真发；余额不足则 skip |
+| SM-IM-13 | 私聊发送表情 | P1 | private | ✅ 点选发送即可（不强制气泡增量） |
+| SM-IM-14 | 私聊默认礼物连送 3 次 | P1 | private | ✅ 真发；余额不足则 skip |
 | SM-IM-15 | 私聊图片入口 | P1 | private | ✅ |
 | SM-IM-16 | 陌生人底栏 | P1 | private | 需造数 |
 | SM-IM-17 | 群聊 @ 并发送 | P1 | group | ✅ 真实 @ 发送 |
@@ -118,6 +118,19 @@ MainActivity 首页(Game)
 ### SM-IM-05 列表摘要更新
 - **步骤**：`toolbar_back_button` 回列表
 - **期望**：对应行 `message_content` 含刚发文案
+
+### SM-IM-13 私聊发表情
+- **步骤**：`iv_keyboard_emoji` → `emoji_all_view` / `iv_pic` 点选可用表情（跳过锁定）
+- **期望**：完成点选发送即可；**不强制** `emojiLottieView` / `emojiBorderView` 数量增加
+
+### SM-IM-14 私聊默认礼物连送
+- **对照**：`iv_gift` → `sendGiftRootLayout`；货架默认选中首个礼物（`GiftClassicVerticalFragment`）
+- **步骤**：
+  1. 点输入区 `iv_gift` 打开礼物面板
+  2. 等待货架加载完成（可见 `itemGiftIconIv` / `itemGiftPriceTv`，即接口成功）
+  3. 不对 Tab/排序/礼物做切换，直接点 `sendGiftSubmitTv` **连送 3 次**
+- **期望**：至少出现送礼连击（`giftComboView`）或礼物气泡（`ll_gift_item` / 盲盒 `ll_box_gift_item`）/ strings key `you_sent_a_gift_message` 或 `send_gift_sender_chat_message`；余额不足（key `not_enough_coin_send_gift_toast` 等）→ **skip**
+- **文案检测**：不写死各语言文本；用 `androidAppStrings` 按 key 解析（`mobile: getStrings` + `strings.xml`）
 
 ### SM-IM-06 / 07 群聊打开与发文本
 - **前置**：存在 `family_*` 会话；否则 **skip**

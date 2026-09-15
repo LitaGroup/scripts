@@ -23,6 +23,7 @@ import {
   sendGroupAtMention,
   uniqueImText,
 } from '../core/_lib/androidImFlow.ts';
+import { sourceHasAndroidStringKeys } from '../core/_lib/androidAppStrings.ts';
 import {
   androidLiteCapabilities,
   ensureAndroidLoggedIn,
@@ -154,16 +155,16 @@ class AndroidImGroupChatSmoke extends AppBaseClass {
 
     await this.check('SM-IM-19 礼物气泡已出现', async () => {
       if (this.giftSkippedForTopup) this.skip('因余额不足未送礼');
-      const n = (await this.driver.findElements(IM.giftBubbleItem)).length;
-      let srcHit = false;
-      try {
-        srcHit = /You sent a gift|你送了|Sent/i.test(await this.driver.source());
-      } catch {
-        /* ignore */
-      }
+      const normal = (await this.driver.findElements(IM.giftBubbleItem)).length;
+      const box = (await this.driver.findElements(IM.giftBoxBubbleItem)).length;
+      const n = normal + box;
+      const srcHit = await sourceHasAndroidStringKeys(this, [
+        'you_sent_a_gift_message',
+        'send_gift_sender_chat_message',
+      ]);
       return {
-        expect: 'll_gift_item≥1 或送礼文案',
-        real: `count=${n} srcHit=${srcHit}`,
+        expect: 'll_gift_item|ll_box_gift_item≥1 或 key 文案',
+        real: `normal=${normal} box=${box} srcHit=${srcHit}`,
         pass: n >= 1 || srcHit,
       };
     });

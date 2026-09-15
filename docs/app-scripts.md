@@ -55,6 +55,21 @@ adb shell screencap -p /sdcard/s.png && adb pull /sdcard/s.png
 4. UiAutomator2 的 `/value`（sendKeys）在部分输入框静默失败，`input()` 统一走 W3C Actions 逐字输入；
 5. 页面切换期间元素可能瞬时失效，`click()` 内置一次自动重试。
 
+## 八、多语言文案检测（禁止写死各语言文本）
+
+需要按**文案**断言 / 等待时：使用 Android `strings.xml` 的 **name（key）** 解析当前语言文案，不要在脚本里罗列中/英/印尼等硬编码字符串。
+
+- Helper：`projects/app/core/_lib/androidAppStrings.ts`
+  - `sourceHasAndroidStringKeys(app, ['you_sent_a_gift_message'])`
+  - `resolveAndroidString(app, key)` / `resolveAndroidStrings(app, keys)`
+- 解析顺序：`mobile: getStrings`（安装包当前语言）→ 回退 sibling `lita-lite-android/.../res/values(-xx)/strings.xml`（该 key 全语言）
+- 可选环境变量 `LITA_ANDROID_RES` 指向 `.../app/src/main/res`
+
+```ts
+import { sourceHasAndroidStringKeys } from '../core/_lib/androidAppStrings.ts';
+const hit = await sourceHasAndroidStringKeys(this, ['you_sent_a_gift_message']);
+```
+
 ## 七、验证基线（emulator-5554 + Appium）
 
 | 脚本 | 结果 | 耗时 |
