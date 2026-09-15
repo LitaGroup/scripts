@@ -13,7 +13,7 @@ Script collection: automated test scripts (`*.test.ts`), online health-check scr
   - `tests/`  — automated test cases (`.test.ts`)
   - `checks/` — online health checks (`.check.ts`)
   - `exports/` — data export scripts (`.export.ts`)
-- APP scripts (Appium-based): `projects/app/<module>/` (current: `projects/app/core/`); platform/flavor/kind are encoded in the file name, so `checks`/`tests` subfolders are NOT used.
+- APP scripts (Appium-based): `projects/app/<module>/` — Android Lite 用例在 `projects/app/android-lite/`；`projects/app/core/` 放 `_lib`、用例文档与 iOS Lita 脚本（**勿再在 core/ 放 Android Lite `*.test.ts` 副本，平台会扫成双份**）。platform/flavor/kind are encoded in the file name, so `checks`/`tests` subfolders are NOT used.
 - Shared layers live in top-level `src/`: `src/resources/` (resource layer), `src/services/` (service layer), `src/base/` (business layer).
 - Config: `config.json` (gitignored) holds secrets like `userToken`; `config.example.json` is the committed template; override path via `LITA_CONFIG_PATH`.
 - APP data config: `config.app.json` holds accounts/passwords for APP scripts（仓库跟踪；结构见 `config.app.example.json`）；path via env `SCRIPT_CONFIG` (default: cwd `config.app.json`)。

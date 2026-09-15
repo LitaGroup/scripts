@@ -7,18 +7,18 @@
  * 运行：
  *   SCRIPT_CONFIG=config.app.json \
  *   SCRIPT_APPIUM_URL=http://127.0.0.1:4723/ \
- *   node --experimental-strip-types projects/app/core/login-entries.android.lite.test.ts
+ *   node --experimental-strip-types projects/app/android-lite/login-entries.android.lite.test.ts
  *
  * 注意：需未登录；若已登录脚本会尝试退出后再验入口。
  */
 import { AppBaseClass } from '../../../src/base/AppBaseClass.ts';
 import { by, sleep, type Locator } from '../../../src/resources/AppiumResource.ts';
-import { ANDROID_LITE_PACKAGE, ANDROID_LOC as LOC, ANDROID_LOGIN_ENTRY } from './_lib/androidLocators.ts';
+import { ANDROID_LITE_PACKAGE, ANDROID_LOC as LOC, ANDROID_LOGIN_ENTRY } from '../core/_lib/androidLocators.ts';
 import {
   androidLiteCapabilities,
   enterAndroidMeGate,
   registerAndroidLoginStates,
-} from './_lib/androidLoginFlow.ts';
+} from '../core/_lib/androidLoginFlow.ts';
 
 type EntryKey = keyof typeof ANDROID_LOGIN_ENTRY;
 

@@ -56,17 +56,15 @@ SCRIPT_DEVICE_UDID=<adb-serial>
 
 ---
 
-## 登录冒烟（core）
+## 登录冒烟（android-lite）
 
-正式登录用例在 `projects/app/core/`，见 `LOGIN_SMOKE.md`。
+正式登录用例在 `projects/app/android-lite/`（文档 `../core/LOGIN_SMOKE.md`）。`core/` 只保留 `_lib` / iOS 脚本，不再放 Android Lite `*.test.ts` 副本，避免平台双份导入。
 
 ```bash
 SCRIPT_CONFIG=config.app.json \
 SCRIPT_APPIUM_URL=http://127.0.0.1:4723/ \
-node projects/app/core/login-phone-password.android.lite.test.ts
+node projects/app/android-lite/login-phone-password.android.lite.test.ts
 ```
-
-同级目录也可跑：`projects/app/android-lite/login-phone-password.android.lite.test.ts`。
 
 ### Google 登录（SM-LOGIN-07）
 
