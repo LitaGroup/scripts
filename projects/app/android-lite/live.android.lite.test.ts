@@ -17,6 +17,8 @@
  *     SCRIPT_CONFIG=config.app.json \
  *     node projects/app/android-lite/live.android.lite.test.ts
  */
+import dns from 'node:dns';
+import http from 'node:http';
 import { AppBaseClass, type AppAccount } from '../../../src/base/AppBaseClass.ts';
 import {
   AppiumResource,
@@ -33,7 +35,9 @@ import {
 } from '../core/_lib/androidLoginFlow.ts';
 import { resolveAndroidStrings } from '../core/_lib/androidAppStrings.ts';
 
-/** 平台常注入 localhost；Node fetch 可能走 IPv6 导致 fetch failed。探测可达地址后再建会话。 */
+dns.setDefaultResultOrder('ipv4first');
+
+/** 平台常注入 localhost；探测可达地址后再建会话（IPv4 HTTP，兼容沙箱）。 */
 function normalizeAppiumBase(raw: string): string {
   let u = raw.trim();
   if (!u) return '';
@@ -43,13 +47,35 @@ function normalizeAppiumBase(raw: string): string {
   return u;
 }
 
-async function probeAppium(url: string): Promise<boolean> {
-  try {
-    const res = await fetch(new URL('status', url), { signal: AbortSignal.timeout(2500) });
-    return res.ok;
-  } catch {
-    return false;
-  }
+function probeAppium(url: string, timeoutMs = 2000): Promise<boolean> {
+  return new Promise((resolve) => {
+    try {
+      const u = new URL('status', url);
+      const hostname = u.hostname === 'localhost' ? '127.0.0.1' : u.hostname;
+      const req = http.request(
+        {
+          hostname,
+          port: Number(u.port || 4723),
+          path: `${u.pathname}${u.search}`,
+          method: 'GET',
+          family: 4,
+          timeout: timeoutMs,
+        },
+        (res) => {
+          res.resume();
+          resolve((res.statusCode ?? 0) >= 200 && (res.statusCode ?? 0) < 300);
+        },
+      );
+      req.on('timeout', () => {
+        req.destroy();
+        resolve(false);
+      });
+      req.on('error', () => resolve(false));
+      req.end();
+    } catch {
+      resolve(false);
+    }
+  });
 }
 
 async function resolveReachableAppiumUrl(): Promise<string> {
@@ -63,7 +89,10 @@ async function resolveReachableAppiumUrl(): Promise<string> {
     }
   };
   add(process.env.SCRIPT_APPIUM_URL);
+  add(process.env.APPIUM_URL);
   add(process.env.APPIUM_HOST);
+  // 平台 Docker/沙箱里 127.0.0.1 是容器自己；宿主机 Appium 走 host.docker.internal
+  add('http://host.docker.internal:4723/');
   add('http://127.0.0.1:4723/');
 
   const failed: string[] = [];
@@ -74,7 +103,9 @@ async function resolveReachableAppiumUrl(): Promise<string> {
     }
     failed.push(u);
   }
-  process.stdout.write(`[log] Appium 探测失败: ${failed.join(' , ')}\n`);
+  process.stdout.write(
+    `[log] Appium 探测失败: ${failed.join(' , ')}（执行环境连不到 Appium。请在平台配置 SCRIPT_APPIUM_URL，或在宿主机执行: appium --address 0.0.0.0 --port 4723）\n`,
+  );
   return candidates[0] ?? 'http://127.0.0.1:4723/';
 }
 
