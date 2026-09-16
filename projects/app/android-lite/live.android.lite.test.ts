@@ -19,6 +19,7 @@
  */
 import { AppBaseClass, type AppAccount } from '../../../src/base/AppBaseClass.ts';
 import {
+  AppiumResource,
   by,
   sleep,
   type AppiumCapabilities,
@@ -31,6 +32,53 @@ import {
   registerAndroidLoginStates,
 } from '../core/_lib/androidLoginFlow.ts';
 import { resolveAndroidStrings } from '../core/_lib/androidAppStrings.ts';
+
+/** 平台常注入 localhost；Node fetch 可能走 IPv6 导致 fetch failed。探测可达地址后再建会话。 */
+function normalizeAppiumBase(raw: string): string {
+  let u = raw.trim();
+  if (!u) return '';
+  if (!/^https?:\/\//i.test(u)) u = `http://${u}`;
+  u = u.replace(/^(https?:\/\/)localhost(?=[:/]|$)/i, '$1127.0.0.1');
+  if (!u.endsWith('/')) u += '/';
+  return u;
+}
+
+async function probeAppium(url: string): Promise<boolean> {
+  try {
+    const res = await fetch(new URL('status', url), { signal: AbortSignal.timeout(2500) });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function resolveReachableAppiumUrl(): Promise<string> {
+  const seen = new Set<string>();
+  const candidates: string[] = [];
+  const add = (raw?: string) => {
+    const n = normalizeAppiumBase(raw ?? '');
+    if (n && !seen.has(n)) {
+      seen.add(n);
+      candidates.push(n);
+    }
+  };
+  add(process.env.SCRIPT_APPIUM_URL);
+  add(process.env.APPIUM_HOST);
+  add('http://127.0.0.1:4723/');
+
+  const failed: string[] = [];
+  for (const u of candidates) {
+    if (await probeAppium(u)) {
+      process.stdout.write(`[log] Appium 可用: ${u}\n`);
+      return u;
+    }
+    failed.push(u);
+  }
+  process.stdout.write(`[log] Appium 探测失败: ${failed.join(' , ')}\n`);
+  return candidates[0] ?? 'http://127.0.0.1:4723/';
+}
+
+process.env.SCRIPT_APPIUM_URL = await resolveReachableAppiumUrl();
 
 const APP_PACKAGE = 'com.litalite.android';
 const id = (name: string) => `${APP_PACKAGE}:id/${name}`;
@@ -117,12 +165,40 @@ const RUNTIME_PERMISSIONS = [
 ];
 
 class LiveAndroidLiteTest extends AppBaseClass {
+  /** 显式传入已探测地址，避免平台注入 localhost 走到不可达地址 */
+  protected override readonly driver = new AppiumResource(
+    process.env.SCRIPT_APPIUM_URL ?? 'http://127.0.0.1:4723/',
+  );
+
   constructor() {
     super('android', 'lite');
     // 登录 → Live 页 → 开播 → 选房 → 相机 → 开始 → 断言关播 → 结束
     this.total = 10;
     registerAndroidLoginStates(this);
     this.registerLiveStates();
+  }
+
+  /** 建连失败则中止，避免后续步骤全刷「会话未创建」 */
+  protected async run(): Promise<void> {
+    await this.act(`创建 Appium 会话 (${this.platform}/${this.flavor}/${this.env})`, async () => {
+      this.log(`Appium: ${process.env.SCRIPT_APPIUM_URL}`);
+      await this.driver.createSession(this.capabilities());
+      await this.activateApp();
+    });
+    if (!this.driver.isActive) {
+      throw new Error(
+        'Appium 会话未创建，已中止后续步骤（请确认执行机 Appium 已启动：appium --address 127.0.0.1 --port 4723）',
+      );
+    }
+    try {
+      await this.runCase();
+    } finally {
+      try {
+        await this.driver.deleteSession();
+      } catch {
+        // ignore
+      }
+    }
   }
 
   protected capabilities(): AppiumCapabilities {
