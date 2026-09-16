@@ -64,9 +64,10 @@ async function resolveReachableAppiumUrl(): Promise<string> {
     }
   };
   add(process.env.SCRIPT_APPIUM_URL);
+  add(process.env.APPIUM_URL);
   add(process.env.APPIUM_HOST);
   add('http://127.0.0.1:4723/');
-  // 不再探测 172.20.1.79（执行机不可达）
+  add('http://172.20.1.79:4723/');
 
   const failed: string[] = [];
   for (const u of candidates) {

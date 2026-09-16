@@ -1,11 +1,16 @@
 /**
- * Appium 资源：基于 W3C WebDriver 协议的 Appium HTTP 客户端（零三方依赖，使用全局 fetch）。
+ * Appium 资源：基于 W3C WebDriver 协议的 Appium HTTP 客户端（零三方依赖）。
  *
  * - 服务地址：SCRIPT_APPIUM_URL 或 APPIUM_HOST，默认 http://127.0.0.1:4723/
- *   localhost 会规范成 127.0.0.1（避免 Node 走 IPv6 ::1 导致 fetch failed）
- * - 不再自动回退 172.20.1.79（该地址在执行机上通常不可达，会导致误报 fetch failed）
- * - 仅实现脚本所需的最小指令集：会话管理、元素查找/点击/输入、页面源码、截图等。
+ *   localhost → 127.0.0.1；请求走 node:http（IPv4），避免 fetch 走 ::1 / 沙箱 fetch failed
+ * - 构造时传入的 baseUrl（脚本探测结果）优先，createSession 不再强行覆盖
  */
+
+import dns from 'node:dns';
+import http from 'node:http';
+import https from 'node:https';
+
+dns.setDefaultResultOrder('ipv4first');
 
 export interface AppiumCapabilities {
   platformName: 'Android' | 'iOS';
@@ -27,10 +32,8 @@ export type Locator = [using: string, value: string];
 const ELEMENT_KEY = 'element-6066-11e4-a52e-4f735466cecf';
 
 const DEFAULT_APPIUM_URL = 'http://127.0.0.1:4723/';
-/** @deprecated 历史内网地址，执行机不可达；若环境变量仍指向它则改用本机 */
-const DEPRECATED_INTERNAL_APPIUM_HOST = '172.20.1.79';
 
-/** localhost → 127.0.0.1，避免 Node fetch 解析到 ::1 而 Appium 只监听 IPv4 */
+/** localhost → 127.0.0.1，避免解析到 ::1 而 Appium 只监听 IPv4 */
 export function normalizeAppiumUrl(raw: string): string {
   let u = raw.trim();
   if (!u) return DEFAULT_APPIUM_URL;
@@ -46,15 +49,7 @@ export function resolveAppiumUrl(): string {
     process.env.APPIUM_URL ||
     process.env.APPIUM_HOST ||
     DEFAULT_APPIUM_URL;
-  const url = normalizeAppiumUrl(raw);
-  try {
-    if (new URL(url).hostname === DEPRECATED_INTERNAL_APPIUM_HOST) {
-      return DEFAULT_APPIUM_URL;
-    }
-  } catch {
-    return DEFAULT_APPIUM_URL;
-  }
-  return url;
+  return normalizeAppiumUrl(raw);
 }
 
 function xpathLiteral(s: string): string {
@@ -86,6 +81,53 @@ export function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+/** IPv4 HTTP，避免 global fetch 解析 ::1 导致 fetch failed */
+function nodeHttpRequest(
+  url: URL,
+  method: string,
+  body: string | undefined,
+  timeoutMs: number,
+): Promise<{ status: number; statusText: string; body: string }> {
+  return new Promise((resolve, reject) => {
+    const isHttps = url.protocol === 'https:';
+    const lib = isHttps ? https : http;
+    const hostname = url.hostname === 'localhost' ? '127.0.0.1' : url.hostname;
+    const req = lib.request(
+      {
+        protocol: url.protocol,
+        hostname,
+        port: url.port || (isHttps ? 443 : 80),
+        path: `${url.pathname}${url.search}`,
+        method,
+        family: 4,
+        timeout: timeoutMs,
+        headers:
+          body !== undefined
+            ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }
+            : undefined,
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (c) => chunks.push(c as Buffer));
+        res.on('end', () => {
+          resolve({
+            status: res.statusCode ?? 0,
+            statusText: res.statusMessage ?? '',
+            body: Buffer.concat(chunks).toString('utf8'),
+          });
+        });
+      },
+    );
+    req.on('timeout', () => {
+      req.destroy();
+      reject(new Error('timeout'));
+    });
+    req.on('error', (e) => reject(e));
+    if (body !== undefined) req.write(body);
+    req.end();
+  });
+}
+
 export class AppiumResource {
   private baseUrl: string;
   private sessionId: string | null = null;
@@ -98,10 +140,11 @@ export class AppiumResource {
     return this.sessionId !== null;
   }
 
-  /** 创建会话，返回 sessionId（每次按最新 resolveAppiumUrl，避免脏环境指到 172.20.1.79） */
+  /** 创建会话。保留构造时传入的探测地址；仅当显式有 env 时刷新 */
   async createSession(capabilities: AppiumCapabilities): Promise<string> {
     if (this.sessionId) throw new Error('Appium 会话已存在，请先 deleteSession()');
-    this.baseUrl = resolveAppiumUrl();
+    const envUrl = process.env.SCRIPT_APPIUM_URL || process.env.APPIUM_URL || process.env.APPIUM_HOST;
+    if (envUrl) this.baseUrl = normalizeAppiumUrl(envUrl);
     return await this.createSessionOnce(capabilities);
   }
 
@@ -385,27 +428,29 @@ export class AppiumResource {
   private async request(method: string, path: string, body?: unknown, timeoutMs = 60_000): Promise<unknown> {
     const base = this.baseUrl.endsWith('/') ? this.baseUrl : this.baseUrl + '/';
     const url = new URL(path, base);
-    let res: Response;
+    let status = 0;
+    let statusText = '';
+    let raw = '';
     try {
-      res = await fetch(url, {
-        method,
-        headers: body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
-        body: body !== undefined ? JSON.stringify(body) : undefined,
-        signal: AbortSignal.timeout(timeoutMs),
-      });
+      const payload = body !== undefined ? JSON.stringify(body) : undefined;
+      const result = await nodeHttpRequest(url, method, payload, timeoutMs);
+      status = result.status;
+      statusText = result.statusText;
+      raw = result.body;
     } catch (e) {
       throw new Error(`appium ${method} ${url} 请求失败: ${(e as Error).message}`);
     }
     let data: { value?: unknown } | null = null;
     try {
-      data = (await res.json()) as { value?: unknown };
+      data = JSON.parse(raw) as { value?: unknown };
     } catch {
       // 非 JSON 响应
     }
+    const ok = status >= 200 && status < 300;
     const value = data?.value;
     const err = value && typeof value === 'object' && 'error' in value ? (value as { error?: string; message?: string }) : null;
-    if (!res.ok || err) {
-      const msg = String(err?.message ?? res.statusText).split('\n')[0].slice(0, 300);
+    if (!ok || err) {
+      const msg = String(err?.message ?? statusText).split('\n')[0].slice(0, 300);
       throw new Error(`appium ${method} ${path} 失败: ${msg}`);
     }
     return value;

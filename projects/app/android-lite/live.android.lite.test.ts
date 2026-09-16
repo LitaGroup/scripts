@@ -33,7 +33,7 @@ import {
 } from '../core/_lib/androidLoginFlow.ts';
 import { resolveAndroidStrings } from '../core/_lib/androidAppStrings.ts';
 
-/** 与 voice-room.android.lite.test.ts 同一套：平台常注入 localhost，探测可达地址后再建会话。 */
+/** 与 voice-room 同逻辑：探测可达 Appium；平台常注入 localhost。 */
 function normalizeAppiumBase(raw: string): string {
   let u = raw.trim();
   if (!u) return '';
@@ -63,8 +63,15 @@ async function resolveReachableAppiumUrl(): Promise<string> {
     }
   };
   add(process.env.SCRIPT_APPIUM_URL);
+  add(process.env.APPIUM_URL);
   add(process.env.APPIUM_HOST);
   add('http://127.0.0.1:4723/');
+  // 文档备用：本机无 Appium 时用内网服务（勿再被框架改写回 127.0.0.1）
+  add('http://172.20.1.79:4723/');
+
+  process.stdout.write(
+    `[log] Appium 候选: ${candidates.join(' | ') || '(空)'}；SCRIPT_APPIUM_URL=${process.env.SCRIPT_APPIUM_URL ?? '(未设)'} APPIUM_HOST=${process.env.APPIUM_HOST ?? '(未设)'}\n`,
+  );
 
   const failed: string[] = [];
   for (const u of candidates) {
@@ -144,6 +151,8 @@ const ID = {
   // CommonDialog
   positive: id('positiveTv'),
   negative: id('negativeTv'),
+  /** LiveFinishDataDialog 返回（源码拼写 tv_retrun） */
+  finishReturn: id('tv_retrun'),
 };
 
 const PERMISSION_ALLOW_IDS = [
@@ -370,29 +379,45 @@ class LiveAndroidLiteTest extends AppBaseClass {
       await sleep(600);
       // CommonDialog：positive = 结束直播
       const deadline = Date.now() + 8_000;
+      let confirmed = false;
       while (Date.now() < deadline) {
         if (await this.driver.exists(by.id(ID.positive))) {
           await this.driver.click(by.id(ID.positive));
+          confirmed = true;
           break;
         }
-        // 文案兜底（多语言）
         const endTexts = await resolveAndroidStrings(this, ['live_room_broadcast47']);
-        let clicked = false;
         for (const t of endTexts) {
           if (t && (await this.driver.exists(by.text(t)))) {
             await this.driver.click(by.text(t));
-            clicked = true;
+            confirmed = true;
             break;
           }
         }
-        if (clicked) break;
+        if (confirmed) break;
         await sleep(300);
       }
-      await sleep(1_500);
-      // 结束后应离开 VideoRoomActivity
-      const leaveDeadline = Date.now() + 15_000;
+      if (!confirmed) throw new Error('未出现「结束直播」确认弹窗');
+
+      // 关播后会弹出 LiveFinishDataDialog，点「返回」才 finish Activity
+      const returnDeadline = Date.now() + 20_000;
+      while (Date.now() < returnDeadline) {
+        if (await this.driver.exists(by.id(ID.finishReturn))) {
+          await this.driver.click(by.id(ID.finishReturn));
+          await sleep(800);
+          break;
+        }
+        await sleep(400);
+      }
+
+      const leaveDeadline = Date.now() + 12_000;
       while (Date.now() < leaveDeadline) {
         if (!(await this.isActivity(VIDEO_ROOM_ACTIVITY))) return;
+        // 结算页仍在时再点一次返回
+        if (await this.driver.exists(by.id(ID.finishReturn))) {
+          await this.driver.click(by.id(ID.finishReturn));
+          await sleep(800);
+        }
         await sleep(400);
       }
       throw new Error(`关播后仍停留在 VideoRoomActivity: ${this.activity || '(未知)'}`);
