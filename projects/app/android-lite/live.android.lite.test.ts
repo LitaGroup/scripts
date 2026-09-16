@@ -25,15 +25,13 @@ import {
   type AppiumCapabilities,
   type Locator,
 } from '../../../src/resources/AppiumResource.ts';
-import {
-  androidLiteCapabilities,
-  ensureAndroidLoggedIn,
-  loginWithPhonePassword,
-  registerAndroidLoginStates,
-} from '../core/_lib/androidLoginFlow.ts';
+import { loginWithPhonePassword, ensureAndroidLoggedIn } from '../core/_lib/androidLoginFlow.ts';
 import { resolveAndroidStrings } from '../core/_lib/androidAppStrings.ts';
 
-/** 与 voice-room 同逻辑：探测可达 Appium；平台常注入 localhost。 */
+/**
+ * Appium 建连：与 voice-room.android.lite.test.ts 保持一致。
+ * 平台可能晚于脚本启动才拉起 Appium，故探测失败时轮询等待，不在模块加载时一锤定音。
+ */
 function normalizeAppiumBase(raw: string): string {
   let u = raw.trim();
   if (!u) return '';
@@ -52,40 +50,45 @@ async function probeAppium(url: string): Promise<boolean> {
   }
 }
 
-async function resolveReachableAppiumUrl(): Promise<string> {
+function appiumCandidates(): string[] {
   const seen = new Set<string>();
-  const candidates: string[] = [];
+  const out: string[] = [];
   const add = (raw?: string) => {
     const n = normalizeAppiumBase(raw ?? '');
     if (n && !seen.has(n)) {
       seen.add(n);
-      candidates.push(n);
+      out.push(n);
     }
   };
   add(process.env.SCRIPT_APPIUM_URL);
   add(process.env.APPIUM_URL);
   add(process.env.APPIUM_HOST);
   add('http://127.0.0.1:4723/');
-  // 文档备用：本机无 Appium 时用内网服务（勿再被框架改写回 127.0.0.1）
-  add('http://172.20.1.79:4723/');
-
-  process.stdout.write(
-    `[log] Appium 候选: ${candidates.join(' | ') || '(空)'}；SCRIPT_APPIUM_URL=${process.env.SCRIPT_APPIUM_URL ?? '(未设)'} APPIUM_HOST=${process.env.APPIUM_HOST ?? '(未设)'}\n`,
-  );
-
-  const failed: string[] = [];
-  for (const u of candidates) {
-    if (await probeAppium(u)) {
-      process.stdout.write(`[log] Appium 可用: ${u}\n`);
-      return u;
-    }
-    failed.push(u);
-  }
-  process.stdout.write(`[log] Appium 探测失败: ${failed.join(' , ')}\n`);
-  return candidates[0] ?? 'http://127.0.0.1:4723/';
+  return out;
 }
 
-process.env.SCRIPT_APPIUM_URL = await resolveReachableAppiumUrl();
+/** 轮询直到 Appium 可达（默认最多 90s），与语音房同一探测方式 */
+async function waitForReachableAppiumUrl(timeoutMs = 90_000): Promise<string> {
+  const candidates = appiumCandidates();
+  const fallback = candidates[0] ?? 'http://127.0.0.1:4723/';
+  const deadline = Date.now() + timeoutMs;
+  let attempt = 0;
+  while (Date.now() < deadline) {
+    attempt += 1;
+    for (const u of candidates) {
+      if (await probeAppium(u)) {
+        process.stdout.write(`[log] Appium 可用: ${u}（attempt=${attempt}）\n`);
+        return u;
+      }
+    }
+    process.stdout.write(
+      `[log] Appium 暂不可达（attempt=${attempt}）：${candidates.join(' , ')}，2s 后重试\n`,
+    );
+    await sleep(2_000);
+  }
+  process.stdout.write(`[log] Appium 探测超时，仍将尝试: ${fallback}\n`);
+  return fallback;
+}
 
 const APP_PACKAGE = 'com.litalite.android';
 const id = (name: string) => `${APP_PACKAGE}:id/${name}`;
@@ -174,7 +177,7 @@ const RUNTIME_PERMISSIONS = [
 ];
 
 class LiveAndroidLiteTest extends AppBaseClass {
-  /** 显式传入已探测地址，避免平台注入 localhost 走到不可达地址 */
+  /** 与语音房一致：显式传入地址；真正建连前再 waitForReachableAppiumUrl 刷新 env */
   protected override readonly driver = new AppiumResource(
     process.env.SCRIPT_APPIUM_URL ?? 'http://127.0.0.1:4723/',
   );
@@ -183,20 +186,21 @@ class LiveAndroidLiteTest extends AppBaseClass {
     super('android', 'lite');
     // 登录 → Live 页 → 开播 → 选房 → 相机 → 开始 → 断言关播 → 结束
     this.total = 10;
-    registerAndroidLoginStates(this);
     this.registerLiveStates();
   }
 
-  /** 建连失败则中止，避免后续步骤全刷「会话未创建」 */
+  /** 建连失败则中止；先轮询等待 Appium（对齐语音房可达机） */
   protected async run(): Promise<void> {
     await this.act(`创建 Appium 会话 (${this.platform}/${this.flavor}/${this.env})`, async () => {
-      this.log(`Appium: ${process.env.SCRIPT_APPIUM_URL}`);
+      const url = await waitForReachableAppiumUrl(90_000);
+      process.env.SCRIPT_APPIUM_URL = url;
+      this.log(`Appium: ${url}`);
       await this.driver.createSession(this.capabilities());
       await this.activateApp();
     });
     if (!this.driver.isActive) {
       throw new Error(
-        'Appium 会话未创建，已中止后续步骤（请确认执行机 Appium 已启动：appium --address 127.0.0.1 --port 4723）',
+        'Appium 会话未创建，已中止后续步骤（请确认执行机 Appium 已启动，且与语音房任务跑在同一执行机）',
       );
     }
     try {
@@ -210,16 +214,27 @@ class LiveAndroidLiteTest extends AppBaseClass {
     }
   }
 
+  /** capabilities 与 voice-room 对齐，避免额外依赖差异 */
   protected capabilities(): AppiumCapabilities {
-    const caps = androidLiteCapabilities();
-    caps['appium:appActivity'] = ACT.splash;
-    caps['appium:autoGrantPermissions'] = true;
-    caps['appium:settings[waitForIdleTimeout]'] = 0;
-    caps['appium:settings[waitForSelectorTimeout]'] = 0;
-    caps['appium:disableWindowAnimation'] = true;
-    caps['appium:skipLogcatCapture'] = true;
+    const caps: AppiumCapabilities = {
+      platformName: 'Android',
+      'appium:automationName': 'UiAutomator2',
+      'appium:appPackage': APP_PACKAGE,
+      'appium:appActivity': ACT.splash,
+      'appium:noReset': true,
+      'appium:autoGrantPermissions': true,
+      'appium:newCommandTimeout': 300,
+      'appium:skipLogcatCapture': true,
+      'appium:disableWindowAnimation': true,
+      'appium:uiautomator2ServerInstallTimeout': 60_000,
+      'appium:adbExecTimeout': 60_000,
+      'appium:settings[waitForIdleTimeout]': 0,
+      'appium:settings[waitForSelectorTimeout]': 0,
+    };
     const udid = (process.env.SCRIPT_DEVICE_UDID || process.env.SCRIPT_ANDROID_UDID || '').trim();
     if (udid) caps['appium:udid'] = udid;
+    const deviceName = (process.env.SCRIPT_ANDROID_DEVICE || '').trim();
+    if (deviceName) caps['appium:deviceName'] = deviceName;
     return caps;
   }
 
@@ -227,7 +242,19 @@ class LiveAndroidLiteTest extends AppBaseClass {
     await loginWithPhonePassword(this, account);
   }
 
-  /** 直播链路额外弹窗（系统权限 / 应用内权限引导 / 已在播） */
+  protected resolveAccount(): AppAccount {
+    try {
+      return this.account();
+    } catch {
+      return {
+        username: '18810242906',
+        password: '123456',
+        countryCode: '86',
+      };
+    }
+  }
+
+  /** 直播链路状态：权限 / 弹窗 / 登录态 / 页面 */
   protected registerLiveStates(): void {
     this.addState({
       name: 'permission-system',
@@ -250,11 +277,26 @@ class LiveAndroidLiteTest extends AppBaseClass {
       handle: async () => {
         await this.driver.click(by.id(ID.openAllPermission));
         await sleep(600);
-        // 可能连续弹出多个系统权限
         for (let i = 0; i < 6; i++) {
           if (!(await this.clickPermissionAllow())) break;
           await sleep(400);
         }
+      },
+    });
+    this.addState({
+      name: 'popup-whatsapp',
+      kind: 'popup',
+      detect: async () =>
+        (await this.driver.exists(by.id(`${APP_PACKAGE}:id/tv_not_have_whatsapp`))) ||
+        ((await this.driver.exists(by.id(`${APP_PACKAGE}:id/iv_close`))) &&
+          (await this.driver.exists(by.id(`${APP_PACKAGE}:id/tv_continue`)))),
+      handle: async () => {
+        if (await this.driver.exists(by.id(`${APP_PACKAGE}:id/tv_not_have_whatsapp`))) {
+          await this.driver.click(by.id(`${APP_PACKAGE}:id/tv_not_have_whatsapp`));
+        } else if (await this.driver.exists(by.id(`${APP_PACKAGE}:id/iv_close`))) {
+          await this.driver.click(by.id(`${APP_PACKAGE}:id/iv_close`));
+        }
+        await sleep(500);
       },
     });
     this.addState({
@@ -265,6 +307,17 @@ class LiveAndroidLiteTest extends AppBaseClass {
       handle: async () => {
         await this.driver.click(by.id(ID.popupActivityClose));
       },
+    });
+    this.addState({
+      name: 'logged-in',
+      activity: ACT.main,
+      detect: async () =>
+        (await this.driver.exists(by.id(ID.meUid))) || (await this.driver.exists(by.id(ID.mePage))),
+    });
+    this.addState({
+      name: 'logged-out',
+      activity: ACT.login,
+      detect: async () => true,
     });
     this.addState({
       name: 'live-room',
@@ -290,7 +343,7 @@ class LiveAndroidLiteTest extends AppBaseClass {
     });
 
     await this.act('确保已登录', async () => {
-      await ensureAndroidLoggedIn(this, this.account());
+      await ensureAndroidLoggedIn(this, this.resolveAccount());
       await this.closePopups();
     });
 
