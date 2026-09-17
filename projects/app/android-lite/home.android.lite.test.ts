@@ -196,13 +196,9 @@ class HomeCheck extends AppBaseClass {
         (await this.driver.exists(by.id(ID.meName))),
     });
     this.addState({
-      name: 'logged-out', // 登录相关页面
+      name: 'logged-out', // 登录相关页面（与 core 登录流程一致：activity 命中即判定）
       activity: '.ui.login.LoginActivity',
-      detect: async () =>
-        (await this.driver.exists(by.id(ID.loginPage))) ||
-        (await this.driver.exists(by.id(ID.phoneInput))) ||
-        (await this.driver.exists(by.id(ID.passwordInput))) ||
-        (await this.driver.exists(by.id(ID.captchaEt))),
+      detect: async () => true,
     });
     this.addState({
       name: 'home', // 主页面（底部 tab 容器）
@@ -212,7 +208,7 @@ class HomeCheck extends AppBaseClass {
   }
 
   protected capabilities(): AppiumCapabilities {
-    return {
+    const caps: AppiumCapabilities = {
       platformName: 'Android',
       'appium:automationName': 'UiAutomator2',
       'appium:appPackage': APP_PACKAGE,
@@ -220,6 +216,12 @@ class HomeCheck extends AppBaseClass {
       'appium:noReset': true,
       'appium:newCommandTimeout': 300,
     };
+    // 指定目标设备（多设备时必须用 udid 区分，如模拟器 emulator-5554）
+    const udid = process.env.SCRIPT_ANDROID_UDID;
+    if (udid) caps['appium:udid'] = udid;
+    const deviceName = process.env.SCRIPT_ANDROID_DEVICE;
+    if (deviceName) caps['appium:deviceName'] = deviceName;
+    return caps;
   }
 
   /** 当前分段所用账号：2.1 游戏段=game，2.2 交友段=friend（config.app.json accounts.{game|friend}） */
@@ -257,7 +259,8 @@ class HomeCheck extends AppBaseClass {
       await sleep(800);
     }
     if (!(await this.driver.exists(by.id(ID.phoneInput)))) {
-      await this.waitForElement(by.id(ID.phoneLoginEntry), '手机号登录入口');
+      // 手机号登录入口在 LoginActivity 的 RecyclerView 里异步加载，慢模拟器 3s 不够，放宽到 10s
+      await this.waitForElement(by.id(ID.phoneLoginEntry), '手机号登录入口', 10_000);
       await this.driver.click(by.id(ID.phoneLoginEntry));
       // 新用户优惠弹窗（确认放弃优惠）→ 点「登录并领取」继续登录
       if (await this.driver.waitFor(by.id(ID.loginClaimBtn), 3_000)) {
@@ -266,24 +269,8 @@ class HomeCheck extends AppBaseClass {
       }
     }
     await this.waitForElement(by.id(ID.phoneInput), '手机号输入框');
-    // 选择区号 +86（默认 +62，需切换中国；选错区号会走短信 OTP 而非密码登录）
-    await this.driver.click(by.id(ID.countryCode));
-    if (await this.driver.waitFor(by.id(ID.countryList), 5_000)) {
-      const china = by.text('中国');
-      for (let i = 0; i < 6 && !(await this.driver.exists(china)); i++) {
-        await this.driver.swipeInElement(by.id(ID.countryList), 'up');
-        await sleep(500);
-      }
-      if (await this.driver.exists(china)) {
-        await this.driver.click(china);
-        await sleep(1_000);
-      }
-    }
-    // 校验区号已切到 +86：切错会走短信 OTP 路径（该手机号在 +86 下是有密码/直接可达的账号）
-    const cc = (await this.driver.textOf(by.id(ID.countryCode))).trim();
-    if (!cc.includes('86')) {
-      throw new Error(`区号未切换为 +86（当前: ${cc || '未知'}）`);
-    }
+    // 选择区号 +86（语言无关：远端模拟器可能是英文系统，'中国' 文本不存在导致切号失败）
+    await this.selectCountryCode86();
     await this.driver.input(by.id(ID.phoneInput), account.username);
     await this.driver.hideKeyboard();
     const since = new Date(); // 记录发码时间基线，供查库取验证码
@@ -339,6 +326,79 @@ class HomeCheck extends AppBaseClass {
     });
   }
 
+  /** 区号行：精确匹配 (+86)，点其可点击的父节点（纯 TextView 往往不可点） */
+  private countryCodeRow86(): Locator {
+    return by.xpath(`//*[@text='(+86)']/ancestor::*[@clickable='true'][1]`);
+  }
+
+  /** 中国区号的多语言兜底（远端模拟器系统语言不确定，'中国' 单一文本会漏匹配） */
+  private country86Fallbacks(): Locator[] {
+    return [
+      by.textContains('China'),
+      by.textContains('中国'),
+      by.textContains('中国大陆'),
+      by.textContains('중국'),
+    ];
+  }
+
+  /**
+   * 选择区号 +86（语言无关、上下双向扫描、失败重试一次）。
+   * 原实现用 by.text('中国') 且仅向上滑动，远端模拟器（英文系统 / 默认 +65）下找不到
+   * 「中国」导致区号未切换，进而是错账号 OTP / 登录态错误，引发后续交友段全部失败。
+   */
+  private async selectCountryCode86(): Promise<void> {
+    const readCode = async (): Promise<string> =>
+      (await this.driver.textOf(by.id(ID.countryCode))).replace(/\D/g, '');
+    if ((await readCode()) === '86') {
+      this.log('当前区号已是 +86，跳过选择');
+      return;
+    }
+
+    const candidates = [this.countryCodeRow86(), ...this.country86Fallbacks()];
+    const findVisible = async (): Promise<Locator | null> => {
+      for (const loc of candidates) {
+        if (await this.driver.exists(loc)) return loc;
+      }
+      return null;
+    };
+
+    const trySelect = async (): Promise<boolean> => {
+      await this.driver.click(by.id(ID.countryCode));
+      await sleep(600);
+      if (!(await this.driver.waitFor(by.id(ID.countryList), 5_000))) {
+        this.log('国家列表未出现');
+        return false;
+      }
+      let target = await findVisible();
+      // 先向下再向上交替扫，避免只向上滑动漏掉列表上方/热门的中国区号
+      const directions: Array<'up' | 'down'> = ['up', 'down', 'up', 'down'];
+      for (let i = 0; i < 20 && !target; i++) {
+        await this.driver.swipeInElement(by.id(ID.countryList), directions[i % directions.length]!);
+        await sleep(350);
+        target = await findVisible();
+      }
+      if (!target) {
+        this.log('国家列表未找到 (+86)');
+        await this.driver.back();
+        await sleep(400);
+        return false;
+      }
+      await this.driver.click(target);
+      await sleep(500);
+      return (await readCode()) === '86';
+    };
+
+    let ok = await trySelect();
+    if (!ok) {
+      this.log('选区号 +86 未确认，重试一次');
+      ok = await trySelect();
+    }
+    if (!ok) {
+      throw new Error(`区号未切换为 +86（当前: ${(await this.driver.textOf(by.id(ID.countryCode))).trim() || '未知'}）`);
+    }
+    this.log('已选择区号 +86');
+  }
+
   protected async runCase(): Promise<void> {
     // ---------- 0. 就绪 ----------
     await this.act('打开APP等待就绪（关弹窗）', async () => {
@@ -374,7 +434,9 @@ class HomeCheck extends AppBaseClass {
     await this.ensureState('home', 15_000);
     const after = await this.enterMeTab();
     if (after !== 'logged-out') throw new Error(`退出登录后状态异常: ${after}`);
-    if (await this.driver.waitFor(by.id(ID.loginClose), 5_000)) await this.driver.click(by.id(ID.loginClose));
+    // 注意：不再点 close_button 关闭登录页。close_button 会异步导航回 MainActivity，
+    // 与紧随其后的 ensureLoggedInAs→login 产生竞态（慢模拟器上 login 时页面已跳回首页，
+    // 找不到手机号登录入口）。退出后停留在 LoginActivity 是确定性状态，login() 可直接在此页继续。
     this.log('已退出登录');
   }
 
@@ -472,7 +534,9 @@ class HomeCheck extends AppBaseClass {
     });
 
     await this.check('跳转至陪玩师个人主页', async () => {
-      const ok = await this.waitDisplayed(by.id(ID.userDetailProfile), '陪玩师个人主页', 8_000);
+      // 用 exists 判定：慢模拟器上页面过渡动画期间 isDisplayed 会短暂为 false，
+      // 而 userDetailProfileView 已进入 XML 层级（exists=true），导致 8s 内误判超时。
+      const ok = await this.driver.waitFor(by.id(ID.userDetailProfile), 8_000);
       return { expect: '陪玩师个人主页', real: ok ? '已进入' : '未进入', pass: ok };
     });
 
@@ -877,17 +941,15 @@ class HomeCheck extends AppBaseClass {
     await this.enterHome();
   }
 
-  /** 滚动页面直到元素出现（用于我的页/设置页的长列表） */
-  private async scrollToVisible(locator: Locator, maxSwipes = 15): Promise<void> {
+  /**
+   * 滚动页面直到元素出现（用于我的页/设置页的长列表）。
+   * 只使用 elementId 定向滚动（优先滚动 ScrollView，其次 RecyclerView），
+   * 避免坐标式滑动误触发 ViewPager 横向切换 tab（远端曾因此切到「动态/消息」页）。
+   */
+  private async scrollToVisible(locator: Locator, maxSwipes = 20): Promise<void> {
     for (let i = 0; i < maxSwipes; i++) {
       if (await this.driver.exists(locator)) return;
       await this.driver.swipeUp();
-      await sleep(500);
-    }
-    // 元素仍在 DOM 外（懒渲染列表）或滚动容器非 ScrollView：改用坐标滑动兜底
-    for (let i = 0; i < maxSwipes; i++) {
-      if (await this.driver.exists(locator)) return;
-      await this.swipeByCoordinates();
       await sleep(500);
     }
     // 诊断：失败时输出当前页面文本，便于定位远端布局差异
@@ -899,16 +961,6 @@ class HomeCheck extends AppBaseClass {
       // ignore
     }
     throw new Error(`滚动后仍未找到元素: ${locator[0]}=${locator[1]}`);
-  }
-
-  /** 屏幕中段坐标滑动（元素滚动失效时的兜底，如懒渲染 RecyclerView / ViewPager 内嵌列表） */
-  private async swipeByCoordinates(): Promise<void> {
-    const { width, height } = await this.driver.windowRect();
-    const left = Math.round(width * 0.15);
-    const top = Math.round(height * 0.25);
-    await this.driver.execute('mobile: scrollGesture', [
-      { left, top, width: width - left * 2, height: Math.round(height * 0.5), direction: 'down', percent: 0.8 },
-    ]);
   }
 }
 
