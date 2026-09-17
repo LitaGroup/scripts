@@ -59,10 +59,30 @@ export interface DrawResult {
   bus: BusForwardResult;
 }
 
+/** /marquee 轮播条目（接口文档 v1.3.0：昵称/头像读取时实时填充，不落存储；仅 totalMileage>0 的抽奖写入） */
 export interface MarqueeItem {
   playerId: string;
-  pool: string;
-  count: number;
+  nickname: string | null;
+  avatar: string | null;
+  mileage: number;
+}
+
+/** 抽奖记录游标分页响应（接口文档 v1.3.0：LuckydrawModule records 由 List 改为分页结构） */
+export interface LuckydrawRecordsResponse {
+  records: LuckydrawDrawData[];
+  more: boolean;
+  last: number;
+  size: number;
+}
+
+/** /gifts 活动礼物清单条目（仅普通礼物=礼物架礼物，按价格升序） */
+export interface GiftItem {
+  giftId: number;
+  name: string;
+  image: string;
+  price: number;
+  type: string;
+  buff: number;
 }
 
 function quoteStr(s: string): string {
@@ -139,6 +159,18 @@ export class DidibusService {
     return (data ?? {}) as DrawResult;
   }
 
+  /** 活动礼物清单（/gifts：仅 ticketGifts 普通礼物=礼物架礼物，含多语言名称/价格/coin-diamond 类型/buff，按价格升序） */
+  async gifts(userId: number | string, locale: string, debugTs: string): Promise<GiftItem[]> {
+    const data = await this.api.request(`active/v3/${DIDIBUS_BIZ}/gifts`, {
+      body: {},
+      userId,
+      locale,
+      debugTimestamp: debugTs,
+    });
+    const list = ((data ?? {}) as Record<string, unknown>)['gifts'];
+    return (Array.isArray(list) ? list : []) as GiftItem[];
+  }
+
   async marquee(userId: number | string, locale: string, debugTs: string): Promise<MarqueeItem[]> {
     const data = await this.api.request(`active/v3/${DIDIBUS_BIZ}/marquee`, {
       body: {},
@@ -190,19 +222,44 @@ export class DidibusService {
     return (await this.moduleCall('lucky-gift/detail', userId, locale, debugTs) ?? {}) as Record<string, unknown>;
   }
 
-  async luckyGiftRecords(userId: number | string, locale: string, debugTs: string): Promise<unknown[]> {
-    const data = await this.moduleCall('lucky-gift/records', userId, locale, debugTs, { minId: 0, size: 50 });
-    return Array.isArray(data) ? data : [];
+  /** 礼物道具抽奖记录（lucky-gift，游标分页：last=上页返回的 last，首屏不传；返回 records/more/last/size） */
+  async luckyGiftRecords(
+    userId: number | string,
+    locale: string,
+    debugTs: string,
+    last = 0,
+    size = 50,
+  ): Promise<LuckydrawRecordsResponse> {
+    const data = await this.moduleCall('lucky-gift/records', userId, locale, debugTs, { last, size });
+    return this.parseLuckydrawRecords(data);
   }
 
   async luckyGiftResult(userId: number | string, locale: string, debugTs: string, pool: string, id: number): Promise<unknown> {
     return this.moduleCall('lucky-gift/result', userId, locale, debugTs, { pool, id });
   }
 
-  /** 里程抽奖记录（lucky-mileage，可反查每次抽中的里程值 item.award_count） */
-  async luckyMileageRecords(userId: number | string, locale: string, debugTs: string): Promise<unknown[]> {
-    const data = await this.moduleCall('lucky-mileage/records', userId, locale, debugTs, { minId: 0, size: 50 });
-    return Array.isArray(data) ? data : [];
+  /** 里程抽奖记录（lucky-mileage，可反查每次抽中的里程值 item.award_count；游标分页同 lucky-gift） */
+  async luckyMileageRecords(
+    userId: number | string,
+    locale: string,
+    debugTs: string,
+    last = 0,
+    size = 50,
+  ): Promise<LuckydrawRecordsResponse> {
+    const data = await this.moduleCall('lucky-mileage/records', userId, locale, debugTs, { last, size });
+    return this.parseLuckydrawRecords(data);
+  }
+
+  /** 解析抽奖记录分页响应（兼容新版 {records,more,last,size}） */
+  private parseLuckydrawRecords(data: unknown): LuckydrawRecordsResponse {
+    const obj = (data ?? {}) as Record<string, unknown>;
+    const records = Array.isArray(obj['records']) ? (obj['records'] as LuckydrawDrawData[]) : [];
+    return {
+      records,
+      more: Boolean(obj['more']),
+      last: Number(obj['last'] ?? 0),
+      size: Number(obj['size'] ?? records.length),
+    };
   }
 
   async luckyMileageResult(userId: number | string, locale: string, debugTs: string, pool: string, id: number): Promise<unknown> {

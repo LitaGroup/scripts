@@ -4,6 +4,10 @@ import { DidibusTestBase } from '../tests/_lib/DidibusTestBase.ts';
 import {
   LOCALE,
   ACTIVITY_GIFTS,
+  TICKET_GIFTS,
+  SAMPLE_TICKET_GIFT,
+  SAMPLE_POOL_BACKPACK_GIFT,
+  SAMPLE_EXPLORE_BACKPACK_GIFT,
   POOL_NORMAL,
   POOL_FLYING,
   TOPIC_SEND,
@@ -46,12 +50,12 @@ const DRAW_PLAN: Array<{ pool: string; count: number }> = [
 /** 抽奖总消耗（按默认价格预估，实际扣费以 detail 价格为准） */
 const DRAW_COST = DRAW_PLAN.reduce((s, p) => s + p.count * (p.pool === POOL_NORMAL ? 30 : 80), 0);
 
-/** 送礼计划（礼物须在活动白名单 ACTIVITY_GIFTS 内）：UID 为主视角，3 笔送出 + 1 笔收到 */
+/** 送礼计划（礼物须在活动白名单 ACTIVITY_GIFTS 内）：UID 为主视角，2 笔普通（发券）+ 1 笔奖池背包 + 1 笔探索背包（仅计榜） */
 const GIFT_PLAN = [
-  { from: UID, to: PEER, giftId: 1001, totalCoin: 100 },
-  { from: UID, to: PEER, giftId: 1005, totalCoin: 500 },
-  { from: UID, to: PEER, giftId: 1003, totalCoin: 1000 },
-  { from: PEER, to: UID, giftId: 1002, totalCoin: 300 },
+  { from: UID, to: PEER, giftId: SAMPLE_TICKET_GIFT, totalCoin: 100 },
+  { from: UID, to: PEER, giftId: SAMPLE_POOL_BACKPACK_GIFT, totalCoin: 500 },
+  { from: UID, to: PEER, giftId: SAMPLE_EXPLORE_BACKPACK_GIFT, totalCoin: 1000 },
+  { from: PEER, to: UID, giftId: 10798, totalCoin: 300 },
 ];
 
 /**
@@ -141,11 +145,13 @@ class DidibusSeed extends DidibusTestBase {
       this.log(`${g.from} → ${g.to} giftId=${g.giftId} coin=${g.totalCoin}，orderNo=${orderNo}`);
     });
 
-    await this.check(`券余额：enter + 送礼(coin×${EXPECT_TICKET_PER_COIN_SENDER}) + 收礼(coin×${EXPECT_TICKET_PER_COIN_RECEIVER}) 入账`, async (): Promise<CheckResult> => {
+    await this.check(`券余额：enter + 普通礼物(coin×${EXPECT_TICKET_PER_COIN_SENDER}) + 收普通礼物(coin×${EXPECT_TICKET_PER_COIN_RECEIVER}) 入账（背包礼物不发券）`, async (): Promise<CheckResult> => {
       this.needActive();
-      const sent = GIFT_PLAN.filter((g) => g.from === UID).reduce((s, g) => s + g.totalCoin, 0);
-      const received = GIFT_PLAN.filter((g) => g.to === UID).reduce((s, g) => s + g.totalCoin, 0);
-      const expectAmt = this.enterTickets + sent * EXPECT_TICKET_PER_COIN_SENDER + received * EXPECT_TICKET_PER_COIN_RECEIVER;
+      // 2026-09-16 需求澄清：仅 ticketGifts（礼物架）发探索券，背包礼物只计榜
+      const ticketCoinOf = (side: 'from' | 'to') => GIFT_PLAN.filter((g) => g[side] === UID && TICKET_GIFTS.includes(g.giftId)).reduce((s, g) => s + g.totalCoin, 0);
+      const expectAmt = this.enterTickets
+        + ticketCoinOf('from') * EXPECT_TICKET_PER_COIN_SENDER
+        + ticketCoinOf('to') * EXPECT_TICKET_PER_COIN_RECEIVER;
       const real = await pollUntil(
         async () => {
           const rows = await this.didibus.queryAccount(UID);
@@ -185,12 +191,19 @@ class DidibusSeed extends DidibusTestBase {
       });
     }
 
-    await this.check(`抽奖扣费：余额 = ${INIT_BALANCE} - Σ(单价×次数)，共 ${DRAW_PLAN.length} 次调用`, async (): Promise<CheckResult> => {
+    await this.check(`抽奖扣费：DRAW 扣减流水 = Σ(单价×次数)，共 ${DRAW_PLAN.length} 笔（3101 为共享账号，余额校验对并发 enter 入账免疫）`, async (): Promise<CheckResult> => {
       this.needActive();
-      const expectAmt = INIT_BALANCE - DRAW_PLAN.reduce((s, p) => s + this.prices[p.pool] * p.count, 0);
-      const rows = await this.didibus.queryAccount(UID);
-      const real = rows.length > 0 ? int(rows[0]['amount']) : 0;
-      return { expect: String(expectAmt), real: String(real) };
+      const expectCost = DRAW_PLAN.reduce((s, p) => s + this.prices[p.pool] * p.count, 0);
+      const logs = await this.didibus.queryAccountLogs(UID);
+      const drawLogs = logs.filter((r) => int(r['amount']) < 0 && String(r['trans_no']).includes('DRAW'));
+      const cost = drawLogs.reduce((s, r) => s + Math.abs(int(r['amount'])), 0);
+      const balanceRows = await this.didibus.queryAccount(UID);
+      const balance = balanceRows.length > 0 ? int(balanceRows[0]['amount']) : 0;
+      return {
+        expect: `扣减=${expectCost}（${DRAW_PLAN.length} 笔），余额≈${INIT_BALANCE - expectCost}`,
+        real: `扣减=${cost}（${drawLogs.length} 笔），余额=${balance}`,
+        pass: cost === expectCost && drawLogs.length === DRAW_PLAN.length,
+      };
     });
 
     await this.check('里程一致性：ΣtotalMileage = DB distance = Σdelta，每抽 1 条记录且 trans_no 唯一', async (): Promise<CheckResult> => {

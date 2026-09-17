@@ -1,6 +1,6 @@
 # 滴滴巴士·探险之旅（didibus-v202609）测试大纲
 
-> 来源文档：需求 `documents/20.md`、技术设计 `documents/26.md`（**v1.5.0**，2026-09-09）、接口文档 `documents/29.md`（**v1.1.0**）、活动配置 `documents/27`（didibus-v202609.yaml）、初始化 SQL `documents/28`（init.sql）——均来自 <http://project.cinta.team/projects/70>
+> 来源文档：技术设计 `documents/26.md`（**v1.9.0**，2026-09-17）、接口文档 `documents/29.md`（**v1.4.0**）、活动配置 `documents/27`（didibus-v202609.yaml，2026-09-16）、奖励配置表 `documents/33`（2026-09-16）、活动礼物配置 `documents/34`（2026-09-16）、需求澄清 `documents/35`（2026-09-16）、初始化 SQL `documents/28`（init.sql，2026-09-16 版）——均来自 <http://project.cinta.team/projects/70>
 > 测试环境：test（`TestBaseClass`，API 直连 + MySQL 直连读写 + Redis 直连）
 > 送礼通过 `POST active/v3/__consumer/funbit.gift_send` 模拟；结算通过 `POST active/v3/__cron`（可指定 time）手动触发。
 
@@ -8,19 +8,21 @@
 
 - 活动时间：开始 2026-09-23 14:00（北京时间，固定）；结束 2026-10-02 23:59:59（各大区本地，R 后缀）——约 9.5 天；大区 in/vi/ph/ko（已与需求方确认：开始较需求文档提前 1 天，结束不变）
 - 探险券账户（**v1.5.0 mod_account 体系**）：账户标识 `accountName: "DIDIBUS-MILEAGE"`（`mod_account.name`，id=901）；余额/流水在 `mod_account_user` / `mod_account_user_record`，**唯一键 (biz, trans_no) 幂等**；旧 `active_coin`/`active_user_account`（N-A-DIDIBUS）已废弃
-- 券比率：送礼 1 币 = 2 券（sender，`ticketPerCoinSender=2`）/ 0.5 券（receiver，`ticketPerCoinReceiver=0.5`，BigDecimal 小数**向下取整**）；每日进入发 10 券（`dailyEntryTickets=10`）
+- 券比率（**仅普通礼物=ticketGifts 礼物架发券**，2026-09-16 需求澄清）：送礼 1 币 = 2 券（sender，`ticketPerCoinSender=2`）/ 0.5 券（receiver，`ticketPerCoinReceiver=0.5`，BigDecimal 小数**向下取整**）；每日进入发 10 券（`dailyEntryTickets=10`）
 - **幂等流水号（v1.5.0）**：送礼入账 transNo=`send_{orderNo}`/`recv_{orderNo}`（Kafka 重投不重复入账，orderNo 为空则跳过入账）；/draw 由 Active 层 `ID.id("DRAW")` 生成 transNo，lucky-gift/lucky-mileage 两次抽奖共用（扣券幂等）；每日进入 transNo=`enter_{userId}_{yyyyMMdd}`（大区本地日期）
 - 抽奖（双 LuckydrawModule）：
-  - `lucky-gift`：礼物/道具抽奖，**统一扣券**（ACCOUNT 类型扣减）——普通巴士 30 券/次、飞行巴士 80 券/次，次数 ∈ {1,10,50}；奖池 `bus.normal` / `bus.flying`，权重和 < baseTotal(1.0)（可未中奖）
-  - `lucky-mileage`：里程抽奖，price=0 **不扣费**；两巴士**独立里程奖池** `bus.mileage.normal`（+1/+3/+5/+10，权重 0.40/0.30/0.20/0.10）/ `bus.mileage.flying`（+3/+5/+10/+20，权重 0.35/0.30/0.25/0.10），权重和 = baseTotal ⇒ 每抽必得；条目 EVENT+VIEW 不实际发放，`award_count` 即里程值；失败 `execIgnoreError` 容错按 0 里程（`luckyMileage=null`、`totalMileage=0`）
+  - `lucky-gift`：礼物/道具抽奖，**统一扣券**（ACCOUNT 类型扣减）——普通巴士 30 券/次、飞行巴士 80 券/次，次数 ∈ {1,10,50}；奖池 `bus.normal`（5 条，权重和 0.9065）/ `bus.flying`（6 条，权重和 0.874），权重和 < baseTotal(1.0)（可未中奖，2026-09-16 配置表）
+  - `lucky-mileage`：里程抽奖，price=0 **不扣费**；两巴士独立里程奖池，权重和 = baseTotal ⇒ 每抽必得；条目 EVENT+VIEW 不实际发放，`award_count` 即里程值（**2026-09-16 配置表**：normal 8 档 +2/+2/+2/+5/+8/+15/+30/+200、flying 9 档 +8/+8/+8/+8/+20/+30/+60/+30/+800，用例从 mod_common_award 动态读取）；失败 `execIgnoreError` 容错按 0 里程（`luckyMileage=null`、`totalMileage=0`）
   - `/draw` 响应：`{luckyGift, luckyMileage, totalMileage, bus}`；每次 /draw 写 **2 批** `mod_luckydraw_record`（topic=lucky-gift/lucky-mileage，按 (biz,user_id,pool,create_time) 一一对应）；`bus.forward` transNo=`bus_{luckyGift.id}`；参数校验失败报 `invalid parameter`
-- 里程生效：`bus.forward` 同步推进，越过探索点自动发奖（背包礼物+道具）；多地图循环（enableLoop）
-- 榜单：送礼总榜+日榜（单实例 gift-send：mainRound+timeRound，日榜 Top6 自动发奖）、收礼总榜 gift-recv（Top3 + 贡献 Top1）；`/m/{topic}/rank` 响应含 `round`/`rankResult`/`my`/`myAll`
-- 加成（**2026-09-09 与需求方确认口径**）：探索获得的背包礼物**仅入背包、不影响榜单**；当活动礼物被**赠送**时，按 **礼物金币数 × buff**（`gifts` 白名单 value 为倍率）计入榜单——送礼人计送礼总榜+日榜、收礼人计收礼总榜；buff 倍率：1001:1.0 / 1002:1.5 / 1003:2.0 / 1004:2.5 / 1005:3.0
-- 轮播：Redis List 最近 20 条，按 locale 隔离
+- 里程生效：`bus.forward` 同步推进，越过探索点自动发奖（背包礼物+道具）；**单地图 map-1**（distance=100，探索点 lv1~lv6 @10/25/45/65/85/100，距离为占位值待策划确认）+ 循环（enableLoop），每圈可重复获得探索点奖励
+- 榜单：送礼总榜+日榜（单实例 gift-send：mainRound+timeRound，**日榜 Top3 自动发奖**，2026-09-16 配置表 topN 6→3）、收礼总榜 gift-recv（Top3 + 贡献 Top1）；`/m/{topic}/rank` 响应含 `round`/`rankResult`/`my`/`myAll`
+- 礼物与榜单加成（**2026-09-16 需求澄清 + 配置表，v1.9.0**）：`gifts` 白名单 12 礼物，**全部白名单礼物赠送时均计榜**（送/收总榜+日榜），计分 = 礼物价值 × buff（1金币/钻石=1积分）；三档：礼物架普通礼物 10797~10801 buff **1.0**（**唯一发探索券**，进 `/gifts` 清单+超发风控 income）、奖池背包礼物 10794/10795/10796 buff **1.1**、探索点背包礼物 10789/10791/10792/10793 buff **1.3**；背包礼物**仅计榜不发券、不登记风控**；探索越点发奖仅入背包、不直接加分（004#16 按此口径断言，见问题 #17）
+- 轮播（接口 v1.3.0）：条目 `{playerId, nickname, avatar, mileage}`（昵称/头像读取时实时填充），内容=本次抽奖合计里程、仅 totalMileage>0 写入；Redis List 最近 20 条，按 locale 隔离
 - 结算：日榜每日 ko/ph/in+vi 三时区 00:05 各触发一次（+5min 延迟、状态位幂等）；总榜活动结束次日同理
-- `/detail` 聚合五块：`account`（accounts[].name="DIDIBUS-MILEAGE"、mine=余额）/ `bus` / `luckyGift` / `dailyTop1` / `marquee`
+- `/detail` 聚合五块：`account`（accounts[].name="DIDIBUS-MILEAGE"、mine=余额）/ `bus`（v1.2.0 起含 remaining）/ `luckyGift` / `dailyTop1` / `marquee`；内部走 `detail` 管道（`/p/detail` 可独立调用，v1.6.0）
+- `/gifts`（接口 v1.3.0 新增）：仅返回 ticketGifts 礼物清单（多语言名称/图片/价格/type coin|diamond/buff，按价格升序）；`/m/lucky-{gift,mileage}/records` 改游标分页（请求 `last`，响应 `{records, more, last, size}`）
 - 账户接口：`/m/account/detail`（accounts[]，type 字段废弃）、`/m/account/records`（name 必填="DIDIBUS-MILEAGE"，返回 type=INCREASE/DECREASE、amount 带符号、totalAmount）
+- 图鉴奖励（ALBUM_AWARD，N-S-HEADBOX 4381）：**本期未实现**，仅 init.sql 数据占位（2026-09-16 配置表新增）
 
 ## 公共层计划（写用例前先落地）
 
@@ -64,10 +66,10 @@
 | 调用 `/didibus-v202609/config`（T_PRE） | check | 返回开始/结束时间（09-24 14:00 ~ 10-02 23:59:59）、enableLocales 含 in/vi/ph/ko |
 | 查 `mod_account` | check | 存在 name=`DIDIBUS-MILEAGE`（id=901）记录，4 大区 locale_config 齐全 |
 | 查 `mod_common_event` | check | 存在 name=`DIDIBUS_MILEAGE`（里程 EVENT，award_id 引用其 id=901） |
-| 查 `mod_common_award` 里程条目 ×2 | check | `bus.mileage.normal` / `bus.mileage.flying` 各自：stage=0、award_type=EVENT、mod=VIEW、权重和=1.0（100% 必得）；normal 档位 +1/+3/+5/+10、flying 档位 +3/+5/+10/+20 |
-| 查 `mod_common_award` 奖池 | check | `bus.normal` / `bus.flying`（lucky-gift 奖池）均有条目，权重和 ≤ baseTotal(1.0)（差值=未中奖） |
+| 查 `mod_common_award` 里程条目 ×2 | check | `bus.mileage.normal` / `bus.mileage.flying` 各自：stage=0、award_type=EVENT、mod=VIEW、权重和=1.0（100% 必得）；normal 8 档、flying 9 档（档位动态读取） |
+| 查 `mod_common_award` 奖池 | check | `bus.normal`（5 条）/ `bus.flying`（6 条）（lucky-gift 奖池）均有条目，权重和 ≤ baseTotal(1.0)（差值=未中奖） |
 | 查 `mod_common_award` 探索点奖励 | check | 每个地图 awardName（bus.map-N）× 每个 stage 均有 ≥1 条 GIFT/道具 |
-| 查 `mod_common_award` 每日进入/榜单奖励 | check | `daily-entry`（ACCOUNT，award_id=901→mod_account.id，count=10）；`gift-send-total` stage=1~3；`gift-send-daily` stage=1~6；`gift-recv` stage=1~3；`gift-recv-contributor` stage=1~3 |
+| 查 `mod_common_award` 每日进入/榜单奖励 | check | `daily-entry`（ACCOUNT，award_id=901→mod_account.id，count=10）；`gift-send-total` stage=1~3；`gift-send-daily` stage=1~3（topN 6→3）；`gift-recv` stage=1~3；`gift-recv-contributor` stage=1~3 |
 
 ### 002-enter —— 每日进入发券
 
@@ -87,12 +89,13 @@
 |---|---|---|
 | 清理 A/B/C 账户与榜单 | act | — |
 | 发送非活动礼物（giftId ∉ 白名单，消息时间 T_D1） | act+check | A/B 券余额不变；双榜无记录 |
-| A 送 B 活动礼物 1001（buff=1.0）totalCoin=100（消息时间 T_D1） | act | `__consumer/funbit.gift_send` |
-| 查券余额 | check | A += ⌊100×ticketPerCoinSender⌋=200、B += ⌊100×ticketPerCoinReceiver⌋=50（比率读配置 2 / 0.5，小数向下取整） |
-| 查送礼总榜+日榜（T_D1） | check | `m/gift-send/rank` A=100×buff(1001)=**100** 分；当日 dayKey 分片同步 |
+| A 送 B 普通礼物 10797（礼物架 buff=1.0，**发券**）totalCoin=100（消息时间 T_D1） | act | `__consumer/funbit.gift_send` |
+| 查券余额 | check | A += ⌊100×ticketPerCoinSender⌋=200、B += ⌊100×ticketPerCoinReceiver⌋=50（仅普通礼物发券，比率读配置） |
+| 查送礼总榜+日榜（T_D1） | check | `m/gift-send/rank` A=100×buff(1.0)=**100** 分；当日 dayKey 分片同步 |
 | 查收礼总榜（T_D1） | check | `m/gift-recv/rank` B=100 分，贡献者=A |
-| A 送 B 高倍率礼物 1005（buff=3.0）totalCoin=100（T_D1） | act+check | 送礼/收礼总榜各 **+= coin×buff = 300**（A 累计 400、B 累计 400）；券按金币数正常入账（与倍率无关） |
-| 同 orderNo 重发消息（T_D1） | act+check | 券与榜单不重复累计（mod_account 按 (biz, send_/recv_+orderNo) 幂等，流水各仅 1 条） |
+| A 送 B 奖池背包礼物 10794（buff=1.1，**只计榜不发券**）totalCoin=100（T_D1） | act+check | 送礼/收礼总榜各 += coin×buff = 110（累计 210）；A/B 券余额不变（需求澄清 2026-09-16） |
+| A 送 B 探索点背包礼物 10789（buff=1.3，只计榜不发券）totalCoin=100（T_D1） | act+check | 双榜累计 340（100×1.0+100×1.1+100×1.3）；券余额仍不变；落库 send=6 条/recv=3 条 |
+| 同 orderNo 重发普通礼物消息（T_D1） | act+check | 券与榜单不重复累计（mod_account 按 (biz, send_/recv_+orderNo) 幂等，流水各仅 1 条） |
 | 活动期外时间戳的消息（T_OUT） | act+check | 不入账不记分（有效期校验） |
 
 ### 004-draw —— 抽奖核心链路（抽奖+里程+探索+加成+轮播）
@@ -103,14 +106,14 @@
 | 普通巴士抽 1 次（pool=normal,count=1，T_D1） | act | `/draw` 返回 `{luckyGift, luckyMileage, totalMileage, bus}` |
 | 扣费 | check | 余额 1000→970（30×1，lucky-gift 统一扣券，lucky-mileage price=0 不重复扣） |
 | 里程必得 | check | `totalMileage` ∈ normal 里程档位集合（+1/+3/+5/+10）且 >0 |
-| 抽奖记录 ×2 | check | `mod_luckydraw_record` +2 批（topic=lucky-gift/lucky-mileage 各 1、item 各 1 条，mileage item.award_count=里程值）；`/m/lucky-gift/result`、`/m/lucky-mileage/result` 均可查 |
+| 抽奖记录 ×2 | check | `mod_luckydraw_record` +2 批（topic=lucky-gift/lucky-mileage 各 1；里程 item 1 条且 award_count=里程值；道具 item ∈ {0,1}，权重和 0.9065 可未中）；`/m/lucky-gift/result`、`/m/lucky-mileage/result` 均可查 |
 | bus 推进 | check | `bus.oldDistance=0`、`newDistance=totalMileage`；`m/bus/detail` 里程一致 |
 | 飞行巴士抽 10 次（pool=flying,count=10，T_D1） | act | — |
 | 扣费 | check | 970→170（80×10） |
 | 里程 | check | `totalMileage` = 10 次抽选之和，每条 mileage item.award_count ∈ flying 档位集合（+3/+5/+10/+20） |
 | 探索点发奖 | check | 累计里程越过 stage=10/30… 时 `crossed` 非空；`mod_bus_user_award` 有账本；对应奖励入 `gift_award_queue` |
-| 探索获得礼物仅入背包 | check | 抽奖/探索发奖后 A 的送礼/收礼总榜**无变化**（buff 倍率在赠送环节计入，见 003；需求口径 2026-09-09 确认） |
-| 轮播 | check | `/marquee` 最新 1 条为 A 的飞行巴士 ×10 记录 |
+| 探索获得礼物仅入背包 | check | 抽奖/探索发奖后 A 的送礼/收礼总榜**无变化**（buff 倍率在赠送环节计入，见 003；需求口径 2026-09-16 需求澄清，见问题 #17） |
+| 轮播 | check | `/marquee` 最新 1 条为本次抽奖里程记录（{playerId, mileage=totalMileage}） |
 
 ### 005-draw-boundary —— 抽奖边界与异常
 
@@ -143,7 +146,8 @@
 | 收礼总榜 | check | `m/gift-recv/rank` 同上 |
 | 日榜 Top1（领航探险） | check | `m/gift-send/round-top` 返回当日 top1 用户 |
 | 大区隔离 | check | in 与 vi 数据互不可见（Redis key 含 locale） |
-| `/detail` 聚合 | check | 返回 account+bus+luckyGift+dailyTop1+marquee 五块齐全 |
+| `/detail` 聚合 | check | 返回 account+bus+luckyGift+dailyTop1+marquee 五块齐全，bus.detail 含 remaining（v1.2.0） |
+| `/gifts` 礼物清单 | check | 仅 ticketGifts 5 个礼物架礼物（10797~10801）、价格升序、type 含 coin/diamond（10801=钻石）、buff=1.0；背包礼物不返回 |
 
 ### 008-marquee —— 轮播记录
 
@@ -152,17 +156,17 @@
 | 连续抽奖 25 次（T_D1） | act | — |
 | 条数上限 | check | `/marquee` 返回 ≤20 条（LTRIM 生效） |
 | 顺序 | check | 最新记录在最前（LPUSH） |
-| 内容 | check | 每条含 playerId/pool/count |
+| 内容 | check | 每条含 playerId/nickname/avatar/mileage，playerId=A 且 mileage>0（接口 v1.3.0 结构） |
 | 大区隔离 | check | 切 locale 查询互不影响 |
 
 ### 009-daily-settle —— 日榜结算（Cron）
 
 | 步骤 | 类型 | 校验点 |
 |---|---|---|
-| 构造当日日榜 ≥6 人数据（消息时间 T_D1） | act | 不同分值 |
+| 构造当日日榜 8 人数据（消息时间 T_D1） | act | 不同分值（前 3 进 Top3，4~8 名验证无奖励） |
 | 触发 `__cron`（time=T_D1_SETTLE，各大区 00:05） | act | — |
 | 结算状态 | check | `mod_common_round.status`=200（已结算）；`mod_common_rank_result` 已废弃不再断言 |
-| 日榜发奖 | check | Top1~6 按 stage=排名 各得 `gift-send-daily` 对应奖励（mod_common_award_record），Top7/8 无奖励 |
+| 日榜发奖 | check | Top1~3 按 stage=排名 各得 `gift-send-daily` 对应奖励（Top1 两件 WIDGET 209+BUBBLE 1035、Top2/3 各 1 件），Top4~8 无奖励（topN 6→3） |
 | 幂等 | check | 重复触发同轮次不重复发奖 |
 | 时区覆盖 | check | ko/ph/in+vi 三次触发（各自 T_D1_SETTLE 换算北京时间）分别仅结算各自已结束轮次，互不误结算 |
 | 未结束日不结算 | check | time=T_D1 中午触发，当日子榜不结算 |
@@ -173,7 +177,7 @@
 |---|---|---|
 | 构造送礼总榜/收礼总榜数据（真实 gift_send 消息，T_D1；禁直写 DB/Redis） | act | 含收礼榜贡献者；造数后走 /rank 接口自检分值 |
 | 触发 `__cron`（time=T_END_SETTLE，各大区 00:05） | act | — |
-| 送礼总榜 | check | 轮次 status=200；Top1 CUSTOM 仅记录不自动发放；Top2-3 自动发放 |
+| 送礼总榜 | check | 轮次 status=200；Top1 分大区 COIN 仅留 view_only 记录（in=koin 10000，手动下发）+ 5 件道具自动发放；Top2-3 自动发放 |
 | 收礼总榜 | check | Top3 按 `gift-recv` stage=排名发奖 |
 | 收礼贡献者 | check | 收礼 Top3 各自的贡献 Top1 按 `gift-recv-contributor` stage=玩家排名发奖；大区隔离（ko 贡献者奖励只发 ko 本地贡献 Top1，不跨大区、不重复） |
 | 幂等 | check | 三个时区 cron 依次触发，仅首次生效，重复安全 |
@@ -189,7 +193,7 @@
 ## 待确认事项
 
 1. ~~**测试环境 biz 名**~~ ✅ 已确认：`didibus-v202609`
-2. ~~**活动礼物 ID**~~ ✅ 已从配置确认：1001~1005（金币礼物1~4 + 钻石礼物），已写入 `_lib/constants.ts` 的 `ACTIVITY_GIFTS`
+2. ~~**活动礼物 ID**~~ ✅ 已从配置确认（~~1001~1005~~ 已于 2026-09-16 配置表废弃）：现为 10789~10801 三档 12 礼物，已写入 `_lib/constants.ts` 的 `ACTIVITY_GIFTS`/`TICKET_GIFTS`/`BACKPACK_GIFTS`
 3. ~~**里程档位与权重**~~ ✅ v1.4.0 已确定：normal +1/+3/+5/+10（0.40/0.30/0.20/0.10）、flying +3/+5/+10/+20（0.35/0.30/0.25/0.10），两巴士独立奖池；用例从 `mod_common_award` 动态读取（001 分池校验权重和=1.0，004 按实际档位断言），不硬编码
 4. **大区时间模拟**：`/enter` 与结算的大区时间依赖 `debugTimestamp`（l-debug-timestamp），沿用 pk 用例的做法；但活动有效性门槛走真实时间（见「模拟时间约定」⚠️）
 5. **checks/ 线上巡检**：上线后另补（各阶段 config/榜单/结算结果只读巡检），本次先不建。
@@ -204,7 +208,7 @@
    - 总榜（gift-send/gift-recv）`mainRound.startTime` 改为**绝对时间** `2026-09-23T14:00:00+08:00`（不再 R 后缀）→ 总榜开始=活动开始，全大区一致
    - 任务（daily-entry）`roundSetting.firstStartTime` 补 **R 后缀**（`2026-09-23T00:00:00+08:00R`）→ 轮次日界=各大区本地零点，round key 按本地 yyyyMMdd
    - ⚠️ 已重跑 001 验证通过（2026-09-09，18/18）：总榜 8 条开始=活动开始、日榜/任务轮次 40+40 条起止=本地日界
-6. ~~**活动礼物 ID / buff 待提供**~~ ✅ 已从配置确认：白名单+buff = 1001:1.0 / 1002:1.5 / 1003:2.0 / 1004:2.5 / 1005:3.0
+6. ~~**活动礼物 ID / buff 待提供**~~ ✅ 已从配置确认（2026-09-16 更新后）：白名单+buff = 礼物架 10797~10801（1.0）/ 奖池背包 10794~10796（1.1）/ 探索点背包 10789/10791/10792/10793（1.3）
 7. **【v1.4.0 架构变更】抽奖改双 LuckydrawModule**（2026-09-09 设计更新，本次已同步用例；init.sql 已重灌测试环境，004 冒烟 16/17 通过，服务端双模块已生效）：
    - 原 `luckydraw` 模块拆分为 `lucky-gift`（礼物/道具，扣券）+ `lucky-mileage`（里程，price=0 不扣费，权重和=baseTotal 100% 必得，条目 mod=VIEW 不实际发放）
    - 奖池 name 改小写点分：`bus.normal`/`bus.flying`；里程拆两独立奖池 `bus.mileage.normal`/`bus.mileage.flying`（原 `DIDIBUS_LUCKYDRAW_*`、单一名 `DIDIBUS_MILEAGE` 的 award 条目废弃；`mod_common_event` DIDIBUS_MILEAGE 保留作 award_id 引用）
@@ -214,7 +218,7 @@
    - **需求口径**：探索获得的背包礼物仅入背包、不影响榜单；礼物被**赠送**时按 `金币数 × buff` 计入送礼/收礼总榜（buff = gifts 白名单 value 倍率）
    - **当前实现（v1.5.0）**：在**探索时**按 buff 加分（`applyRankBuff`），且 `rank.update` transNo=null 被 (player,'') 幂等去重导致仅首次 /draw 生效（实测：两次 draw 应 4.5+3.5=8，实际 4.5）；赠送时按 coin×1 计分、未乘 buff
    - 用例已按需求口径更新：003 新增高倍率礼物（1005 ×3.0）断言、004#16 改为「探索不影响榜单」——✅ 开发修复后复跑全部转绿（2026-09-09，003 14/14、004 17/17）；同期 #11 期外发券也已修复
-9. **【信息→005#2 降级为提示】余额不足错误信息未透出 `didibus_not_enough`**（2026-09-09 实测）：余额不足 / 未开放大区均返回 `Request processing failed: null`，notEnoughMsg 配置疑似未生效；005 改为仅断言「报错+无副作用」，错误文本作为 message 提示
+9. ~~**【信息→005#2 降级为提示】余额不足错误信息未透出 `didibus_not_enough`**~~ ✅ 已修复（2026-09-17 复测：余额不足报错 `didibus_not_enough` 正常透出，005#3 success）；未开放大区返回 `luckydraw_not_active`
 10. ~~**送礼消息券入账无幂等（003#11 fail）**~~ ✅ 已修复（v1.5.0，2026-09-09）：账户体系迁移 mod_account，送礼入账 transNo=`send_{orderNo}`/`recv_{orderNo}`，`mod_account_user_record` 唯一键 (biz, trans_no) INSERT IGNORE 幂等；orderNo 为空跳过入账并 warn
 11. ~~**期外送礼消息仍发券（003#12 fail，v1.5.0 未修）**~~ ✅ 已修复（2026-09-09 复测，003#14 转绿：期外消息券与榜单均不变）
 12. **【v1.5.0 架构变更】账户体系迁移 mod_account**（2026-09-09 设计更新 + 接口文档 v1.1.0，本次已同步用例）：
@@ -227,3 +231,9 @@
 14. ~~**总榜（mainRound）结算发奖双倍**~~ ✅ 已修复（2026-09-10 复测，010 送礼发奖 check 转绿：S1=[4110,14328]、S4=[4109]、Top1 view_only 恰好 1 条、收礼榜同样单份，全场 9 条无重复）。原现象：单次 cron 触发内同一玩家每个奖励产生 2 条 `mod_common_award_record`（create_time 相同、order_no 相邻）；日榜（timeRound）无此问题
 15. ~~**收礼榜贡献者奖励（AWARD_CONTRIBUTORS）未发放**~~ ✅ 造数问题（2026-09-10 确认）：直写 `mod_common_rank_record` 不驱动贡献者结算；010 造数改为**真实 gift_send 消息链路**后贡献者奖励正常发放（010#14 转绿：S1/S2/S4 按 stage=1/2/3 得 14328/14327/984）。需求口径（2026-09-09 确认）：仅收礼总榜有贡献者奖励
 16. ~~**收礼贡献者结算跨大区串数据（010#15 fail）**~~ ✅ 造数问题（2026-09-10 确认）：ko 造数曾复用 in 的收礼 Top1 uid（13125），同一 uid 出现在两个大区榜单在生产上不会发生；ko 改用专属用户（S6→S7）后 010 **17/17 全绿**（ko 贡献者奖励正确发给 S6、S1 恰好 1 次）。经验：造数时同一 uid 不得跨大区上榜
+17. **【v1.9.0 需求/配置更新】2026-09-16 需求澄清 + 配置表**（本次已同步用例，基线 v1.5.0 → v1.9.0）：
+    - 礼物体系重构：白名单 1001~1005（buff 1.0~3.0）**废弃** → 12 礼物三档（礼物架 10797~10801 buff=1.0 **唯一发券**；奖池背包 10794/10795/10796 buff=1.1；探索点背包 10789/10791/10792/10793 buff=1.3）；新增 `ticketGifts` 配置（发券+`/gifts` 清单+超发风控 income）
+    - 日榜 topN 6→3（`gift-send-daily` 仅 stage1~3）；总榜 Top1 由 CUSTOM 占位改**分大区 COIN+VIEW（in=koin 10000）+ 5 件道具自动发放**
+    - 奖池全量替换：里程 normal 8 档 / flying 9 档（权重和各=1.0）；道具池 bus.normal 5 条 0.9065 / bus.flying 6 条 0.874；地图合并为**单张 map-1**（探索点 lv1~lv6，距离为占位值待策划确认）
+    - 接口文档 v1.3.0/v1.4.0：新增 `/gifts`（仅普通礼物）；`/m/lucky-{gift,mileage}/records` 游标分页（`minId`→`last`，响应 `{records,more,last,size}`）；marquee 条目改 `{playerId,nickname,avatar,mileage}`；`/m/bus/detail` 新增 `remaining`；新增 `/p/detail` 管道
+    - ⚠️ **待与开发确认**：技术设计 v1.9.0 §3.3 代码仍保留 `applyRankBuff`（探索越点把 buff 直接加到两总榜，transNo=null），与需求澄清「全部礼物按 buff 计榜（赠送时）」矛盾（§10.3 数据流图无此步、决策3 称已落地为赠送计分）——004#16 按需求澄清口径断言「探索不影响榜单」，复跑若发现探索直接加分则报 BUG

@@ -1,6 +1,18 @@
 import { type CheckResult } from '../../../../src/base/CheckBaseClass.ts';
-import { USER_A, USER_B, USER_C, RANK_USERS, ALL_USERS, TOPIC_SEND, TOPIC_RECV } from './_lib/constants.ts';
+import {
+  USER_A,
+  USER_B,
+  USER_C,
+  RANK_USERS,
+  ALL_USERS,
+  TOPIC_SEND,
+  TOPIC_RECV,
+  TICKET_GIFTS,
+  BACKPACK_GIFTS,
+  ACTIVITY_GIFTS,
+} from './_lib/constants.ts';
 import { T_D1, DAY1_KEY, localIso } from './_lib/times.ts';
+import { int } from './_lib/helpers.ts';
 import { DidibusTestBase } from './_lib/DidibusTestBase.ts';
 
 const U1 = RANK_USERS[0]; // 13128
@@ -8,14 +20,14 @@ const U2 = RANK_USERS[1]; // 13129
 const U3 = RANK_USERS[2]; // 13130
 
 /**
- * 007-rank-query —— 榜单查询
+ * 007-rank-query —— 榜单查询 + /gifts 礼物清单
  * 模拟时间：全部 T_D1。榜单数据用 Redis ZADD 直接造数（003 已覆盖 consumer 真实链路）。
  * 造数（in）：送礼 A=100、U1=300、U2=200；收礼 B=100、C=500。（vi）：送礼 U3=50 —— 大区隔离验证。
  */
 class RankQuery007 extends DidibusTestBase {
   constructor() {
     super();
-    this.total = 8;
+    this.total = 9;
   }
 
   private ts(locale: string): string {
@@ -101,15 +113,37 @@ class RankQuery007 extends DidibusTestBase {
       };
     });
 
-    await this.check('/detail 聚合：account / bus / luckyGift / dailyTop1 / marquee 五块齐全', async (): Promise<CheckResult> => {
+    await this.check('/detail 聚合：account / bus / luckyGift / dailyTop1 / marquee 五块齐全，bus 含 remaining', async (): Promise<CheckResult> => {
       this.needActive();
       const d = await this.didibus.detail(USER_A, 'in', this.ts('in'));
       const keys = ['account', 'bus', 'luckyGift', 'dailyTop1', 'marquee'];
       const missing = keys.filter((k) => !(k in d));
+      // v1.2.0 起 bus.detail 新增 remaining（距终点剩余里程）
+      const bus = d['bus'] as Record<string, unknown> | undefined;
+      const busDetail = bus?.['detail'] as Record<string, unknown> | undefined;
+      const hasRemaining = busDetail !== undefined && busDetail !== null && 'remaining' in busDetail;
       return {
-        expect: `含 ${keys.join('/')}`,
-        real: `实际字段=${Object.keys(d).join(',')}`,
-        pass: missing.length === 0,
+        expect: `含 ${keys.join('/')}，bus.detail.remaining 存在`,
+        real: `实际字段=${Object.keys(d).join(',')}，remaining=${hasRemaining ? busDetail?.['remaining'] : '缺失'}`,
+        pass: missing.length === 0 && hasRemaining,
+      };
+    });
+
+    await this.check('/gifts 礼物清单：仅 ticketGifts 5 个礼物架礼物、价格升序、type 含 coin/diamond、buff=1.0', async (): Promise<CheckResult> => {
+      this.needActive();
+      const gifts = await this.didibus.gifts(USER_A, 'in', this.ts('in'));
+      const ids = gifts.map((g) => int(g.giftId));
+      const idsOk = ids.length === TICKET_GIFTS.length && TICKET_GIFTS.every((id) => ids.includes(id));
+      const noBackpack = gifts.every((g) => !BACKPACK_GIFTS.includes(int(g.giftId)));
+      const prices = gifts.map((g) => Number(g.price));
+      const sortedOk = prices.every((p, i) => i === 0 || prices[i - 1] <= p);
+      const typesOk = gifts.every((g) => g.type === 'coin' || g.type === 'diamond');
+      const diamondOk = gifts.some((g) => int(g.giftId) === 10801 && g.type === 'diamond');
+      const buffOk = gifts.every((g) => Number(g.buff) === (ACTIVITY_GIFTS[int(g.giftId)] ?? 1));
+      return {
+        expect: `ids=${JSON.stringify(TICKET_GIFTS)}（价格升序，背包礼物不返回；type=coin/diamond，buff 全 1.0）`,
+        real: `ids=${JSON.stringify(ids)}，prices=${JSON.stringify(prices)}，types=${gifts.map((g) => g.type).join(',')}，buffs=${gifts.map((g) => g.buff).join(',')}`,
+        pass: idsOk && noBackpack && sortedOk && typesOk && diamondOk && buffOk,
       };
     });
   }

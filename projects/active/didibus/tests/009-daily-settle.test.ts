@@ -14,7 +14,7 @@ import {
 import { int } from './_lib/helpers.ts';
 import { DidibusTestBase } from './_lib/DidibusTestBase.ts';
 
-/** in 大区第 1 天日榜造数：8 人不同分值（前 6 进 Top6） */
+/** in 大区第 1 天日榜造数：8 人不同分值（2026-09-16 配置表：日榜 topN 6→3，前 3 进 Top3，4~8 名无奖励） */
 const IN_DAY1: Array<[number, number]> = [
   [RANK_USERS[0], 600],
   [RANK_USERS[1], 500],
@@ -25,7 +25,7 @@ const IN_DAY1: Array<[number, number]> = [
   [RANK_USERS[6], 80],
   [RANK_USERS[7], 60],
 ];
-const IN_TOP6 = IN_DAY1.slice(0, 6);
+const IN_TOP3 = IN_DAY1.slice(0, 3);
 
 /**
  * 009-daily-settle —— 日榜结算（Cron）
@@ -140,28 +140,28 @@ class DailySettle009 extends DidibusTestBase {
       };
     });
 
-    await this.check('日榜发奖：Top1~6 各得 gift-send-daily stage=排名 对应奖励，Top7/8 无奖励', async (): Promise<CheckResult> => {
+    await this.check('日榜发奖：Top1~3 各得 gift-send-daily stage=排名 对应奖励，Top4~8 无奖励', async (): Promise<CheckResult> => {
       this.needActive();
       const config = await this.didibus.queryAwardConfig(AWARD_SEND_DAILY);
       if (config.length === 0) {
         return { expect: 'gift-send-daily 配置存在', real: '0 条', pass: false, message: '预置数据缺失：mod_common_award gift-send-daily' };
       }
       const problems: string[] = [];
-      for (let rank = 1; rank <= 6; rank++) {
-        const [player] = IN_TOP6[rank - 1];
+      for (let rank = 1; rank <= 3; rank++) {
+        const [player] = IN_TOP3[rank - 1];
         const expectIds = config.filter((c) => int(c['stage']) === rank).map((c) => int(c['award_id'])).sort();
         const records = await this.didibus.queryAwardRecords({ player });
         const gotIds = records.map((r) => int(r['award_id'])).sort();
         const hit = expectIds.every((id) => gotIds.includes(id));
         if (!hit) problems.push(`rank${rank}/player${player}：期望含 ${JSON.stringify(expectIds)}，实际 ${JSON.stringify(gotIds)}`);
       }
-      // Top7/8（未进榜）不应有任何发奖记录
-      for (const player of [RANK_USERS[6], RANK_USERS[7]]) {
+      // Top4~8（未进结算范围）不应有任何发奖记录
+      for (const player of RANK_USERS.slice(3)) {
         const records = await this.didibus.queryAwardRecords({ player });
         if (records.length > 0) problems.push(`未进榜 player${player} 不应有发奖记录，实际 ${records.length} 条`);
       }
       return {
-        expect: 'Top1~6 奖励按 stage=排名 发放，Top7/8 无奖励',
+        expect: 'Top1~3 奖励按 stage=排名 发放，Top4~8 无奖励',
         real: problems.length === 0 ? '全部正确' : problems.join('；'),
         pass: problems.length === 0,
       };

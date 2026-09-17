@@ -106,7 +106,7 @@ class Draw004 extends DidibusTestBase {
       };
     });
 
-    await this.check('抽奖记录：lucky-gift/lucky-mileage 各 1 批 + item 各 1 条，双 result 接口可查', async (): Promise<CheckResult> => {
+    await this.check('抽奖记录：lucky-gift/lucky-mileage 各 1 批 + 里程 item 1 条，双 result 接口可查', async (): Promise<CheckResult> => {
       this.needActive();
       const records = await this.didibus.queryLuckydrawRecords(USER_A);
       const giftRec = records.find((r) => String(r['topic']) === 'lucky-gift');
@@ -129,10 +129,11 @@ class Draw004 extends DidibusTestBase {
       } catch (e) {
         resultMsg = (e as Error).message;
       }
+      // lucky-gift 奖池权重和 0.9065 < baseTotal（约 9% 未中奖）：item 可为 0 或 1；里程池 100% 必得 item=1
       return {
-        expect: `record=2、item=1+1、里程 item 里程和=${int(this.draw1.totalMileage)}、result 均可查`,
+        expect: `record=2、里程 item=1 且里程和=${int(this.draw1.totalMileage)}、道具 item ∈ {0,1}、result 均可查`,
         real: `item=${giftItems.length}+${mileageItems.length}、里程和=${mileageSum}、result=${resultOk ? '可查' : `失败:${resultMsg}`}`,
-        pass: giftItems.length === 1 && mileageItems.length === 1 && mileageSum === int(this.draw1.totalMileage) && resultOk,
+        pass: [0, 1].includes(giftItems.length) && mileageItems.length === 1 && mileageSum === int(this.draw1.totalMileage) && resultOk,
       };
     });
 
@@ -227,18 +228,19 @@ class Draw004 extends DidibusTestBase {
       };
     });
 
-    await this.check('轮播：最新 1 条为本次飞行巴士 ×10 记录', async (): Promise<CheckResult> => {
+    await this.check('轮播：最新 1 条为本次抽奖里程记录（接口 v1.3.0：playerId/nickname/avatar/mileage）', async (): Promise<CheckResult> => {
       this.needActive();
       const list = await this.didibus.marquee(USER_A, LOCALE, this.ts());
       const latest = list[0];
+      const expectMileage = int(this.draw2.totalMileage);
       const ok = latest !== undefined
         && String(latest.playerId) === String(USER_A)
-        && latest.pool === POOL_FLYING
-        && int(latest.count) === 10;
+        && int(latest.mileage) === expectMileage;
       return {
-        expect: `{playerId:${USER_A}, pool:${POOL_FLYING}, count:10}`,
+        expect: `{playerId:${USER_A}, mileage:${expectMileage}}`,
         real: latest ? JSON.stringify(latest) : '轮播为空',
         pass: ok,
+        message: latest && int(latest.mileage) !== expectMileage ? '最新条目 mileage 与本次抽奖合计里程不一致' : undefined,
       };
     });
   }

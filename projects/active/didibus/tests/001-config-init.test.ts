@@ -184,7 +184,7 @@ class ConfigInit001 extends TestBaseClass {
     });
 
     await this.checkRankAward(AWARD_SEND_TOTAL, [1, 2, 3]);
-    await this.checkRankAward(AWARD_SEND_DAILY, [1, 2, 3, 4, 5, 6]);
+    await this.checkRankAward(AWARD_SEND_DAILY, [1, 2, 3]); // 2026-09-16 配置表：日榜 topN 6→3，仅 stage1~3
     await this.checkRankAward(AWARD_RECV, [1, 2, 3]);
     await this.checkRankAward(AWARD_RECV_CONTRIBUTOR, [1, 2, 3]);
   }

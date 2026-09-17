@@ -24,9 +24,13 @@ class TotalSettle010 extends DidibusTestBase {
     this.total = 17;
   }
 
-  private async awardIdsOf(name: string, stage: number): Promise<number[]> {
+  private async awardIdsOf(name: string, stage: number, locale?: string): Promise<number[]> {
     const rows = await this.didibus.queryAwardConfig(name);
-    return rows.filter((r) => int(r['stage']) === stage).map((r) => int(r['award_id'])).sort();
+    return rows
+      .filter((r) => int(r['stage']) === stage)
+      .filter((r) => !locale || String(r['locale']) === locale || String(r['locale']) === '*')
+      .map((r) => int(r['award_id']))
+      .sort((a, b) => a - b);
   }
 
   private async playerAwardIds(player: number): Promise<number[]> {
@@ -147,27 +151,33 @@ class TotalSettle010 extends DidibusTestBase {
       await this.didibus.runCron(CRON_TOTAL_INVI);
     });
 
-    await this.check('送礼总榜发奖：Top2(S1)/Top3(S4) 自动发放，Top1(S2) CUSTOM 仅留 view_only 记录不发放', async (): Promise<CheckResult> => {
+    await this.check('送礼总榜发奖：Top2(S1)/Top3(S4) 自动发放；Top1(S2) 分大区 COIN 仅留 view_only + 道具自动发放', async (): Promise<CheckResult> => {
       this.needActive();
+      const stage1Rows = (await this.didibus.queryAwardConfig(AWARD_SEND_TOTAL)).filter((r) => int(r['stage']) === 1);
       const stage2Ids = await this.awardIdsOf(AWARD_SEND_TOTAL, 2);
       const stage3Ids = await this.awardIdsOf(AWARD_SEND_TOTAL, 3);
-      if (stage2Ids.length === 0 || stage3Ids.length === 0) {
-        return { expect: 'gift-send-total stage2/3 配置存在', real: '缺失', pass: false, message: '预置数据缺失：mod_common_award gift-send-total' };
+      if (stage1Rows.length === 0 || stage2Ids.length === 0 || stage3Ids.length === 0) {
+        return { expect: 'gift-send-total stage1/2/3 配置存在', real: '缺失', pass: false, message: '预置数据缺失：mod_common_award gift-send-total' };
       }
-      // 注意：活动期内的提前 cron 会顺带结算已结束的 0924 日榜（catch-up，正确行为），
-      // S1/S2/S4 会额外含日榜奖励；此处只断言总榜奖励存在性 + Top1 CUSTOM 无实发
+      // 2026-09-16 配置表：Top1 = 分大区 COIN+VIEW（in=koin 10000，仅记录不自动发放）+ 5 件道具 ADD 自动发放
+      const stage1AddIds = stage1Rows.filter((r) => String(r['mod']).toUpperCase() !== 'VIEW').map((r) => int(r['award_id'])).sort((a, b) => a - b);
+      const stage1ViewIds = stage1Rows.filter((r) => String(r['mod']).toUpperCase() === 'VIEW').map((r) => int(r['award_id']));
+      // 注意：活动期内的提前 cron 会顺带结算已结束的日榜（catch-up，正确行为），
+      // S1/S2/S4 会额外含日榜奖励；S2 断言实发全集 = 日榜 stage1 + 总榜 stage1 ADD 道具
       const s1Awards = await this.playerAwardIds(S1);
       const s4Awards = await this.playerAwardIds(S4);
       const s2Rows = (await this.didibus.queryAwardRecords({ player: S2 })).filter((r) => String(r['topic']) === TOPIC_SEND);
       const s2ViewOnly = s2Rows.filter((r) => String(r['mod']) === 'view_only');
-      const dailyStage1 = (await this.awardIdsOf(AWARD_SEND_DAILY, 1)).sort();
-      const s2Adds = s2Rows.filter((r) => String(r['mod']) !== 'view_only').map((r) => int(r['award_id'])).sort();
+      const dailyStage1 = await this.awardIdsOf(AWARD_SEND_DAILY, 1, LOCALE);
+      const s2Adds = s2Rows.filter((r) => String(r['mod']) !== 'view_only').map((r) => int(r['award_id'])).sort((a, b) => a - b);
       const s1Ok = stage2Ids.every((id) => s1Awards.includes(id));
       const s4Ok = stage3Ids.every((id) => s4Awards.includes(id));
-      // S2（送礼总榜 Top1 CUSTOM）：view_only 恰好 1 条；gift-send 实发仅允许日榜 stage1 奖励（总榜奖励不得实发）
-      const s2Ok = s2ViewOnly.length === 1 && JSON.stringify(s2Adds) === JSON.stringify(dailyStage1);
+      // S2（in 送礼总榜 Top1）：view_only 恰好 1 条且为本大区 COIN 档位；实发=日榜 stage1 + 总榜 stage1 ADD 道具
+      const expectS2Adds = [...dailyStage1, ...stage1AddIds].sort((a, b) => a - b);
+      const s2Ok = s2ViewOnly.length === 1 && stage1ViewIds.includes(int(s2ViewOnly[0]['award_id']))
+        && JSON.stringify(s2Adds) === JSON.stringify(expectS2Adds);
       return {
-        expect: `S1 含 stage2 奖励 ${JSON.stringify(stage2Ids)}，S4 含 stage3 ${JSON.stringify(stage3Ids)}，S2 view_only=1 且实发仅日榜 stage1 ${JSON.stringify(dailyStage1)}`,
+        expect: `S1 含 stage2 ${JSON.stringify(stage2Ids)}，S4 含 stage3 ${JSON.stringify(stage3Ids)}，S2 view_only=1（COIN award_id∈${JSON.stringify(stage1ViewIds)}）且实发=${JSON.stringify(expectS2Adds)}`,
         real: `S1=${JSON.stringify(s1Awards)}，S4=${JSON.stringify(s4Awards)}，S2 view_only=${s2ViewOnly.length} 条/实发=${JSON.stringify(s2Adds)}`,
         pass: s1Ok && s4Ok && s2Ok,
       };
@@ -178,7 +188,7 @@ class TotalSettle010 extends DidibusTestBase {
       const problems: string[] = [];
       const rankOf: Array<[number, number]> = [[USER_B, 1], [USER_A, 2], [USER_C, 3]];
       for (const [player, rank] of rankOf) {
-        const expectIds = await this.awardIdsOf(AWARD_RECV, rank);
+        const expectIds = await this.awardIdsOf(AWARD_RECV, rank, LOCALE); // 分大区 COIN 只期望本大区档位（in）+ '*' 道具
         if (expectIds.length === 0) {
           problems.push(`stage${rank} 配置缺失`);
           continue;
@@ -226,13 +236,14 @@ class TotalSettle010 extends DidibusTestBase {
       }
       const s6Recv = (await this.didibus.queryAwardRecords({ player: S6, topic: TOPIC_RECV })).map((r) => int(r['award_id']));
       const s1Recv = (await this.didibus.queryAwardRecords({ player: S1, topic: TOPIC_RECV })).map((r) => int(r['award_id']));
-      // S1 仅是 in 大区 B 的贡献 Top1，只应在 in 结算时得 1 次 stage1；ko 大区 B 的贡献 Top1 是 S6
+      // S1 仅是 in 大区 B 的贡献 Top1，只应在 in 结算时得 1 次 stage1（每件奖励恰好 1 条）；
+      // ko 大区 B 的贡献 Top1 是 S6
       const s1Stage1Count = s1Recv.filter((id) => stage1Ids.includes(id)).length;
       const s6Ok = stage1Ids.every((id) => s6Recv.includes(id));
       return {
-        expect: `S6 含 stage1 贡献奖励 ${JSON.stringify(stage1Ids)}；S1 的 stage1 贡献奖励恰好 1 次（仅 in 结算）`,
-        real: `S6 gift-recv=${JSON.stringify(s6Recv)}；S1 stage1 次数=${s1Stage1Count}`,
-        pass: s6Ok && s1Stage1Count === 1,
+        expect: `S6 含 stage1 贡献奖励 ${JSON.stringify(stage1Ids)}；S1 的 stage1 贡献奖励恰好各 1 次（共 ${stage1Ids.length} 条，仅 in 结算）`,
+        real: `S6 gift-recv=${JSON.stringify(s6Recv)}；S1 stage1 条数=${s1Stage1Count}`,
+        pass: s6Ok && s1Stage1Count === stage1Ids.length,
       };
     });
 

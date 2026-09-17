@@ -8,11 +8,13 @@ const DRAW_TIMES = 24;
 const MARQUEE_MAX = 20;
 
 /**
- * 008-marquee —— 轮播记录
- * 模拟时间：全部 T_D1。连续 normal×24 后追一抽 flying×1（指纹），验证条数上限、
+ * 008-marquee —— 轮播记录（接口文档 v1.3.0：条目 {playerId, nickname, avatar, mileage}，仅里程抽奖写入）
+ * 模拟时间：全部 T_D1。连续 normal×24 后追一抽 flying×1（记录其 totalMileage 作指纹），验证条数上限、
  * 最新在最前（LPUSH）与大区隔离；全部通过 /marquee 接口验证。
  */
 class Marquee008 extends DidibusTestBase {
+  private lastMileage = 0;
+
   constructor() {
     super();
     this.total = 7;
@@ -33,7 +35,9 @@ class Marquee008 extends DidibusTestBase {
       for (let i = 0; i < DRAW_TIMES; i++) {
         await this.didibus.draw(USER_A, LOCALE, localIso(LOCALE, T_D1), POOL_NORMAL, 1);
       }
-      await this.didibus.draw(USER_A, LOCALE, localIso(LOCALE, T_D1), 'flying', 1);
+      const last = await this.didibus.draw(USER_A, LOCALE, localIso(LOCALE, T_D1), 'flying', 1);
+      this.lastMileage = int(last.totalMileage);
+      this.log(`最后 1 抽（flying×1）totalMileage=${this.lastMileage}`);
     });
 
     await this.check(`条数上限：/marquee 返回 ${MARQUEE_MAX} 条（25 次抽奖仅保留最新 ${MARQUEE_MAX} 条，LTRIM 生效）`, async (): Promise<CheckResult> => {
@@ -46,26 +50,27 @@ class Marquee008 extends DidibusTestBase {
       };
     });
 
-    await this.check('顺序：最新记录在最前（flying 抽在首条）', async (): Promise<CheckResult> => {
+    await this.check('顺序：最新记录在最前（首条 mileage=最后 1 抽 totalMileage）', async (): Promise<CheckResult> => {
       this.needActive();
       const apiList = await this.didibus.marquee(USER_A, LOCALE, localIso(LOCALE, T_D1));
       const first = apiList[0];
       return {
-        expect: '首条 pool=flying（最后触发）',
+        expect: `首条 mileage=${this.lastMileage}（最后触发）`,
         real: `首条=${JSON.stringify(first ?? null)}`,
-        pass: first?.pool === 'flying',
+        pass: first !== undefined && int(first.mileage) === this.lastMileage,
       };
     });
 
-    await this.check('内容：每条含 playerId / pool / count', async (): Promise<CheckResult> => {
+    await this.check('内容：每条含 playerId/nickname/avatar/mileage，playerId=A 且 mileage>0', async (): Promise<CheckResult> => {
       this.needActive();
       const list = await this.didibus.marquee(USER_A, LOCALE, localIso(LOCALE, T_D1));
       const bad = list.filter(
-        (it) => it.playerId === undefined || it.pool === undefined || it.count === undefined
-          || String(it.playerId) !== String(USER_A) || (it.pool !== POOL_NORMAL && it.pool !== 'flying') || int(it.count) !== 1,
+        (it) => it.playerId === undefined || it.mileage === undefined
+          || String(it.playerId) !== String(USER_A) || int(it.mileage) <= 0
+          || !('nickname' in it) || !('avatar' in it),
       );
       return {
-        expect: `全部 {playerId:${USER_A}, pool:normal|flying, count:1}`,
+        expect: `全部 {playerId:${USER_A}, nickname/avatar 字段存在, mileage>0}`,
         real: bad.length === 0 ? `${list.length} 条均符合` : `${bad.length} 条不符：${JSON.stringify(bad[0])}`,
         pass: bad.length === 0 && list.length > 0,
       };
