@@ -271,6 +271,8 @@ class HomeCheck extends AppBaseClass {
     await this.waitForElement(by.id(ID.phoneInput), '手机号输入框');
     // 选择区号 +86（语言无关：远端模拟器可能是英文系统，'中国' 文本不存在导致切号失败）
     await this.selectCountryCode86();
+    // 兜底：确保浮层已关闭、手机号输入框可访问后再输入
+    await this.waitForElement(by.id(ID.phoneInput), '手机号输入框', 10_000);
     await this.driver.input(by.id(ID.phoneInput), account.username);
     await this.driver.hideKeyboard();
     const since = new Date(); // 记录发码时间基线，供查库取验证码
@@ -384,7 +386,12 @@ class HomeCheck extends AppBaseClass {
         return false;
       }
       await this.driver.click(target);
-      await sleep(500);
+      // 等国家列表浮层真正关闭再返回：浮层打开时手机号输入框(enter_phone_number)不在可访问层级，
+      // 而 tv_country_code 在浮层打开时仍可读（readCode 会误判已切换）。慢设备上浮层关闭耗时更久，
+      // 紧接着的 input(phoneInput) 会报 "An element could not be located"。
+      for (let i = 0; i < 25 && (await this.driver.exists(by.id(ID.countryList))); i++) {
+        await sleep(200);
+      }
       return (await readCode()) === '86';
     };
 

@@ -510,7 +510,12 @@ async function selectCountryCode(app: AppBaseClass, countryCode: string): Promis
       return false;
     }
     await driver.click(target);
-    await sleep(500);
+    // 等国家列表浮层真正关闭再返回：浮层打开时手机号输入框(enter_phone_number)不在可访问层级，
+    // 而 tv_country_code 在浮层打开时仍可读（readSelectedCountryCode 会误判已切换）。慢设备上
+    // 紧接着的 input(phoneInput) 会报 "An element could not be located"。
+    for (let i = 0; i < 25 && (await driver.exists(LOC.countryList)); i++) {
+      await sleep(200);
+    }
     return (await readSelectedCountryCode(app)) === code;
   };
 
