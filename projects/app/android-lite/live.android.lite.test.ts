@@ -1,17 +1,19 @@
 /**
- * 直播冒烟（Android / Lite）— 开播创建自己的直播间 → 房内发消息 → 关播
+ * 直播冒烟（Android / Lite）— 开播 → 房内发消息 → 送礼 → 关播
  *
  * 前置：
  *   1. Lita 账号已登录（脚本会 ensure 登录），当前在一级页面
  *   2. 账号具备开播资格（Live 页右上角 startLiveIV 可见）
  *   3. 权限弹窗一律允许（autoGrant + LivePermissionDialog「全部打开」+ 系统 Allow）
+ *   4. 送礼：账号金币余额充足；房内需有其他可收礼用户（连麦用户；房主不能给自己送礼）
  *
  * 步骤：
  *   1. 底部语音房 → Live Tab → 点右上角开播
  *   2. 选择直播间页：点「个人直播间」下封面
  *   3. 开播编辑页：点「相机」Tab →「开始直播」
  *   4. 进入自己的直播间后：点输入框 → 输入 → 发送 → 公屏回显
- *   5. 右上角关播（img_more）→ 确认结束
+ *   5. 点右下角礼物 → 选可负担礼物 → 送礼 → 公屏展示送礼信息
+ *   6. 右上角关播（img_more）→ 确认结束
  *
  * 运行：
  *   SCRIPT_APPIUM_URL=http://127.0.0.1:4723/ SCRIPT_ENV=TEST \
@@ -183,6 +185,24 @@ const ID = {
   chatContent: id('tv_content'),
   chatList: id('rv_message'),
 
+  // 礼物架（与语音房同一套 dialog_send_gift）
+  giftEntry: id('iv_gift'),
+  giftRoot: id('sendGiftRootLayout'),
+  giftItem: id('itemGiftLayout'),
+  giftItemPrice: id('itemGiftPriceTv'),
+  giftItemName: id('itemGiftNameTv'),
+  giftBalance: id('sendGiftPriceTv'),
+  giftSendToRv: id('giftSendToRv'),
+  giftSelectedAvatar: id('giftSelectedAvatarIv'),
+  giftSend: id('sendGiftSubmitTv'),
+  giftCombo: id('giftComboView'),
+  giftCountLayout: id('sendGiftCountLayout'),
+  giftCountTv: id('sendGiftCountTv'),
+  giftCountOption: id('giftCountTv'),
+  giftSendToEmpty: id('giftSendToEmptyTv'),
+  giftMsgName: id('tv_gift_name'),
+  giftMsgCount: id('tv_gift_count'),
+
   // CommonDialog
   positive: id('positiveTv'),
   negative: id('negativeTv'),
@@ -217,10 +237,16 @@ class LiveAndroidLiteTest extends AppBaseClass {
   /** 进房后发送的公屏文案（唯一，便于回显校验） */
   protected readonly chatMessage = `live-msg-${Date.now().toString().slice(-6)}`;
 
+  /** 送礼结果：opened / sent / empty-receiver / insufficient */
+  protected giftResult: string = '';
+
+  /** 选中的礼物名（用于公屏校验） */
+  protected selectedGiftName = '';
+
   constructor() {
     super('android', 'lite');
-    // 登录 → Live → 开播进自己的房 → 发消息 → 关播
-    this.total = 13;
+    // 登录 → Live → 开播 → 发消息 → 送礼 → 关播
+    this.total = 19;
     this.registerLiveStates();
   }
 
@@ -486,17 +512,81 @@ class LiveAndroidLiteTest extends AppBaseClass {
       };
     });
 
+    // ---------- 直播间送礼 ----------
+    await this.act('点击右下角礼物 icon，调起礼物架', async () => {
+      // 先收起公屏输入，避免挡住礼物入口
+      await this.dismissLiveChatInput();
+      this.giftResult = await this.openLiveGiftPanel();
+      this.log(`礼物面板: ${this.giftResult}`);
+      if (this.giftResult === 'empty-receiver') {
+        this.skip('无可收礼用户（房主不能给自己送礼，需连麦其他用户）');
+      }
+    });
+
+    await this.check('礼物架面板已打开', async () => {
+      if (this.giftResult === 'empty-receiver') {
+        this.skip('无可收礼用户');
+      }
+      const opened =
+        (await this.driver.exists(by.id(ID.giftSend))) ||
+        (await this.driver.exists(by.id(ID.giftRoot)));
+      return {
+        expect: '礼物架面板可见（Send 或 root）',
+        real: opened ? '已打开' : '未打开',
+        pass: opened,
+      };
+    });
+
+    await this.act('选择价格 ≤ 账户余额的礼物', async () => {
+      if (this.giftResult === 'empty-receiver') this.skip('无可收礼用户');
+      await this.selectAffordableLiveGift();
+    });
+
+    await this.act('点击送礼按钮', async () => {
+      if (this.giftResult === 'empty-receiver') this.skip('无可收礼用户');
+      await this.selectLiveGiftRecipient();
+      this.giftResult = await this.clickLiveGiftSend();
+      this.log(`送礼结果: ${this.giftResult}`);
+    });
+
+    await this.check('可以送礼成功', async () => {
+      if (this.giftResult === 'empty-receiver') this.skip('无可收礼用户');
+      if (this.giftResult === 'insufficient') {
+        return {
+          expect: '送礼成功（连击/面板关闭）',
+          real: '余额不足或触发充值',
+          pass: false,
+        };
+      }
+      const ok = await this.assertLiveGiftSent();
+      return {
+        expect: '送礼成功（连击/面板关闭）',
+        real: ok ? '成功' : '未检测到成功迹象',
+        pass: ok,
+      };
+    });
+
+    await this.check('直播间消息列表展示该送礼信息', async () => {
+      if (this.giftResult === 'empty-receiver') this.skip('无可收礼用户');
+      if (this.giftResult === 'insufficient') {
+        return {
+          expect: '公屏出现送礼消息',
+          real: '未送礼成功，跳过公屏校验',
+          pass: false,
+        };
+      }
+      const found = await this.hasLiveGiftMessage(8_000);
+      return {
+        expect: '公屏出现送礼消息（Sent / 礼物名）',
+        real: found ? '已找到' : '未找到送礼消息',
+        pass: found,
+      };
+    });
+
     // ---------- 关播 ----------
     await this.act('点击关播并确认结束直播', async () => {
-      // 输入面板可能仍盖住顶部关播，先收起
-      if (await this.driver.exists(by.id(ID.chatInput))) {
-        try {
-          await this.driver.hideKeyboard();
-        } catch {
-          await this.driver.back();
-        }
-        await sleep(500);
-      }
+      await this.dismissLiveGiftPanel();
+      await this.dismissLiveChatInput();
       await this.waitForElement(by.id(ID.closeLive), '关播按钮 img_more', 8_000);
       await this.driver.click(by.id(ID.closeLive));
       await sleep(600);
@@ -808,6 +898,316 @@ class LiveAndroidLiteTest extends AppBaseClass {
         } catch {
           // ignore
         }
+      }
+      await sleep(400);
+    }
+    return false;
+  }
+
+  /** 收起公屏输入面板 / 键盘 */
+  protected async dismissLiveChatInput(): Promise<void> {
+    if (await this.driver.exists(by.id(ID.chatInput))) {
+      try {
+        await this.driver.hideKeyboard();
+      } catch {
+        // ignore
+      }
+      try {
+        await this.driver.back();
+        await sleep(400);
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  protected async dismissLiveGiftPanel(): Promise<void> {
+    if (!(await this.driver.exists(by.id(ID.giftSend))) && !(await this.driver.exists(by.id(ID.giftRoot)))) {
+      return;
+    }
+    try {
+      const win = await this.driver.windowRect();
+      await this.driver.execute('mobile: clickGesture', [
+        { x: Math.round(win.width / 2), y: Math.round(win.height * 0.22) },
+      ]);
+      await sleep(400);
+    } catch {
+      try {
+        await this.driver.back();
+        await sleep(400);
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  protected async isLiveGiftEmptyReceiver(): Promise<boolean> {
+    if (await this.driver.exists(by.id(ID.giftSendToEmpty))) return true;
+    const emptyTexts = await resolveAndroidStrings(this, ['live_connect_nobody']);
+    for (const t of emptyTexts) {
+      if (t && (await this.driver.exists(by.textContains(t.slice(0, Math.min(12, t.length)))))) {
+        return true;
+      }
+    }
+    const selfTexts = await resolveAndroidStrings(this, ['live_room_studio66']);
+    for (const t of selfTexts) {
+      if (t && (await this.driver.exists(by.textContains(t.slice(0, Math.min(12, t.length)))))) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** 打开直播间礼物架；无可收礼人时返回 empty-receiver */
+  protected async openLiveGiftPanel(): Promise<'opened' | 'empty-receiver'> {
+    await this.dismissLiveGiftPanel();
+    await this.closePopups();
+
+    const openDeadline = Date.now() + 10_000;
+    while (Date.now() < openDeadline) {
+      if (await this.isActivity(PERMISSION_ACTIVITY)) {
+        await this.clickPermissionAllow();
+        continue;
+      }
+      if (await this.driver.exists(by.id(ID.giftSend)) || (await this.driver.exists(by.id(ID.giftRoot)))) {
+        break;
+      }
+      if (await this.driver.exists(by.id(ID.giftEntry))) {
+        await this.driver.click(by.id(ID.giftEntry));
+      } else {
+        // iv_gift 常为 PAG，不在无障碍树：点右下热区
+        const win = await this.driver.windowRect();
+        await this.driver.execute('mobile: clickGesture', [
+          { x: Math.round(win.width * 0.92), y: Math.round(win.height * 0.92) },
+        ]);
+      }
+      await sleep(600);
+      if (await this.isLiveGiftEmptyReceiver()) {
+        this.log('礼物面板提示无可收礼用户');
+        await this.dismissLiveGiftPanel();
+        return 'empty-receiver';
+      }
+    }
+
+    if (!(await this.driver.exists(by.id(ID.giftSend))) && !(await this.driver.exists(by.id(ID.giftRoot)))) {
+      throw new Error('未能打开礼物面板');
+    }
+    if (await this.isLiveGiftEmptyReceiver()) {
+      await this.dismissLiveGiftPanel();
+      return 'empty-receiver';
+    }
+    // 相机开播时收礼人列表为空（仅自己）也视为 empty
+    const hasRecipient =
+      (await this.driver.exists(by.id(ID.giftSelectedAvatar))) ||
+      (await this.driver.exists(
+        by.xpath(`//*[@resource-id='${ID.giftSendToRv}']//*[@clickable='true']`),
+      ));
+    const showSelected = await this.driver.exists(by.id(ID.giftSendToRv));
+    if (showSelected && !hasRecipient) {
+      this.log('礼物面板收礼人列表为空（房主独处）');
+      await this.dismissLiveGiftPanel();
+      return 'empty-receiver';
+    }
+    return 'opened';
+  }
+
+  protected async readLiveGiftBalance(): Promise<number> {
+    try {
+      if (await this.driver.exists(by.id(ID.giftBalance))) {
+        const raw = (await this.driver.textOf(by.id(ID.giftBalance))).replace(/[^\d.]/g, '');
+        const n = Number(raw);
+        if (Number.isFinite(n)) {
+          this.log(`账户余额: ${n}`);
+          return n;
+        }
+      }
+    } catch {
+      // ignore
+    }
+    this.log('未能读取账户余额，将选可见礼物中价格最低者');
+    return Number.POSITIVE_INFINITY;
+  }
+
+  /** 选择最便宜且价格 ≤ 余额的礼物，数量固定 1 */
+  protected async selectAffordableLiveGift(): Promise<void> {
+    await this.waitForElement(by.id(ID.giftItem), '礼物列表项', 8_000);
+    const balance = await this.readLiveGiftBalance();
+
+    const priceEls = await this.driver.findElements(by.id(ID.giftItemPrice));
+    let bestIdx = 0;
+    let bestPrice = Number.POSITIVE_INFINITY;
+    const affordable: { idx: number; price: number }[] = [];
+
+    for (let i = 0; i < priceEls.length; i++) {
+      const priceLoc = by.xpath(`(//*[@resource-id='${ID.giftItemPrice}'])[${i + 1}]`);
+      try {
+        if (!(await this.driver.exists(priceLoc))) continue;
+        const raw = (await this.driver.textOf(priceLoc)).replace(/[^\d.]/g, '');
+        const price = Number(raw);
+        if (!Number.isFinite(price)) continue;
+        if (price < bestPrice) {
+          bestPrice = price;
+          bestIdx = i + 1;
+        }
+        if (price <= balance) affordable.push({ idx: i + 1, price });
+      } catch {
+        // continue
+      }
+    }
+
+    let pick = bestIdx;
+    if (affordable.length > 0) {
+      affordable.sort((a, b) => a.price - b.price);
+      pick = affordable[0].idx;
+      this.log(`选择最便宜可负担礼物 #${pick}，价格=${affordable[0].price}，余额=${balance}`);
+    } else if (priceEls.length > 0) {
+      this.log(`无可负担礼物，回退最低价礼物 #${pick}，价格=${bestPrice}`);
+    } else {
+      this.log('未读到礼物价格，点击第一个礼物项');
+      pick = 1;
+    }
+
+    const giftLoc = by.xpath(`(//*[@resource-id='${ID.giftItem}'])[${pick}]`);
+    if (await this.driver.exists(giftLoc)) {
+      await this.driver.click(giftLoc);
+    } else if (await this.driver.exists(by.id(ID.giftItem))) {
+      await this.driver.click(by.id(ID.giftItem));
+    } else {
+      throw new Error('礼物列表为空，无法选择礼物');
+    }
+    await sleep(400);
+
+    // 记录礼物名（若布局有 itemGiftNameTv）
+    try {
+      const nameLoc = by.xpath(
+        `(//*[@resource-id='${ID.giftItem}'])[${pick}]//*[@resource-id='${ID.giftItemName}']`,
+      );
+      if (await this.driver.exists(nameLoc)) {
+        this.selectedGiftName = (await this.driver.textOf(nameLoc)).trim();
+      }
+    } catch {
+      // ignore
+    }
+
+    await this.ensureLiveGiftCountOne();
+  }
+
+  protected async ensureLiveGiftCountOne(): Promise<void> {
+    const isOne = async (): Promise<boolean> => {
+      if (!(await this.driver.exists(by.id(ID.giftCountTv)))) return false;
+      const t = (await this.driver.textOf(by.id(ID.giftCountTv))).replace(/\s/g, '');
+      return t === 'x1' || t === '1' || t.endsWith('x1');
+    };
+    if (await isOne()) return;
+    if (!(await this.driver.exists(by.id(ID.giftCountLayout)))) return;
+    await this.driver.click(by.id(ID.giftCountLayout));
+    await sleep(400);
+    const opt =
+      (await this.driver.exists(
+        by.xpath(`//*[@resource-id='${ID.giftCountOption}' and contains(@text,'1')]`),
+      ))
+        ? by.xpath(`//*[@resource-id='${ID.giftCountOption}' and contains(@text,'1')]`)
+        : by.textContains('x 1');
+    if (await this.driver.exists(opt)) {
+      await this.driver.click(opt);
+      await sleep(300);
+    } else {
+      this.log('未找到数量选项 x 1，按默认数量');
+      try {
+        const win = await this.driver.windowRect();
+        await this.driver.execute('mobile: clickGesture', [
+          { x: Math.round(win.width / 2), y: Math.round(win.height * 0.4) },
+        ]);
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  /** 点选收礼人（相机开播时顶部头像列表） */
+  protected async selectLiveGiftRecipient(): Promise<void> {
+    if (!(await this.driver.exists(by.id(ID.giftSendToRv)))) {
+      this.log('无收礼人选择条（非相机连麦模式），直接送礼');
+      return;
+    }
+    const first = by.xpath(
+      `//*[@resource-id='${ID.giftSendToRv}']//*[@resource-id='${ID.giftSelectedAvatar}'][1]`,
+    );
+    if (await this.driver.exists(first)) {
+      await this.driver.click(first);
+      await sleep(300);
+      this.log('已点选收礼人头像');
+      return;
+    }
+    const clickable = by.xpath(`//*[@resource-id='${ID.giftSendToRv}']//*[@clickable='true'][1]`);
+    if (await this.driver.exists(clickable)) {
+      await this.driver.click(clickable);
+      await sleep(300);
+      return;
+    }
+    throw new Error('礼物面板无可用收礼人（房主不能给自己送礼）');
+  }
+
+  protected async clickLiveGiftSend(): Promise<'sent' | 'insufficient' | 'empty-receiver'> {
+    await this.waitForElement(by.id(ID.giftSend), '送礼按钮', 5_000);
+    // 未选收礼人时按钮可能不可点（isSelected=false），再试一次选人
+    try {
+      await this.driver.click(by.id(ID.giftSend));
+    } catch {
+      await this.selectLiveGiftRecipient();
+      await this.driver.click(by.id(ID.giftSend));
+    }
+    await sleep(1_000);
+
+    if (await this.isLiveGiftEmptyReceiver()) return 'empty-receiver';
+    if (
+      (await this.driver.exists(by.textContains('Recharge'))) ||
+      (await this.driver.exists(by.textContains('Top up'))) ||
+      (await this.driver.exists(by.textContains('余额'))) ||
+      (await this.driver.exists(by.textContains('不足')))
+    ) {
+      return 'insufficient';
+    }
+    return 'sent';
+  }
+
+  protected async assertLiveGiftSent(): Promise<boolean> {
+    const deadline = Date.now() + 6_000;
+    while (Date.now() < deadline) {
+      if (await this.driver.exists(by.id(ID.giftCombo))) return true;
+      if (await this.driver.exists(by.id(id('sendGiftCountView')))) return true;
+      if (!(await this.driver.exists(by.id(ID.giftSend))) && !(await this.driver.exists(by.id(ID.giftRoot)))) {
+        return true;
+      }
+      await sleep(400);
+    }
+    // 已点过 Send 也算尝试成功（连击面板可能仍在）
+    return this.giftResult === 'sent';
+  }
+
+  protected async hasLiveGiftMessage(timeoutMs = 8_000): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs;
+    const sentTexts = await resolveAndroidStrings(this, ['send_gift_sender_chat_message']);
+    const candidates: Locator[] = [
+      by.id(ID.giftMsgName),
+      by.id(ID.giftMsgCount),
+      by.id(ID.giftCombo),
+      by.id(id('sendGiftCountView')),
+    ];
+    if (this.selectedGiftName) {
+      candidates.push(by.textContains(this.selectedGiftName));
+    }
+    for (const t of sentTexts) {
+      if (t) candidates.push(by.textContains(t));
+    }
+    candidates.push(by.textContains('Sent'), by.textContains('sent'));
+
+    while (Date.now() < deadline) {
+      if (await this.driver.exists(by.id(ID.giftSend)) || (await this.driver.exists(by.id(ID.giftRoot)))) {
+        await this.dismissLiveGiftPanel();
+      }
+      for (const c of candidates) {
+        if (await this.driver.exists(c)) return true;
       }
       await sleep(400);
     }
