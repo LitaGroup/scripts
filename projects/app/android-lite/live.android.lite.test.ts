@@ -18,6 +18,7 @@
  *     node projects/app/android-lite/live.android.lite.test.ts
  */
 import { hostname } from 'node:os';
+import http from 'node:http';
 import { AppBaseClass, type AppAccount } from '../../../src/base/AppBaseClass.ts';
 import {
   AppiumResource,
@@ -30,8 +31,8 @@ import { loginWithPhonePassword, ensureAndroidLoggedIn } from '../core/_lib/andr
 import { resolveAndroidStrings } from '../core/_lib/androidAppStrings.ts';
 
 /**
- * Appium 建连：与 voice-room.android.lite.test.ts 完全同一套（勿单独改）。
- * 注意：127.0.0.1 = 跑 node 的执行机，不是手机。手机相同但执行机不同会导致语音房通、直播不通。
+ * Appium 建连：与 voice-room 同一套。
+ * 先探 127.0.0.1（执行机本机 Appium）；局域网 IP 仅作 env 指定或次选，避免不可达 IP 把探测/建连卡死。
  */
 function normalizeAppiumBase(raw: string): string {
   let u = raw.trim();
@@ -42,13 +43,35 @@ function normalizeAppiumBase(raw: string): string {
   return u;
 }
 
-async function probeAppium(url: string): Promise<boolean> {
-  try {
-    const res = await fetch(new URL('status', url), { signal: AbortSignal.timeout(2500) });
-    return res.ok;
-  } catch {
-    return false;
-  }
+/** 短超时 HTTP 探测，不可达地址最多卡 ~1.5s，避免「一直卡住」 */
+function probeAppium(url: string, timeoutMs = 1500): Promise<boolean> {
+  return new Promise((resolve) => {
+    try {
+      const u = new URL('status', url);
+      const req = http.request(
+        {
+          hostname: u.hostname === 'localhost' ? '127.0.0.1' : u.hostname,
+          port: Number(u.port || 4723),
+          path: `${u.pathname}${u.search}`,
+          method: 'GET',
+          family: 4,
+          timeout: timeoutMs,
+        },
+        (res) => {
+          res.resume();
+          resolve((res.statusCode ?? 0) >= 200 && (res.statusCode ?? 0) < 300);
+        },
+      );
+      req.on('timeout', () => {
+        req.destroy();
+        resolve(false);
+      });
+      req.on('error', () => resolve(false));
+      req.end();
+    } catch {
+      resolve(false);
+    }
+  });
 }
 
 async function resolveReachableAppiumUrl(): Promise<string> {
@@ -61,11 +84,12 @@ async function resolveReachableAppiumUrl(): Promise<string> {
       candidates.push(n);
     }
   };
+  // env 优先；本机 127.0.0.1 先于局域网 IP（不可达时会拖死）
   add(process.env.SCRIPT_APPIUM_URL);
   add(process.env.APPIUM_URL);
   add(process.env.APPIUM_HOST);
-  add('http://10.20.0.157:4723/');
   add('http://127.0.0.1:4723/');
+  add('http://10.20.0.157:4723/');
   add('http://172.20.1.79:4723/');
 
   process.stdout.write(
@@ -80,10 +104,12 @@ async function resolveReachableAppiumUrl(): Promise<string> {
     }
     failed.push(u);
   }
-  process.stdout.write(
-    `[log] Appium 探测失败: ${failed.join(' , ')}（若语音房在同平台刚成功连 127.0.0.1，说明直播任务的 node 不在装 Appium 的那台电脑上——请核对任务的「执行机/Agent」，不是手机）\n`,
-  );
-  return candidates[0] ?? 'http://10.20.0.157:4723/';
+  const msg =
+    `Appium 探测失败: ${failed.join(' , ')}。` +
+    `执行机=${hostname()}。请把直播任务改到与语音房相同的 Agent（本机有 Appium），` +
+    `或设置 SCRIPT_APPIUM_URL 为该 Agent 能访问的地址。`;
+  process.stdout.write(`[log] ${msg}\n`);
+  throw new Error(msg);
 }
 
 process.env.SCRIPT_APPIUM_URL = await resolveReachableAppiumUrl();
@@ -177,7 +203,7 @@ const RUNTIME_PERMISSIONS = [
 class LiveAndroidLiteTest extends AppBaseClass {
   /** 与语音房一致：显式传入地址；真正建连前再 waitForReachableAppiumUrl 刷新 env */
   protected override readonly driver = new AppiumResource(
-    process.env.SCRIPT_APPIUM_URL ?? 'http://10.20.0.157:4723/',
+    process.env.SCRIPT_APPIUM_URL ?? 'http://127.0.0.1:4723/',
   );
 
   constructor() {
