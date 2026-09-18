@@ -1,19 +1,22 @@
 /**
- * 直播开播冒烟（Android / Lite）— 语音房 Live 页开播 → 关播
+ * 直播冒烟（Android / Lite）— Live 列表进房发消息 + 开播关播
  *
  * 前置：
- *   1. Lita 账号已登录（脚本会 ensure 登录）
- *   2. 账号具备开播资格（Live 页右上角 startLiveIV 可见）
+ *   1. Lita 账号已登录（脚本会 ensure 登录），当前在一级页面
+ *   2. 账号具备开播资格（Live 页右上角 startLiveIV 可见；开播段需要）
  *   3. 权限弹窗一律允许（autoGrant + LivePermissionDialog「全部打开」+ 系统 Allow）
  *
  * 步骤：
- *   1. 底部语音房 → Live Tab → 点右上角开播
- *   2. 选择直播间页：点「个人直播间」下封面
- *   3. 开播编辑页：点「相机」Tab →「开始直播」
- *   4. 进入直播间后右上角关播（img_more）→ 确认结束
+ *   A. 进房发消息
+ *      1. 底部语音房 → Live Tab
+ *      2. 展示列表中点免密直播间进入
+ *      3. 点输入框输入任意内容 → 发送 → 公屏回显
+ *   B. 开播关播（原流程）
+ *      1. Live 页右上角开播 → 选个人房封面 → 相机 → 开始直播
+ *      2. 关播（img_more）→ 确认结束
  *
  * 运行：
- *   SCRIPT_APPIUM_URL=http://10.20.0.157:4723/ SCRIPT_ENV=TEST \
+ *   SCRIPT_APPIUM_URL=http://127.0.0.1:4723/ SCRIPT_ENV=TEST \
  *     SCRIPT_CONFIG=config.app.json \
  *     node projects/app/android-lite/live.android.lite.test.ts
  */
@@ -147,10 +150,18 @@ const ID = {
   startLive: id('startLiveIV'),
   searchEntry: id('img_search_room'),
   partyTitleArea: id('partyTitleAllView'),
+  /** Live 列表 */
+  roomList: id('roomListRecyclerView'),
+  liveCover: id('liveCoverView'),
+  roomListEmpty: id('roomListEmptyView'),
 
   // LivePermissionDialog
   openAllPermission: id('tv_open_all_permission'),
   permissionDialogClose: id('iv_close'),
+
+  // EnterPasswordDialog — 加密房
+  passwordField: id('password'),
+  passwordClose: id('img_close'),
 
   // LiveChooseRoomActivity — 个人直播间封面在 gameListView
   myRoomList: id('gameListView'),
@@ -169,11 +180,23 @@ const ID = {
   startLiveBtn: id('tv_start_live'),
   editClose: id('img_close'),
 
-  // VideoRoomTopFragment — 房主时 img_more = 关播
+  // VideoRoomTopFragment — 房主时 img_more = 关播；观众时弹出 More 菜单
   closeLive: id('img_more'),
   roomName: id('roomNameTv'),
   roomId: id('roomIdTv'),
   liveTime: id('liveTimeTv'),
+  /** MoreMenuPopWindow — 观众退出 */
+  exitRoom: id('tv_exit'),
+  exitRoomIcon: id('img_exit'),
+  floatLeave: id('tv_leave'),
+  floatStay: id('tv_stay'),
+
+  // VideoRoomBottomFragment — 公屏
+  chatEntry: id('tv_input_text'),
+  chatEntryBg: id('input_view_bg'),
+  chatInput: id('input_view'),
+  chatContent: id('tv_content'),
+  chatList: id('rv_message'),
 
   // CommonDialog
   positive: id('positiveTv'),
@@ -206,10 +229,13 @@ class LiveAndroidLiteTest extends AppBaseClass {
     process.env.SCRIPT_APPIUM_URL ?? 'http://127.0.0.1:4723/',
   );
 
+  /** 进房后发送的公屏文案（唯一，便于回显校验） */
+  protected readonly chatMessage = `live-msg-${Date.now().toString().slice(-6)}`;
+
   constructor() {
     super('android', 'lite');
-    // 登录 → Live 页 → 开播 → 选房 → 相机 → 开始 → 断言关播 → 结束
-    this.total = 10;
+    // 登录 → Live → 列表进房发消息 → 开播 → 选房 → 相机 → 开始 → 关播
+    this.total = 17;
     this.registerLiveStates();
   }
 
@@ -373,7 +399,86 @@ class LiveAndroidLiteTest extends AppBaseClass {
       await this.openVoiceRoomLiveTab();
     });
 
+    // ---------- A. Live 列表进房并发消息 ----------
+    await this.check('可以展示直播间列表', async () => {
+      const deadline = Date.now() + 15_000;
+      let listVisible = false;
+      let coverCount = 0;
+      while (Date.now() < deadline) {
+        await this.closePopups();
+        await this.ensureLiveSubTab();
+        listVisible = await this.driver.exists(by.id(ID.roomList));
+        coverCount = (await this.driver.findElements(by.id(ID.liveCover))).length;
+        if (listVisible && coverCount > 0) break;
+        // 空态也算「列表页已出」但后续无法进房
+        if (listVisible && (await this.driver.exists(by.id(ID.roomListEmpty)))) break;
+        await sleep(400);
+      }
+      return {
+        expect: 'roomListRecyclerView + liveCoverView',
+        real: `list=${listVisible} covers=${coverCount}`,
+        pass: !!(listVisible && coverCount > 0),
+        message: coverCount <= 0 ? 'Live 列表无在播房间，无法进房发消息' : undefined,
+      };
+    });
+
+    await this.act('点击免密直播间进入', async () => {
+      await this.enterUnlockedLiveFromList();
+    });
+
+    await this.check('可以进入直播间', async () => {
+      const inRoom = await this.isActivity(VIDEO_ROOM_ACTIVITY);
+      const deadline = Date.now() + 10_000;
+      let chatReady = false;
+      while (Date.now() < deadline) {
+        await this.closePopups();
+        if (
+          (await this.driver.exists(by.id(ID.chatEntry))) ||
+          (await this.driver.exists(by.id(ID.chatEntryBg))) ||
+          (await this.driver.exists(by.id(ID.roomName)))
+        ) {
+          chatReady = true;
+          break;
+        }
+        await sleep(400);
+      }
+      return {
+        expect: 'VideoRoomActivity + 底部输入区',
+        real: `inRoom=${inRoom} chatReady=${chatReady}`,
+        pass: !!(inRoom && chatReady),
+      };
+    });
+
+    await this.act(`点击输入框并输入：${this.chatMessage}`, async () => {
+      await this.openLiveChatInput();
+      await this.driver.input(by.id(ID.chatInput), this.chatMessage);
+      await sleep(300);
+    });
+
+    await this.act('点击发送', async () => {
+      await this.driver.performEditorAction('send');
+      await sleep(800);
+    });
+
+    await this.check('发送消息后消息区域正常展示发送内容', async () => {
+      const found = await this.hasLiveChatMessage(this.chatMessage, 8_000);
+      return {
+        expect: `公屏含 "${this.chatMessage}"`,
+        real: found ? '已找到' : '未找到消息气泡',
+        pass: found,
+      };
+    });
+
+    await this.act('退出直播间（观众 More → Exit）', async () => {
+      await this.leaveAudienceLiveRoom();
+    });
+
+    // ---------- B. 开播 → 关播（原流程） ----------
     await this.act('点击右上角开播按钮', async () => {
+      // 退房后可能不在 Live Tab，先确保回到 Live 页
+      if (!(await this.driver.exists(by.id(ID.startLive)))) {
+        await this.openVoiceRoomLiveTab();
+      }
       await this.assertExists(by.id(ID.startLive), '开播按钮 startLiveIV（账号需具备开播资格）');
       await this.driver.click(by.id(ID.startLive));
       await sleep(800);
@@ -715,6 +820,239 @@ class LiveAndroidLiteTest extends AppBaseClass {
       throw new Error('直播品类页未找到可选品类');
     }
     await sleep(800);
+  }
+
+  /** Live 列表依次尝试封面：遇密码弹窗则关闭换下一个，直到进入 VideoRoom */
+  protected async enterUnlockedLiveFromList(maxAttempts = 8): Promise<void> {
+    await this.waitForElement(by.id(ID.roomList), '直播间列表 roomListRecyclerView', 15_000);
+
+    let lastError: Error | null = null;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      await this.closePopups();
+      if (await this.isActivity(VIDEO_ROOM_ACTIVITY)) {
+        this.log('已在直播间，无需再点列表');
+        return;
+      }
+
+      const covers = await this.driver.findElements(by.id(ID.liveCover));
+      const total = covers.length;
+      if (total <= 0) {
+        // 下滑换一批
+        if (await this.driver.exists(by.id(ID.roomList))) {
+          await this.driver.swipeInElement(by.id(ID.roomList), 'up');
+          await sleep(800);
+        }
+        lastError = new Error('Live 列表无 liveCoverView');
+        continue;
+      }
+
+      const index = ((attempt - 1) % total) + 1;
+      const cover = by.xpath(`(//*[@resource-id='${ID.liveCover}'])[${index}]`);
+      this.log(`尝试进房 attempt=${attempt}/${maxAttempts} cover=${index}/${total}`);
+      try {
+        await this.driver.click(cover);
+      } catch (e) {
+        lastError = e instanceof Error ? e : new Error(String(e));
+        continue;
+      }
+      await sleep(1_200);
+
+      if (await this.isPasswordDialogVisible()) {
+        this.log('该房需密码，关闭弹窗换下一个');
+        await this.dismissPasswordDialog();
+        lastError = new Error('点到加密房');
+        // 略下滑避免一直点同一批
+        if (attempt % 3 === 0 && (await this.driver.exists(by.id(ID.roomList)))) {
+          await this.driver.swipeInElement(by.id(ID.roomList), 'up');
+          await sleep(600);
+        }
+        continue;
+      }
+
+      const entered = await this.waitEnteredLiveRoom(18_000);
+      if (entered) {
+        this.log('已进入免密直播间');
+        return;
+      }
+
+      if (await this.isPasswordDialogVisible()) {
+        await this.dismissPasswordDialog();
+        lastError = new Error('进房过程弹出密码框');
+        continue;
+      }
+      lastError = new Error(`点击后未进入 VideoRoomActivity，当前: ${this.activity || '(未知)'}`);
+    }
+
+    throw lastError ?? new Error('未能进入免密直播间');
+  }
+
+  protected async waitEnteredLiveRoom(timeoutMs: number): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      await this.closePopups();
+      if (await this.isPasswordDialogVisible()) return false;
+      if (await this.isActivity(VIDEO_ROOM_ACTIVITY)) {
+        // 等底部输入区就绪
+        if (
+          (await this.driver.exists(by.id(ID.chatEntry))) ||
+          (await this.driver.exists(by.id(ID.chatEntryBg))) ||
+          (await this.driver.exists(by.id(ID.roomName)))
+        ) {
+          return true;
+        }
+      }
+      await sleep(400);
+    }
+    return await this.isActivity(VIDEO_ROOM_ACTIVITY);
+  }
+
+  protected async isPasswordDialogVisible(): Promise<boolean> {
+    if (await this.driver.exists(by.id(ID.passwordField))) return true;
+    const titles = await resolveAndroidStrings(this, ['chat_room_private_room4']);
+    for (const t of titles) {
+      if (t && (await this.driver.exists(by.textContains(t.slice(0, Math.min(16, t.length)))))) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  protected async dismissPasswordDialog(): Promise<void> {
+    const closeNearPassword = by.xpath(
+      `//*[@resource-id='${ID.passwordField}']/..//*[@resource-id='${ID.passwordClose}']`,
+    );
+    if (await this.driver.exists(closeNearPassword)) {
+      await this.driver.click(closeNearPassword);
+    } else if (await this.driver.exists(by.id(ID.passwordClose))) {
+      await this.driver.click(by.id(ID.passwordClose));
+    } else {
+      await this.driver.back();
+    }
+    await sleep(600);
+  }
+
+  /** 打开直播间公屏输入框（tv_input_text / input_view_bg → input_view） */
+  protected async openLiveChatInput(): Promise<void> {
+    if (!(await this.isActivity(VIDEO_ROOM_ACTIVITY))) {
+      throw new Error(`打开输入框前不在 VideoRoomActivity，当前: ${this.activity || '(未知)'}`);
+    }
+    let opened = false;
+    for (let i = 0; i < 3 && !opened; i++) {
+      await this.closePopups();
+      if (await this.driver.exists(by.id(ID.chatEntry))) {
+        await this.driver.click(by.id(ID.chatEntry));
+      } else if (await this.driver.exists(by.id(ID.chatEntryBg))) {
+        await this.driver.click(by.id(ID.chatEntryBg));
+      } else {
+        throw new Error('直播间未找到输入入口 tv_input_text / input_view_bg');
+      }
+      opened = await this.driver.waitFor(by.id(ID.chatInput), 3_500, 300);
+      if (!opened) await sleep(300);
+    }
+    if (!opened) throw new Error('无法打开公屏输入框 input_view');
+    await this.driver.click(by.id(ID.chatInput));
+    await sleep(200);
+  }
+
+  protected async hasLiveChatMessage(message: string, timeoutMs = 6_000): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs;
+    const candidates: Locator[] = [
+      by.xpath(
+        `//*[@resource-id='${ID.chatContent}' and contains(@text,${JSON.stringify(message)})]`,
+      ),
+      by.textContains(message),
+    ];
+    while (Date.now() < deadline) {
+      for (const c of candidates) {
+        if (await this.driver.exists(c)) return true;
+      }
+      // 新消息提示条
+      if (await this.driver.exists(by.id(id('tv_new_message')))) {
+        try {
+          await this.driver.click(by.id(id('tv_new_message')));
+          await sleep(400);
+        } catch {
+          // ignore
+        }
+      }
+      await sleep(400);
+    }
+    return false;
+  }
+
+  /**
+   * 观众退出：顶部 img_more → MoreMenu → Exit（tv_exit）。
+   * 顶部/底部都有 img_more，优先点能弹出 Exit 菜单的那一个。
+   */
+  protected async leaveAudienceLiveRoom(): Promise<void> {
+    if (!(await this.isActivity(VIDEO_ROOM_ACTIVITY))) {
+      this.log('已不在直播间，跳过退出');
+      return;
+    }
+
+    const moreButtons = await this.driver.findElements(by.id(ID.closeLive));
+    this.log(`img_more 数量=${moreButtons.length}，尝试打开退出菜单`);
+
+    let menuOpened = false;
+    for (let i = 1; i <= Math.max(moreButtons.length, 1); i++) {
+      const more = by.xpath(`(//*[@resource-id='${ID.closeLive}'])[${i}]`);
+      if (!(await this.driver.exists(more))) continue;
+      try {
+        await this.driver.click(more);
+      } catch {
+        continue;
+      }
+      await sleep(600);
+      if (
+        (await this.driver.exists(by.id(ID.exitRoom))) ||
+        (await this.driver.exists(by.id(ID.exitRoomIcon)))
+      ) {
+        menuOpened = true;
+        break;
+      }
+      // 可能点到房主关播确认或底部工具栏：取消/返回
+      if (await this.driver.exists(by.id(ID.negative))) {
+        await this.driver.click(by.id(ID.negative));
+        await sleep(400);
+      } else {
+        await this.driver.back();
+        await sleep(400);
+      }
+    }
+
+    if (!menuOpened) {
+      // 兜底：系统返回 → 若浮窗权限弹窗出现则点 leave 无效，再试 back
+      this.log('未打开 Exit 菜单，尝试 back 离开');
+      await this.driver.back();
+      await sleep(600);
+      if (await this.driver.exists(by.id(ID.floatLeave))) {
+        // tv_leave 仅关弹窗不退房；有悬浮窗权限时 back 会 finish
+        await this.driver.click(by.id(ID.floatLeave));
+        await sleep(400);
+      }
+    } else {
+      if (await this.driver.exists(by.id(ID.exitRoom))) {
+        await this.driver.click(by.id(ID.exitRoom));
+      } else {
+        await this.driver.click(by.id(ID.exitRoomIcon));
+      }
+      await sleep(1_000);
+    }
+
+    const deadline = Date.now() + 12_000;
+    while (Date.now() < deadline) {
+      if (!(await this.isActivity(VIDEO_ROOM_ACTIVITY))) {
+        this.log('已退出直播间');
+        await this.closePopups();
+        return;
+      }
+      if (await this.driver.exists(by.id(ID.floatLeave))) {
+        await this.driver.click(by.id(ID.floatLeave));
+        await sleep(400);
+      }
+      await sleep(400);
+    }
+    throw new Error(`退出直播间失败，仍在: ${this.activity || '(未知)'}`);
   }
 }
 
