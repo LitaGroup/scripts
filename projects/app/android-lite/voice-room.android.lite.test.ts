@@ -24,6 +24,7 @@
  *   SCRIPT_CONFIG=config.app.json
  *   SCRIPT_DEVICE_UDID=<adb-serial>
  */
+import { hostname } from 'node:os';
 import { AppBaseClass, type AppAccount } from '../../../src/base/AppBaseClass.ts';
 import {
   AppiumResource,
@@ -68,6 +69,10 @@ async function resolveReachableAppiumUrl(): Promise<string> {
   add(process.env.APPIUM_HOST);
   add('http://127.0.0.1:4723/');
   add('http://172.20.1.79:4723/');
+
+  process.stdout.write(
+    `[log] 执行机 hostname=${hostname()} cwd=${process.cwd()} SCRIPT_APPIUM_URL=${process.env.SCRIPT_APPIUM_URL ?? '(未设)'} APPIUM_HOST=${process.env.APPIUM_HOST ?? '(未设)'}\n`,
+  );
 
   const failed: string[] = [];
   for (const u of candidates) {

@@ -17,6 +17,7 @@
  *     SCRIPT_CONFIG=config.app.json \
  *     node projects/app/android-lite/live.android.lite.test.ts
  */
+import { hostname } from 'node:os';
 import { AppBaseClass, type AppAccount } from '../../../src/base/AppBaseClass.ts';
 import {
   AppiumResource,
@@ -29,8 +30,8 @@ import { loginWithPhonePassword, ensureAndroidLoggedIn } from '../core/_lib/andr
 import { resolveAndroidStrings } from '../core/_lib/androidAppStrings.ts';
 
 /**
- * Appium 建连：与 voice-room.android.lite.test.ts 保持一致。
- * 平台可能晚于脚本启动才拉起 Appium，故探测失败时轮询等待，不在模块加载时一锤定音。
+ * Appium 建连：与 voice-room.android.lite.test.ts 完全同一套（勿单独改）。
+ * 注意：127.0.0.1 = 跑 node 的执行机，不是手机。手机相同但执行机不同会导致语音房通、直播不通。
  */
 function normalizeAppiumBase(raw: string): string {
   let u = raw.trim();
@@ -50,45 +51,41 @@ async function probeAppium(url: string): Promise<boolean> {
   }
 }
 
-function appiumCandidates(): string[] {
+async function resolveReachableAppiumUrl(): Promise<string> {
   const seen = new Set<string>();
-  const out: string[] = [];
+  const candidates: string[] = [];
   const add = (raw?: string) => {
     const n = normalizeAppiumBase(raw ?? '');
     if (n && !seen.has(n)) {
       seen.add(n);
-      out.push(n);
+      candidates.push(n);
     }
   };
   add(process.env.SCRIPT_APPIUM_URL);
   add(process.env.APPIUM_URL);
   add(process.env.APPIUM_HOST);
   add('http://127.0.0.1:4723/');
-  return out;
+  add('http://172.20.1.79:4723/');
+
+  process.stdout.write(
+    `[log] 执行机 hostname=${hostname()} cwd=${process.cwd()} SCRIPT_APPIUM_URL=${process.env.SCRIPT_APPIUM_URL ?? '(未设)'} APPIUM_HOST=${process.env.APPIUM_HOST ?? '(未设)'}\n`,
+  );
+
+  const failed: string[] = [];
+  for (const u of candidates) {
+    if (await probeAppium(u)) {
+      process.stdout.write(`[log] Appium 可用: ${u}\n`);
+      return u;
+    }
+    failed.push(u);
+  }
+  process.stdout.write(
+    `[log] Appium 探测失败: ${failed.join(' , ')}（若语音房在同平台刚成功连 127.0.0.1，说明直播任务的 node 不在装 Appium 的那台电脑上——请核对任务的「执行机/Agent」，不是手机）\n`,
+  );
+  return candidates[0] ?? 'http://127.0.0.1:4723/';
 }
 
-/** 轮询直到 Appium 可达（默认最多 90s），与语音房同一探测方式 */
-async function waitForReachableAppiumUrl(timeoutMs = 90_000): Promise<string> {
-  const candidates = appiumCandidates();
-  const fallback = candidates[0] ?? 'http://127.0.0.1:4723/';
-  const deadline = Date.now() + timeoutMs;
-  let attempt = 0;
-  while (Date.now() < deadline) {
-    attempt += 1;
-    for (const u of candidates) {
-      if (await probeAppium(u)) {
-        process.stdout.write(`[log] Appium 可用: ${u}（attempt=${attempt}）\n`);
-        return u;
-      }
-    }
-    process.stdout.write(
-      `[log] Appium 暂不可达（attempt=${attempt}）：${candidates.join(' , ')}，2s 后重试\n`,
-    );
-    await sleep(2_000);
-  }
-  process.stdout.write(`[log] Appium 探测超时，仍将尝试: ${fallback}\n`);
-  return fallback;
-}
+process.env.SCRIPT_APPIUM_URL = await resolveReachableAppiumUrl();
 
 const APP_PACKAGE = 'com.litalite.android';
 const id = (name: string) => `${APP_PACKAGE}:id/${name}`;
@@ -189,18 +186,16 @@ class LiveAndroidLiteTest extends AppBaseClass {
     this.registerLiveStates();
   }
 
-  /** 建连失败则中止；先轮询等待 Appium（对齐语音房可达机） */
+  /** 建连与语音房一致：用模块加载时已探测的 SCRIPT_APPIUM_URL */
   protected async run(): Promise<void> {
     await this.act(`创建 Appium 会话 (${this.platform}/${this.flavor}/${this.env})`, async () => {
-      const url = await waitForReachableAppiumUrl(90_000);
-      process.env.SCRIPT_APPIUM_URL = url;
-      this.log(`Appium: ${url}`);
+      this.log(`Appium: ${process.env.SCRIPT_APPIUM_URL} hostname=${hostname()}`);
       await this.driver.createSession(this.capabilities());
       await this.activateApp();
     });
     if (!this.driver.isActive) {
       throw new Error(
-        'Appium 会话未创建，已中止后续步骤（请确认执行机 Appium 已启动，且与语音房任务跑在同一执行机）',
+        'Appium 会话未创建。127.0.0.1 是跑 node 的电脑，不是手机。请确认直播任务与语音房任务的执行机/Agent 是同一台（装 Appium 的那台）。',
       );
     }
     try {
