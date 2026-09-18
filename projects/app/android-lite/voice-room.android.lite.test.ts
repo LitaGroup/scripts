@@ -14,7 +14,7 @@
  * 说明：本文件为服务端正式环境唯一识别入口，公共能力已内联于此，勿再拆成 helpers。
  *
  * 运行：
- *   SCRIPT_APPIUM_URL=http://127.0.0.1:4723/ SCRIPT_ENV=TEST \
+ *   SCRIPT_APPIUM_URL=http://10.20.0.157:4723/ SCRIPT_ENV=TEST \
  *     node projects/app/android-lite/voice-room.android.lite.test.ts
  *
  * 可选：
@@ -67,6 +67,7 @@ async function resolveReachableAppiumUrl(): Promise<string> {
   add(process.env.SCRIPT_APPIUM_URL);
   add(process.env.APPIUM_URL);
   add(process.env.APPIUM_HOST);
+  add('http://10.20.0.157:4723/');
   add('http://127.0.0.1:4723/');
   add('http://172.20.1.79:4723/');
 
@@ -83,7 +84,7 @@ async function resolveReachableAppiumUrl(): Promise<string> {
     failed.push(u);
   }
   process.stdout.write(`[log] Appium 探测失败: ${failed.join(' , ')}\n`);
-  return candidates[0] ?? 'http://127.0.0.1:4723/';
+  return candidates[0] ?? 'http://10.20.0.157:4723/';
 }
 
 process.env.SCRIPT_APPIUM_URL = await resolveReachableAppiumUrl();
@@ -283,7 +284,7 @@ abstract class VoiceRoomSampleBase extends AppBaseClass {
   /** true=搜到并进入了 preferredRoomNo；false=列表兜底进了其它 Fun 房 */
   protected enteredPreferredRoom = false;
   /** 显式传入已探测地址，避免平台注入的 localhost 走到旧版 AppiumResource */
-  protected override readonly driver = new AppiumResource(process.env.SCRIPT_APPIUM_URL ?? 'http://127.0.0.1:4723/');
+  protected override readonly driver = new AppiumResource(process.env.SCRIPT_APPIUM_URL ?? 'http://10.20.0.157:4723/');
 
   constructor(caseTotal: number) {
     super('android', 'lite');

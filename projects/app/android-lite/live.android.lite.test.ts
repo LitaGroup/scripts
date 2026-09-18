@@ -13,7 +13,7 @@
  *   4. 进入直播间后右上角关播（img_more）→ 确认结束
  *
  * 运行：
- *   SCRIPT_APPIUM_URL=http://127.0.0.1:4723/ SCRIPT_ENV=TEST \
+ *   SCRIPT_APPIUM_URL=http://10.20.0.157:4723/ SCRIPT_ENV=TEST \
  *     SCRIPT_CONFIG=config.app.json \
  *     node projects/app/android-lite/live.android.lite.test.ts
  */
@@ -64,6 +64,7 @@ async function resolveReachableAppiumUrl(): Promise<string> {
   add(process.env.SCRIPT_APPIUM_URL);
   add(process.env.APPIUM_URL);
   add(process.env.APPIUM_HOST);
+  add('http://10.20.0.157:4723/');
   add('http://127.0.0.1:4723/');
   add('http://172.20.1.79:4723/');
 
@@ -82,7 +83,7 @@ async function resolveReachableAppiumUrl(): Promise<string> {
   process.stdout.write(
     `[log] Appium 探测失败: ${failed.join(' , ')}（若语音房在同平台刚成功连 127.0.0.1，说明直播任务的 node 不在装 Appium 的那台电脑上——请核对任务的「执行机/Agent」，不是手机）\n`,
   );
-  return candidates[0] ?? 'http://127.0.0.1:4723/';
+  return candidates[0] ?? 'http://10.20.0.157:4723/';
 }
 
 process.env.SCRIPT_APPIUM_URL = await resolveReachableAppiumUrl();
@@ -176,7 +177,7 @@ const RUNTIME_PERMISSIONS = [
 class LiveAndroidLiteTest extends AppBaseClass {
   /** 与语音房一致：显式传入地址；真正建连前再 waitForReachableAppiumUrl 刷新 env */
   protected override readonly driver = new AppiumResource(
-    process.env.SCRIPT_APPIUM_URL ?? 'http://127.0.0.1:4723/',
+    process.env.SCRIPT_APPIUM_URL ?? 'http://10.20.0.157:4723/',
   );
 
   constructor() {
