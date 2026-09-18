@@ -1,19 +1,16 @@
 /**
- * 直播冒烟（Android / Lite）— 开播 → 房内发消息 → 送礼 → 关播
+ * 直播冒烟（Android / Lite）— 开播发消息 → 关播 → 列表进他人房送礼
  *
  * 前置：
  *   1. Lita 账号已登录（脚本会 ensure 登录），当前在一级页面
  *   2. 账号具备开播资格（Live 页右上角 startLiveIV 可见）
  *   3. 权限弹窗一律允许（autoGrant + LivePermissionDialog「全部打开」+ 系统 Allow）
- *   4. 送礼：账号金币余额充足；房内需有其他可收礼用户（连麦用户；房主不能给自己送礼）
+ *   4. 送礼：账号金币余额充足；从 Live 列表进他人房给主播送（不在自己房送礼；列表为空则跳过）
  *
  * 步骤：
- *   1. 底部语音房 → Live Tab → 点右上角开播
- *   2. 选择直播间页：点「个人直播间」下封面
- *   3. 开播编辑页：点「相机」Tab →「开始直播」
- *   4. 进入自己的直播间后：点输入框 → 输入 → 发送 → 公屏回显
- *   5. 点右下角礼物 → 选可负担礼物 → 送礼 → 公屏展示送礼信息
- *   6. 右上角关播（img_more）→ 确认结束
+ *   1. 底部语音房 → Live Tab → 开播 → 选房 → 相机 → 开始直播
+ *   2. 自己的直播间内发公屏消息并回显 → 关播
+ *   3. 回到 Live 列表：有直播间则随机进入免密房，给主播送礼；列表为空则跳过送礼
  *
  * 运行：
  *   SCRIPT_APPIUM_URL=http://127.0.0.1:4723/ SCRIPT_ENV=TEST \
@@ -150,10 +147,18 @@ const ID = {
   startLive: id('startLiveIV'),
   searchEntry: id('img_search_room'),
   partyTitleArea: id('partyTitleAllView'),
+  /** Live 列表 */
+  roomList: id('roomListRecyclerView'),
+  liveCover: id('liveCoverView'),
+  roomListEmpty: id('roomListEmptyView'),
 
   // LivePermissionDialog
   openAllPermission: id('tv_open_all_permission'),
   permissionDialogClose: id('iv_close'),
+
+  // EnterPasswordDialog
+  passwordField: id('password'),
+  passwordClose: id('img_close'),
 
   // LiveChooseRoomActivity — 个人直播间封面在 gameListView
   myRoomList: id('gameListView'),
@@ -172,11 +177,14 @@ const ID = {
   startLiveBtn: id('tv_start_live'),
   editClose: id('img_close'),
 
-  // VideoRoomTopFragment — 房主时 img_more = 关播
+  // VideoRoomTopFragment — 房主时 img_more = 关播；观众时 More 菜单
   closeLive: id('img_more'),
   roomName: id('roomNameTv'),
   roomId: id('roomIdTv'),
   liveTime: id('liveTimeTv'),
+  exitRoom: id('tv_exit'),
+  exitRoomIcon: id('img_exit'),
+  floatLeave: id('tv_leave'),
 
   // VideoRoomBottomFragment — 公屏
   chatEntry: id('tv_input_text'),
@@ -237,7 +245,7 @@ class LiveAndroidLiteTest extends AppBaseClass {
   /** 进房后发送的公屏文案（唯一，便于回显校验） */
   protected readonly chatMessage = `live-msg-${Date.now().toString().slice(-6)}`;
 
-  /** 送礼结果：opened / sent / empty-receiver / insufficient */
+  /** 送礼结果：opened / sent / empty-list / empty-receiver / insufficient */
   protected giftResult: string = '';
 
   /** 选中的礼物名（用于公屏校验） */
@@ -245,8 +253,8 @@ class LiveAndroidLiteTest extends AppBaseClass {
 
   constructor() {
     super('android', 'lite');
-    // 登录 → Live → 开播 → 发消息 → 送礼 → 关播
-    this.total = 19;
+    // 登录 → 开播发消息关播 → 列表进他人房送礼
+    this.total = 22;
     this.registerLiveStates();
   }
 
@@ -512,80 +520,8 @@ class LiveAndroidLiteTest extends AppBaseClass {
       };
     });
 
-    // ---------- 直播间送礼 ----------
-    await this.act('点击右下角礼物 icon，调起礼物架', async () => {
-      // 先收起公屏输入，避免挡住礼物入口
-      await this.dismissLiveChatInput();
-      this.giftResult = await this.openLiveGiftPanel();
-      this.log(`礼物面板: ${this.giftResult}`);
-      if (this.giftResult === 'empty-receiver') {
-        this.skip('无可收礼用户（房主不能给自己送礼，需连麦其他用户）');
-      }
-    });
-
-    await this.check('礼物架面板已打开', async () => {
-      if (this.giftResult === 'empty-receiver') {
-        this.skip('无可收礼用户');
-      }
-      const opened =
-        (await this.driver.exists(by.id(ID.giftSend))) ||
-        (await this.driver.exists(by.id(ID.giftRoot)));
-      return {
-        expect: '礼物架面板可见（Send 或 root）',
-        real: opened ? '已打开' : '未打开',
-        pass: opened,
-      };
-    });
-
-    await this.act('选择价格 ≤ 账户余额的礼物', async () => {
-      if (this.giftResult === 'empty-receiver') this.skip('无可收礼用户');
-      await this.selectAffordableLiveGift();
-    });
-
-    await this.act('点击送礼按钮', async () => {
-      if (this.giftResult === 'empty-receiver') this.skip('无可收礼用户');
-      await this.selectLiveGiftRecipient();
-      this.giftResult = await this.clickLiveGiftSend();
-      this.log(`送礼结果: ${this.giftResult}`);
-    });
-
-    await this.check('可以送礼成功', async () => {
-      if (this.giftResult === 'empty-receiver') this.skip('无可收礼用户');
-      if (this.giftResult === 'insufficient') {
-        return {
-          expect: '送礼成功（连击/面板关闭）',
-          real: '余额不足或触发充值',
-          pass: false,
-        };
-      }
-      const ok = await this.assertLiveGiftSent();
-      return {
-        expect: '送礼成功（连击/面板关闭）',
-        real: ok ? '成功' : '未检测到成功迹象',
-        pass: ok,
-      };
-    });
-
-    await this.check('直播间消息列表展示该送礼信息', async () => {
-      if (this.giftResult === 'empty-receiver') this.skip('无可收礼用户');
-      if (this.giftResult === 'insufficient') {
-        return {
-          expect: '公屏出现送礼消息',
-          real: '未送礼成功，跳过公屏校验',
-          pass: false,
-        };
-      }
-      const found = await this.hasLiveGiftMessage(8_000);
-      return {
-        expect: '公屏出现送礼消息（Sent / 礼物名）',
-        real: found ? '已找到' : '未找到送礼消息',
-        pass: found,
-      };
-    });
-
-    // ---------- 关播 ----------
+    // ---------- 关播（离开自己的直播间） ----------
     await this.act('点击关播并确认结束直播', async () => {
-      await this.dismissLiveGiftPanel();
       await this.dismissLiveChatInput();
       await this.waitForElement(by.id(ID.closeLive), '关播按钮 img_more', 8_000);
       await this.driver.click(by.id(ID.closeLive));
@@ -626,7 +562,6 @@ class LiveAndroidLiteTest extends AppBaseClass {
       const leaveDeadline = Date.now() + 12_000;
       while (Date.now() < leaveDeadline) {
         if (!(await this.isActivity(VIDEO_ROOM_ACTIVITY))) return;
-        // 结算页仍在时再点一次返回
         if (await this.driver.exists(by.id(ID.finishReturn))) {
           await this.driver.click(by.id(ID.finishReturn));
           await sleep(800);
@@ -643,6 +578,128 @@ class LiveAndroidLiteTest extends AppBaseClass {
         real: this.activity || '(未知)',
         pass: !stillLive,
       };
+    });
+
+    // ---------- 从 Live 列表进他人房，给主播送礼（列表空则跳过） ----------
+    await this.act('检查 Live 列表并随机进入他人直播间', async () => {
+      if (!(await this.driver.exists(by.id(ID.startLive))) && !(await this.driver.exists(by.id(ID.roomList)))) {
+        await this.openVoiceRoomLiveTab();
+      } else {
+        await this.ensureLiveSubTab();
+        await sleep(500);
+      }
+
+      const coverCount = await this.countLiveListCovers(12_000);
+      this.log(`Live 列表直播间数量: ${coverCount}`);
+      if (coverCount <= 0) {
+        this.giftResult = 'empty-list';
+        this.skip('直播间列表为空，跳过送礼');
+      }
+      await this.enterRandomUnlockedLiveFromList();
+    });
+
+    await this.check('已进入他人直播间', async () => {
+      if (this.giftResult === 'empty-list') this.skip('直播间列表为空');
+      const deadline = Date.now() + 12_000;
+      let inRoom = false;
+      let chatReady = false;
+      while (Date.now() < deadline) {
+        await this.closePopups();
+        inRoom = await this.isActivity(VIDEO_ROOM_ACTIVITY);
+        if (
+          (await this.driver.exists(by.id(ID.chatEntry))) ||
+          (await this.driver.exists(by.id(ID.chatEntryBg))) ||
+          (await this.driver.exists(by.id(ID.roomName)))
+        ) {
+          chatReady = true;
+        }
+        if (inRoom && chatReady) break;
+        await sleep(400);
+      }
+      return {
+        expect: 'VideoRoomActivity（他人直播间）',
+        real: `inRoom=${inRoom} chatReady=${chatReady}`,
+        pass: !!(inRoom && chatReady),
+      };
+    });
+
+    await this.act('点击右下角礼物 icon，调起礼物架', async () => {
+      if (this.giftResult === 'empty-list') this.skip('直播间列表为空');
+      await this.dismissLiveChatInput();
+      this.giftResult = await this.openLiveGiftPanel();
+      this.log(`礼物面板: ${this.giftResult}`);
+      if (this.giftResult === 'empty-receiver') {
+        this.skip('无可收礼主播');
+      }
+    });
+
+    await this.check('礼物架面板已打开', async () => {
+      if (this.giftResult === 'empty-list') this.skip('直播间列表为空');
+      if (this.giftResult === 'empty-receiver') this.skip('无可收礼主播');
+      const opened =
+        (await this.driver.exists(by.id(ID.giftSend))) ||
+        (await this.driver.exists(by.id(ID.giftRoot)));
+      return {
+        expect: '礼物架面板可见（Send 或 root）',
+        real: opened ? '已打开' : '未打开',
+        pass: opened,
+      };
+    });
+
+    await this.act('选择价格 ≤ 账户余额的礼物', async () => {
+      if (this.giftResult === 'empty-list') this.skip('直播间列表为空');
+      if (this.giftResult === 'empty-receiver') this.skip('无可收礼主播');
+      await this.selectAffordableLiveGift();
+    });
+
+    await this.act('点击送礼按钮给主播送礼', async () => {
+      if (this.giftResult === 'empty-list') this.skip('直播间列表为空');
+      if (this.giftResult === 'empty-receiver') this.skip('无可收礼主播');
+      await this.selectLiveGiftRecipient();
+      this.giftResult = await this.clickLiveGiftSend();
+      this.log(`送礼结果: ${this.giftResult}`);
+    });
+
+    await this.check('可以送礼成功', async () => {
+      if (this.giftResult === 'empty-list') this.skip('直播间列表为空');
+      if (this.giftResult === 'empty-receiver') this.skip('无可收礼主播');
+      if (this.giftResult === 'insufficient') {
+        return {
+          expect: '送礼成功（连击/面板关闭）',
+          real: '余额不足或触发充值',
+          pass: false,
+        };
+      }
+      const ok = await this.assertLiveGiftSent();
+      return {
+        expect: '送礼成功（连击/面板关闭）',
+        real: ok ? '成功' : '未检测到成功迹象',
+        pass: ok,
+      };
+    });
+
+    await this.check('直播间消息列表展示该送礼信息', async () => {
+      if (this.giftResult === 'empty-list') this.skip('直播间列表为空');
+      if (this.giftResult === 'empty-receiver') this.skip('无可收礼主播');
+      if (this.giftResult === 'insufficient') {
+        return {
+          expect: '公屏出现送礼消息',
+          real: '未送礼成功，跳过公屏校验',
+          pass: false,
+        };
+      }
+      const found = await this.hasLiveGiftMessage(8_000);
+      return {
+        expect: '公屏出现送礼消息（Sent / 礼物名）',
+        real: found ? '已找到' : '未找到送礼消息',
+        pass: found,
+      };
+    });
+
+    await this.act('退出他人直播间', async () => {
+      if (this.giftResult === 'empty-list') this.skip('直播间列表为空');
+      await this.dismissLiveGiftPanel();
+      await this.leaveAudienceLiveRoom();
     });
   }
 
@@ -853,6 +910,199 @@ class LiveAndroidLiteTest extends AppBaseClass {
       throw new Error('直播品类页未找到可选品类');
     }
     await sleep(800);
+  }
+
+  /** 等待 Live 列表并返回封面数量（0 = 空） */
+  protected async countLiveListCovers(timeoutMs = 12_000): Promise<number> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      await this.closePopups();
+      await this.ensureLiveSubTab();
+      if (await this.driver.exists(by.id(ID.roomListEmpty))) {
+        const covers = (await this.driver.findElements(by.id(ID.liveCover))).length;
+        if (covers <= 0) return 0;
+      }
+      const covers = (await this.driver.findElements(by.id(ID.liveCover))).length;
+      if (covers > 0) return covers;
+      if (await this.driver.exists(by.id(ID.roomList))) {
+        // 列表已出但仍无封面，再等一会
+      }
+      await sleep(400);
+    }
+    return (await this.driver.findElements(by.id(ID.liveCover))).length;
+  }
+
+  protected async isPasswordDialogVisible(): Promise<boolean> {
+    if (await this.driver.exists(by.id(ID.passwordField))) return true;
+    const titles = await resolveAndroidStrings(this, ['chat_room_private_room4']);
+    for (const t of titles) {
+      if (t && (await this.driver.exists(by.textContains(t.slice(0, Math.min(16, t.length)))))) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  protected async dismissPasswordDialog(): Promise<void> {
+    const closeNearPassword = by.xpath(
+      `//*[@resource-id='${ID.passwordField}']/..//*[@resource-id='${ID.passwordClose}']`,
+    );
+    if (await this.driver.exists(closeNearPassword)) {
+      await this.driver.click(closeNearPassword);
+    } else if (await this.driver.exists(by.id(ID.passwordClose))) {
+      await this.driver.click(by.id(ID.passwordClose));
+    } else {
+      await this.driver.back();
+    }
+    await sleep(600);
+  }
+
+  /** 从 Live 列表随机点免密直播间进入（给主播送礼用，不进自己刚关的房依赖列表刷新） */
+  protected async enterRandomUnlockedLiveFromList(maxAttempts = 8): Promise<void> {
+    await this.waitForElement(by.id(ID.roomList), '直播间列表 roomListRecyclerView', 12_000);
+
+    let lastError: Error | null = null;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      await this.closePopups();
+      if (await this.isActivity(VIDEO_ROOM_ACTIVITY)) {
+        this.log('已在直播间');
+        return;
+      }
+
+      let covers = await this.driver.findElements(by.id(ID.liveCover));
+      if (covers.length <= 0) {
+        if (await this.driver.exists(by.id(ID.roomList))) {
+          await this.driver.swipeInElement(by.id(ID.roomList), 'up');
+          await sleep(800);
+        }
+        covers = await this.driver.findElements(by.id(ID.liveCover));
+      }
+      if (covers.length <= 0) {
+        lastError = new Error('Live 列表无直播间');
+        continue;
+      }
+
+      const index = 1 + Math.floor(Math.random() * covers.length);
+      const cover = by.xpath(`(//*[@resource-id='${ID.liveCover}'])[${index}]`);
+      this.log(`随机进房 attempt=${attempt}/${maxAttempts} cover=${index}/${covers.length}`);
+      try {
+        await this.driver.click(cover);
+      } catch (e) {
+        lastError = e instanceof Error ? e : new Error(String(e));
+        continue;
+      }
+      await sleep(1_200);
+
+      if (await this.isPasswordDialogVisible()) {
+        this.log('该房需密码，关闭后换下一个');
+        await this.dismissPasswordDialog();
+        lastError = new Error('点到加密房');
+        continue;
+      }
+
+      const entered = await this.waitEnteredOtherLiveRoom(18_000);
+      if (entered) {
+        this.log('已随机进入他人直播间');
+        return;
+      }
+      if (await this.isPasswordDialogVisible()) {
+        await this.dismissPasswordDialog();
+        lastError = new Error('进房弹出密码框');
+        continue;
+      }
+      lastError = new Error(`未进入 VideoRoomActivity，当前: ${this.activity || '(未知)'}`);
+    }
+    throw lastError ?? new Error('未能进入他人直播间');
+  }
+
+  protected async waitEnteredOtherLiveRoom(timeoutMs: number): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      await this.closePopups();
+      if (await this.isPasswordDialogVisible()) return false;
+      if (await this.isActivity(VIDEO_ROOM_ACTIVITY)) {
+        if (
+          (await this.driver.exists(by.id(ID.chatEntry))) ||
+          (await this.driver.exists(by.id(ID.chatEntryBg))) ||
+          (await this.driver.exists(by.id(ID.roomName)))
+        ) {
+          return true;
+        }
+      }
+      await sleep(400);
+    }
+    return await this.isActivity(VIDEO_ROOM_ACTIVITY);
+  }
+
+  /**
+   * 观众退出：顶部 img_more → MoreMenu → Exit。
+   * 顶部/底部都有 img_more，优先点能弹出 Exit 的那个。
+   */
+  protected async leaveAudienceLiveRoom(): Promise<void> {
+    if (!(await this.isActivity(VIDEO_ROOM_ACTIVITY))) {
+      this.log('已不在直播间，跳过退出');
+      return;
+    }
+
+    const moreButtons = await this.driver.findElements(by.id(ID.closeLive));
+    this.log(`img_more 数量=${moreButtons.length}，尝试打开退出菜单`);
+
+    let menuOpened = false;
+    for (let i = 1; i <= Math.max(moreButtons.length, 1); i++) {
+      const more = by.xpath(`(//*[@resource-id='${ID.closeLive}'])[${i}]`);
+      if (!(await this.driver.exists(more))) continue;
+      try {
+        await this.driver.click(more);
+      } catch {
+        continue;
+      }
+      await sleep(600);
+      if (
+        (await this.driver.exists(by.id(ID.exitRoom))) ||
+        (await this.driver.exists(by.id(ID.exitRoomIcon)))
+      ) {
+        menuOpened = true;
+        break;
+      }
+      if (await this.driver.exists(by.id(ID.negative))) {
+        await this.driver.click(by.id(ID.negative));
+        await sleep(400);
+      } else {
+        await this.driver.back();
+        await sleep(400);
+      }
+    }
+
+    if (!menuOpened) {
+      this.log('未打开 Exit 菜单，尝试 back 离开');
+      await this.driver.back();
+      await sleep(600);
+      if (await this.driver.exists(by.id(ID.floatLeave))) {
+        await this.driver.click(by.id(ID.floatLeave));
+        await sleep(400);
+      }
+    } else if (await this.driver.exists(by.id(ID.exitRoom))) {
+      await this.driver.click(by.id(ID.exitRoom));
+      await sleep(1_000);
+    } else {
+      await this.driver.click(by.id(ID.exitRoomIcon));
+      await sleep(1_000);
+    }
+
+    const deadline = Date.now() + 12_000;
+    while (Date.now() < deadline) {
+      if (!(await this.isActivity(VIDEO_ROOM_ACTIVITY))) {
+        this.log('已退出他人直播间');
+        await this.closePopups();
+        return;
+      }
+      if (await this.driver.exists(by.id(ID.floatLeave))) {
+        await this.driver.click(by.id(ID.floatLeave));
+        await sleep(400);
+      }
+      await sleep(400);
+    }
+    throw new Error(`退出直播间失败，仍在: ${this.activity || '(未知)'}`);
   }
 
   /** 打开直播间公屏输入框（tv_input_text / input_view_bg → input_view） */
