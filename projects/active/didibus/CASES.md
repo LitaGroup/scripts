@@ -1,6 +1,6 @@
 # 滴滴巴士·探险之旅（didibus-v202609）测试大纲
 
-> 来源文档：技术设计 `documents/26.md`（**v1.9.0**，2026-09-17）、接口文档 `documents/29.md`（**v1.4.0**）、活动配置 `documents/27`（didibus-v202609.yaml，2026-09-16）、奖励配置表 `documents/33`（2026-09-16）、活动礼物配置 `documents/34`（2026-09-16）、需求澄清 `documents/35`（2026-09-16）、初始化 SQL `documents/28`（init.sql，2026-09-16 版）——均来自 <http://project.cinta.team/projects/70>
+> 来源文档：技术设计 `documents/26.md`（**v1.12.0**，2026-09-18）、接口文档 `documents/29.md`（**v1.10.0**，2026-09-18）、活动配置 `documents/27`（didibus-v202609.yaml，2026-09-17）、奖励配置表 `documents/33`（2026-09-20）、活动礼物配置 `documents/34`（2026-09-20）、需求澄清 `documents/35`（2026-09-16）、初始化 SQL `documents/28`（init.sql，2026-09-17 版）——均来自 <http://project.cinta.team/projects/70>
 > 测试环境：test（`TestBaseClass`，API 直连 + MySQL 直连读写 + Redis 直连）
 > 送礼通过 `POST active/v3/__consumer/funbit.gift_send` 模拟；结算通过 `POST active/v3/__cron`（可指定 time）手动触发。
 
@@ -18,11 +18,16 @@
 - 榜单：送礼总榜+日榜（单实例 gift-send：mainRound+timeRound，**日榜 Top3 自动发奖**，2026-09-16 配置表 topN 6→3）、收礼总榜 gift-recv（Top3 + 贡献 Top1）；`/m/{topic}/rank` 响应含 `round`/`rankResult`/`my`/`myAll`
 - 礼物与榜单加成（**2026-09-16 需求澄清 + 配置表，v1.9.0**）：`gifts` 白名单 12 礼物，**全部白名单礼物赠送时均计榜**（送/收总榜+日榜），计分 = 礼物价值 × buff（1金币/钻石=1积分）；三档：礼物架普通礼物 10797~10801 buff **1.0**（**唯一发探索券**，进 `/gifts` 清单+超发风控 income）、奖池背包礼物 10794/10795/10796 buff **1.1**、探索点背包礼物 10789/10791/10792/10793 buff **1.3**；背包礼物**仅计榜不发券、不登记风控**；探索越点发奖仅入背包、不直接加分（004#16 按此口径断言，见问题 #17）
 - 轮播（接口 v1.3.0）：条目 `{playerId, nickname, avatar, mileage}`（昵称/头像读取时实时填充），内容=本次抽奖合计里程、仅 totalMileage>0 写入；Redis List 最近 20 条，按 locale 隔离
+- 抽奖记录与合并奖励（接口 v1.6.0 / v1.9.0 / v1.10.0）：
+  - `/records`（v1.6.0）：lucky-gift 批次记录 + `createTime` + 本次里程 `mileage`（Active 层按同一次 /draw 的 createTime 合并 lucky-mileage 批次，无匹配/查询失败降级 0）；条目含 `awards`（= 模块层 mergedAwards，v1.10.0）
+  - `DrawResponse` 新增 `createTime`（draw/records/result 均返回）与 `mergedAwards`（按 award_type+award_id 合并：个数类求和 count、时长类求和 expire，prob=null）；`/draw` 响应新增 `awards` = `luckyGift.mergedAwards`
+  - `/m/lucky-{gift,mileage}/records` 请求新增可选 `createTimes`（create_time IN 批量过滤，非空时忽略游标、more=false）
+- `/debug`（接口 v1.8.0）：返回活动开始/结束时间（按请求者大区解析的毫秒时间戳 + ISO-8601 文本）
 - 结算：日榜每日 ko/ph/in+vi 三时区 00:05 各触发一次（+5min 延迟、状态位幂等）；总榜活动结束次日同理
 - `/detail` 聚合五块：`account`（accounts[].name="DIDIBUS-MILEAGE"、mine=余额）/ `bus`（v1.2.0 起含 remaining）/ `luckyGift` / `dailyTop1` / `marquee`；内部走 `detail` 管道（`/p/detail` 可独立调用，v1.6.0）
-- `/gifts`（接口 v1.3.0 新增）：仅返回 ticketGifts 礼物清单（多语言名称/图片/价格/type coin|diamond/buff，按价格升序）；`/m/lucky-{gift,mileage}/records` 改游标分页（请求 `last`，响应 `{records, more, last, size}`）
+- `/gifts`（接口 v1.3.0 新增）：仅返回 ticketGifts 礼物清单（多语言名称/图片/价格/type coin|diamond/buff，按价格升序）；`albumGifts`（v1.5.0 新增，v1.7.0 补 unitNum/unit 有效期）：图鉴礼物展示（来源 mod_common_award name=album_award，N-S-HEADBOX 4381，type 去 N-S- 前缀归一，仅展示不参与计榜/发券/风控，查询失败降级空列表）；`/m/lucky-{gift,mileage}/records` 改游标分页（请求 `last`，响应 `{records, more, last, size}`）
 - 账户接口：`/m/account/detail`（accounts[]，type 字段废弃）、`/m/account/records`（name 必填="DIDIBUS-MILEAGE"，返回 type=INCREASE/DECREASE、amount 带符号、totalAmount）
-- 图鉴奖励（ALBUM_AWARD，N-S-HEADBOX 4381）：**本期未实现**，仅 init.sql 数据占位（2026-09-16 配置表新增）
+- 图鉴奖励（ALBUM_AWARD，N-S-HEADBOX 4381）：图鉴收集/发放逻辑**本期未实现**；init.sql 2026-09-17 版起有 `album_award` 占位数据，接口 v1.5.0 起 `/gifts` 以 `albumGifts` 返回展示（名称/图片大区本地化，type 归一 HEADBOX）
 
 ## 公共层计划（写用例前先落地）
 
@@ -64,11 +69,13 @@
 | 步骤 | 类型 | 校验点 |
 |---|---|---|
 | 调用 `/didibus-v202609/config`（T_PRE） | check | 返回开始/结束时间（09-24 14:00 ~ 10-02 23:59:59）、enableLocales 含 in/vi/ph/ko |
+| 调用 `/debug`（T_PRE，接口 v1.8.0） | check | 返回按大区解析的 startTime/finishTime（与 /config 一致）+ ISO-8601 文本 |
 | 查 `mod_account` | check | 存在 name=`DIDIBUS-MILEAGE`（id=901）记录，4 大区 locale_config 齐全 |
 | 查 `mod_common_event` | check | 存在 name=`DIDIBUS_MILEAGE`（里程 EVENT，award_id 引用其 id=901） |
 | 查 `mod_common_award` 里程条目 ×2 | check | `bus.mileage.normal` / `bus.mileage.flying` 各自：stage=0、award_type=EVENT、mod=VIEW、权重和=1.0（100% 必得）；normal 8 档、flying 9 档（档位动态读取） |
 | 查 `mod_common_award` 奖池 | check | `bus.normal`（5 条）/ `bus.flying`（6 条）（lucky-gift 奖池）均有条目，权重和 ≤ baseTotal(1.0)（差值=未中奖） |
 | 查 `mod_common_award` 探索点奖励 | check | 每个地图 awardName（bus.map-N）× 每个 stage 均有 ≥1 条 GIFT/道具 |
+| 查 `mod_common_award` 图鉴奖励 | check | `album_award` 存在（N-S-HEADBOX 4381，init.sql 2026-09-17 版新增；/gifts albumGifts 展示用，无发放链路） |
 | 查 `mod_common_award` 每日进入/榜单奖励 | check | `daily-entry`（ACCOUNT，award_id=901→mod_account.id，count=10）；`gift-send-total` stage=1~3；`gift-send-daily` stage=1~3（topN 6→3）；`gift-recv` stage=1~3；`gift-recv-contributor` stage=1~3 |
 
 ### 002-enter —— 每日进入发券
@@ -114,6 +121,8 @@
 | 探索点发奖 | check | 累计里程越过 stage=10/30… 时 `crossed` 非空；`mod_bus_user_award` 有账本；对应奖励入 `gift_award_queue` |
 | 探索获得礼物仅入背包 | check | 抽奖/探索发奖后 A 的送礼/收礼总榜**无变化**（buff 倍率在赠送环节计入，见 003；需求口径 2026-09-16 需求澄清，见问题 #17） |
 | 轮播 | check | `/marquee` 最新 1 条为本次抽奖里程记录（{playerId, mileage=totalMileage}） |
+| 抽奖响应新字段（接口 v1.9.0） | check | `draw.awards` = `luckyGift.mergedAwards`（按 award_type+award_id 合并，未中奖为空数组）；lucky-gift/lucky-mileage 两批 `createTime` 一致且 = DB create_time |
+| `/records` 抽奖记录（接口 v1.6.0/v1.10.0） | check | 批次条目含 `createTime`/`mileage`/`awards`；`mileage` = 对应 /draw 的 totalMileage（Active 层按 createTime 合并 lucky-mileage），`awards` 与 /draw 响应一致 |
 
 ### 005-draw-boundary —— 抽奖边界与异常
 
@@ -148,6 +157,7 @@
 | 大区隔离 | check | in 与 vi 数据互不可见（Redis key 含 locale） |
 | `/detail` 聚合 | check | 返回 account+bus+luckyGift+dailyTop1+marquee 五块齐全，bus.detail 含 remaining（v1.2.0） |
 | `/gifts` 礼物清单 | check | 仅 ticketGifts 5 个礼物架礼物（10797~10801）、价格升序、type 含 coin/diamond（10801=钻石）、buff=1.0；背包礼物不返回 |
+| `/gifts` 图鉴礼物（接口 v1.5.0/v1.7.0） | check | `albumGifts` 含 awardId=4381、type=HEADBOX（去 N-S- 前缀）、unitNum/unit 非空（仅展示） |
 
 ### 008-marquee —— 轮播记录
 
@@ -237,3 +247,15 @@
     - 奖池全量替换：里程 normal 8 档 / flying 9 档（权重和各=1.0）；道具池 bus.normal 5 条 0.9065 / bus.flying 6 条 0.874；地图合并为**单张 map-1**（探索点 lv1~lv6，距离为占位值待策划确认）
     - 接口文档 v1.3.0/v1.4.0：新增 `/gifts`（仅普通礼物）；`/m/lucky-{gift,mileage}/records` 游标分页（`minId`→`last`，响应 `{records,more,last,size}`）；marquee 条目改 `{playerId,nickname,avatar,mileage}`；`/m/bus/detail` 新增 `remaining`；新增 `/p/detail` 管道
     - ⚠️ **待与开发确认**：技术设计 v1.9.0 §3.3 代码仍保留 `applyRankBuff`（探索越点把 buff 直接加到两总榜，transNo=null），与需求澄清「全部礼物按 buff 计榜（赠送时）」矛盾（§10.3 数据流图无此步、决策3 称已落地为赠送计分）——004#16 按需求澄清口径断言「探索不影响榜单」，复跑若发现探索直接加分则报 BUG
+18. **【v1.10.0 接口 / v1.12.0 设计同步】2026-09-18 文档更新**（本次已同步用例，接口基线 v1.4.0 → v1.10.0、设计 v1.9.0 → v1.12.0）：
+    - 新增 `/records`（v1.6.0：lucky-gift 批次 + createTime + Active 层合并 mileage；v1.10.0 条目补 awards）→ DidibusService.records()，004 新增断言
+    - `DrawResponse` 新增 `createTime` + `mergedAwards`；`/draw` 响应新增 `awards`（= luckyGift.mergedAwards，v1.9.0/v1.12.0）→ 004 新增断言
+    - `/gifts` 新增 `albumGifts`（v1.5.0；v1.7.0 补 unitNum/unit）→ DidibusService.gifts() 返回结构改为 `{gifts, albumGifts}`，007 新增断言
+    - 新增 `/debug`（v1.8.0：按大区解析的开始/结束时间）→ DidibusService.debug()，001 新增断言
+    - init.sql 2026-09-17 版新增 `album_award`（N-S-HEADBOX 4381）占位 → 001 新增预置校验（测试环境需重灌该版 init.sql）；贡献者奖励改 MICBOX 14589+HEADBOX 4370 —— 010 按 mod_common_award 动态读取，无需改
+    - 接口路径别名 `didibus`（v1.6.1，等价 biz didibus-v202609）——脚本仍用全 biz 路径，等价无需改
+19. **【测试环境配置/数据与文档不符】2026-09-21 按 v1.10.0 文档复跑 001 发现**（待与开发确认是否重灌测试环境，脚本断言按文档口径未改）：
+    - Nacos 活动开始时间实测 **2026-09-19 14:00**（/config 与 /debug 一致），文档（documents/27 yaml）= 2026-09-23 14:00；连带总榜轮次开始、日榜/任务轮次变为 **14 条**（09-19~10-02，文档口径 10 条）→ 001#1/#2/#14/#15/#16 fail
+    - 里程池数据混杂新旧档位（normal 档位=[1,1,1,1,1,2,2,2,5,8,15,30,200] 13 条、权重和 1.0275；flying 15 条、1.0095），`bus.normal`/`bus.flying` 道具池 **0 条** → 001#5~#8 fail，init.sql 2026-09-17 版未（完整）重灌
+    - `daily-entry` award_count 实测 **5**（文档=10）；`album_award` 已存在但 award_type=HEADBOX（init.sql 写 N-S-HEADBOX、配置表 09-20 写 HEADBOX——文档间不一致，001#12 已兼容两种写法）
+    - 贡献者奖励实测已是 MICBOX 14589/ADD（与 init.sql 09-17 版一致）

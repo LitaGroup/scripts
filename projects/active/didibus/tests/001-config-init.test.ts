@@ -17,6 +17,7 @@ import {
   AWARD_SEND_DAILY,
   AWARD_RECV,
   AWARD_RECV_CONTRIBUTOR,
+  ALBUM_AWARD,
   TOPIC_SEND,
   TOPIC_RECV,
 } from './_lib/constants.ts';
@@ -50,7 +51,7 @@ class ConfigInit001 extends TestBaseClass {
 
   constructor() {
     super();
-    this.total = 18;
+    this.total = 20;
   }
 
   protected async run(): Promise<void> {
@@ -64,6 +65,19 @@ class ConfigInit001 extends TestBaseClass {
         expect: `start=${EXPECT_START_MS}, finish=${EXPECT_FINISH_MS}, locales 含 ${LOCALES.join('/')}`,
         real: `start=${start}, finish=${finish}, locales=${locales.join(',')}`,
         pass: start === EXPECT_START_MS && finish === EXPECT_FINISH_MS && localesOk,
+      };
+    });
+
+    await this.check('/debug 调试接口（接口 v1.8.0）：返回按大区解析的开始/结束时间，与 /config 一致', async (): Promise<CheckResult> => {
+      const d = await this.didibus.debug(USER_A, LOCALE, localIso(LOCALE, T_PRE));
+      const start = int(d.startTime);
+      const finish = int(d.finishTime);
+      const textOk = typeof d.startTimeText === 'string' && d.startTimeText.includes('2026-09-23T14:00:00')
+        && typeof d.finishTimeText === 'string' && d.finishTimeText.includes('2026-10-02T23:59:59');
+      return {
+        expect: `start=${EXPECT_START_MS}, finish=${EXPECT_FINISH_MS}, 文本含 09-23T14:00/10-02T23:59:59`,
+        real: `start=${start}, finish=${finish}, text=${d.startTimeText} ~ ${d.finishTimeText}`,
+        pass: start === EXPECT_START_MS && finish === EXPECT_FINISH_MS && textOk,
       };
     });
 
@@ -145,6 +159,18 @@ class ConfigInit001 extends TestBaseClass {
         expect: 'ACCOUNT 且 award_id=901（mod_account.id）且 award_count>0',
         real: rows.map((r) => `${r['award_type']}#${r['award_id']}×${r['award_count']}`).join(','),
         pass: ok,
+      };
+    });
+
+    await this.check('图鉴奖励 album_award（init.sql 2026-09-17 版新增）：HEADBOX 4381 占位（/gifts albumGifts 展示用）', async (): Promise<CheckResult> => {
+      const rows = await this.didibus.queryAwardConfig(ALBUM_AWARD);
+      // 文档口径不一致：init.sql（09-17）写 N-S-HEADBOX，配置表（09-20）写 HEADBOX；/gifts 归一后均为 HEADBOX，两者皆接受
+      const ok = rows.length >= 1 && rows.some((r) => ['N-S-HEADBOX', 'HEADBOX'].includes(String(r['award_type'])) && int(r['award_id']) === 4381);
+      return {
+        expect: '≥1 条且 award_type=N-S-HEADBOX|HEADBOX、award_id=4381',
+        real: rows.length === 0 ? '0 条' : rows.map((r) => `${r['award_type']}#${r['award_id']}`).join(','),
+        pass: ok,
+        message: rows.length === 0 ? '预置数据缺失：mod_common_award album_award（需按 init.sql 2026-09-17 版重灌）' : undefined,
       };
     });
 

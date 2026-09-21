@@ -40,23 +40,50 @@ export interface BusForwardResult {
   crossed: BusCrossedPoint[];
 }
 
+/** 奖品展示结构 AwardDisplay（里程结果中 count 即里程值；合并结果 prob=null） */
+export interface AwardDisplay {
+  id: number;
+  type: string;
+  title?: string;
+  icon?: string;
+  count: number;
+  expire?: number;
+  show?: boolean;
+  unitNum?: number;
+  unit?: string;
+  prob?: number | null;
+  extra?: unknown;
+}
+
+/** 单次抽奖结果（awards=null 表示未中奖，仅 lucky-gift 会出现） */
+export interface DrawResultItem {
+  prob?: number;
+  awards?: AwardDisplay[] | null;
+}
+
 export interface LuckydrawDrawData {
   id: number;
   pool: string;
   count: number;
-  results?: unknown[];
+  /** 抽奖时间（毫秒时间戳，接口 v1.6.0 起 DrawResponse 新增，mod_luckydraw_record.create_time） */
+  createTime?: number;
+  results?: DrawResultItem[];
+  /** 全部中奖奖励按 award_type+award_id 合并结果（接口 v1.9.0 起，未中奖为空数组） */
+  mergedAwards?: AwardDisplay[];
 }
 
 /**
  * /draw 响应（v1.4.0 双 LuckydrawModule）：
  * luckyGift = 礼物道具抽奖（topic=lucky-gift，扣券）；luckyMileage = 里程抽奖（topic=lucky-mileage，price=0 不扣费）。
  * 两条 mod_luckydraw_record 通过 (biz, user_id, pool, create_time) 一一对应；bus.forward transNo = "bus_"+luckyGift.id。
+ * awards（接口 v1.9.0）= luckyGift.mergedAwards（本次全部中奖奖励合并结果，未中奖为空数组）。
  */
 export interface DrawResult {
   luckyGift: LuckydrawDrawData;
   luckyMileage?: LuckydrawDrawData;
   totalMileage: number;
   bus: BusForwardResult;
+  awards?: AwardDisplay[];
 }
 
 /** /marquee 轮播条目（接口文档 v1.3.0：昵称/头像读取时实时填充，不落存储；仅 totalMileage>0 的抽奖写入） */
@@ -83,6 +110,50 @@ export interface GiftItem {
   price: number;
   type: string;
   buff: number;
+}
+
+/** /gifts 图鉴礼物条目（接口 v1.5.0 新增；来源 mod_common_award name=album_award，仅展示不参与计榜/发券/风控；v1.7.0 起含 unitNum/unit 有效期） */
+export interface AlbumGiftItem {
+  awardId: number;
+  name: string;
+  image: string;
+  /** 奖励类型归一（去掉 N-S- 前缀，如 HEADBOX） */
+  type: string;
+  unitNum?: number;
+  unit?: string;
+}
+
+/** /gifts 响应（接口 v1.5.0 起：gifts 普通礼物清单 + albumGifts 图鉴礼物） */
+export interface GiftsResponse {
+  gifts: GiftItem[];
+  albumGifts: AlbumGiftItem[];
+}
+
+/** /records 抽奖记录条目（接口 v1.6.0 新增接口；mileage 由 Active 层按 createTime 合并 lucky-mileage，无匹配记 0；v1.10.0 起含 awards=mergedAwards） */
+export interface ActiveRecordItem {
+  id: number;
+  pool: string;
+  count: number;
+  createTime?: number;
+  results?: DrawResultItem[];
+  mileage: number;
+  awards?: AwardDisplay[];
+}
+
+/** /records 响应（游标分页，同模块 records 结构） */
+export interface ActiveRecordsResponse {
+  records: ActiveRecordItem[];
+  more: boolean;
+  last: number;
+  size: number;
+}
+
+/** /debug 调试接口响应（接口 v1.8.0 新增：活动开始/结束时间，按请求者大区解析） */
+export interface DebugTimeInfo {
+  startTime: number;
+  finishTime: number;
+  startTimeText: string;
+  finishTimeText: string;
 }
 
 function quoteStr(s: string): string {
@@ -159,16 +230,53 @@ export class DidibusService {
     return (data ?? {}) as DrawResult;
   }
 
-  /** 活动礼物清单（/gifts：仅 ticketGifts 普通礼物=礼物架礼物，含多语言名称/价格/coin-diamond 类型/buff，按价格升序） */
-  async gifts(userId: number | string, locale: string, debugTs: string): Promise<GiftItem[]> {
+  /** 活动礼物清单（/gifts：gifts=仅 ticketGifts 普通礼物按价格升序；albumGifts=图鉴礼物仅展示，接口 v1.5.0 起） */
+  async gifts(userId: number | string, locale: string, debugTs: string): Promise<GiftsResponse> {
     const data = await this.api.request(`active/v3/${DIDIBUS_BIZ}/gifts`, {
       body: {},
       userId,
       locale,
       debugTimestamp: debugTs,
     });
-    const list = ((data ?? {}) as Record<string, unknown>)['gifts'];
-    return (Array.isArray(list) ? list : []) as GiftItem[];
+    const obj = (data ?? {}) as Record<string, unknown>;
+    const gifts = Array.isArray(obj['gifts']) ? (obj['gifts'] as GiftItem[]) : [];
+    const albumGifts = Array.isArray(obj['albumGifts']) ? (obj['albumGifts'] as AlbumGiftItem[]) : [];
+    return { gifts, albumGifts };
+  }
+
+  /** 抽奖记录（/records，接口 v1.6.0：lucky-gift 批次结果 + createTime + 本次里程 mileage（Active 层合并）+ awards 合并奖励） */
+  async records(
+    userId: number | string,
+    locale: string,
+    debugTs: string,
+    last = 0,
+    size = 20,
+  ): Promise<ActiveRecordsResponse> {
+    const data = await this.api.request(`active/v3/${DIDIBUS_BIZ}/records`, {
+      body: { last, size },
+      userId,
+      locale,
+      debugTimestamp: debugTs,
+    });
+    const obj = (data ?? {}) as Record<string, unknown>;
+    const records = Array.isArray(obj['records']) ? (obj['records'] as ActiveRecordItem[]) : [];
+    return {
+      records,
+      more: Boolean(obj['more']),
+      last: Number(obj['last'] ?? 0),
+      size: Number(obj['size'] ?? records.length),
+    };
+  }
+
+  /** 调试接口（/debug，接口 v1.8.0：活动开始/结束时间，按请求者大区解析的毫秒时间戳 + ISO-8601 文本） */
+  async debug(userId: number | string, locale: string, debugTs: string): Promise<DebugTimeInfo> {
+    const data = await this.api.request(`active/v3/${DIDIBUS_BIZ}/debug`, {
+      body: {},
+      userId,
+      locale,
+      debugTimestamp: debugTs,
+    });
+    return (data ?? {}) as DebugTimeInfo;
   }
 
   async marquee(userId: number | string, locale: string, debugTs: string): Promise<MarqueeItem[]> {
@@ -222,15 +330,18 @@ export class DidibusService {
     return (await this.moduleCall('lucky-gift/detail', userId, locale, debugTs) ?? {}) as Record<string, unknown>;
   }
 
-  /** 礼物道具抽奖记录（lucky-gift，游标分页：last=上页返回的 last，首屏不传；返回 records/more/last/size） */
+  /** 礼物道具抽奖记录（lucky-gift，游标分页：last=上页返回的 last，首屏不传；返回 records/more/last/size；createTimes=按抽奖时间批量过滤，非空时忽略游标，接口 v1.6.0） */
   async luckyGiftRecords(
     userId: number | string,
     locale: string,
     debugTs: string,
     last = 0,
     size = 50,
+    createTimes?: number[],
   ): Promise<LuckydrawRecordsResponse> {
-    const data = await this.moduleCall('lucky-gift/records', userId, locale, debugTs, { last, size });
+    const body: Record<string, unknown> = { last, size };
+    if (createTimes !== undefined) body['createTimes'] = createTimes;
+    const data = await this.moduleCall('lucky-gift/records', userId, locale, debugTs, body);
     return this.parseLuckydrawRecords(data);
   }
 
@@ -238,15 +349,18 @@ export class DidibusService {
     return this.moduleCall('lucky-gift/result', userId, locale, debugTs, { pool, id });
   }
 
-  /** 里程抽奖记录（lucky-mileage，可反查每次抽中的里程值 item.award_count；游标分页同 lucky-gift） */
+  /** 里程抽奖记录（lucky-mileage，可反查每次抽中的里程值 item.award_count；游标分页与 createTimes 过滤同 lucky-gift） */
   async luckyMileageRecords(
     userId: number | string,
     locale: string,
     debugTs: string,
     last = 0,
     size = 50,
+    createTimes?: number[],
   ): Promise<LuckydrawRecordsResponse> {
-    const data = await this.moduleCall('lucky-mileage/records', userId, locale, debugTs, { last, size });
+    const body: Record<string, unknown> = { last, size };
+    if (createTimes !== undefined) body['createTimes'] = createTimes;
+    const data = await this.moduleCall('lucky-mileage/records', userId, locale, debugTs, body);
     return this.parseLuckydrawRecords(data);
   }
 

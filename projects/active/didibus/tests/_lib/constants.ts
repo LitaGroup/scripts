@@ -72,6 +72,8 @@ export const AWARD_SEND_TOTAL = 'gift-send-total';
 export const AWARD_SEND_DAILY = 'gift-send-daily';
 export const AWARD_RECV = 'gift-recv';
 export const AWARD_RECV_CONTRIBUTOR = 'gift-recv-contributor';
+/** 图鉴奖励（init.sql 2026-09-17 版新增，N-S-HEADBOX 4381；仅 /gifts albumGifts 展示，无发放链路） */
+export const ALBUM_AWARD = 'album_award';
 
 export const TOPIC_SEND = 'gift-send';
 export const TOPIC_RECV = 'gift-recv';

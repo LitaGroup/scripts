@@ -16,10 +16,12 @@ import { DidibusTestBase } from './_lib/DidibusTestBase.ts';
 const INIT_BALANCE = 100000;
 
 /**
- * 004-draw —— 抽奖核心链路（扣费 + 里程必得 + bus 探索 + 探索不影响榜单 + 轮播）
+ * 004-draw —— 抽奖核心链路（扣费 + 里程必得 + bus 探索 + 探索不影响榜单 + 轮播 + 抽奖记录）
  * 模拟时间：全部 T_D1。里程档位/奖池价格从配置动态读取（mod_common_award / m/lucky-gift/detail）。
  * v1.4.0 双 LuckydrawModule：每次 /draw 写 2 批抽奖记录（topic=lucky-gift 扣券 + topic=lucky-mileage 里程必得），
  * 两巴士里程奖池独立（bus.mileage.normal / bus.mileage.flying，档位各不相同）。
+ * 接口 v1.9.0/v1.10.0：/draw 响应新增 awards（= luckyGift.mergedAwards）、DrawResponse 新增 createTime/mergedAwards；
+ * 接口 v1.6.0：新增 /records（lucky-gift 批次 + createTime + Active 层合并 mileage + awards）。
  */
 class Draw004 extends DidibusTestBase {
   private tiers: Record<string, number[]> = { [POOL_NORMAL]: [], [POOL_FLYING]: [] };
@@ -30,7 +32,7 @@ class Draw004 extends DidibusTestBase {
 
   constructor() {
     super();
-    this.total = 17;
+    this.total = 19;
   }
 
   private ts(): string {
@@ -241,6 +243,38 @@ class Draw004 extends DidibusTestBase {
         real: latest ? JSON.stringify(latest) : '轮播为空',
         pass: ok,
         message: latest && int(latest.mileage) !== expectMileage ? '最新条目 mileage 与本次抽奖合计里程不一致' : undefined,
+      };
+    });
+
+    await this.check('抽奖响应新字段（接口 v1.9.0）：draw.awards=luckyGift.mergedAwards；两批 createTime 一致且与 DB 相同', async (): Promise<CheckResult> => {
+      this.needActive();
+      const d = this.draw2;
+      const giftCt = int(d.luckyGift?.createTime);
+      const mileageCt = int(d.luckyMileage?.createTime);
+      const awardsOk = JSON.stringify(d.awards ?? null) === JSON.stringify(d.luckyGift?.mergedAwards ?? null);
+      // DB create_time 应与响应 createTime 一致（同一 /draw 两批共用）
+      const dbRecs = await this.didibus.queryLuckydrawRecords(USER_A);
+      const giftDb = dbRecs.find((r) => int(r['id']) === int(d.luckyGift?.id));
+      const dbCt = giftDb ? int(giftDb['create_time']) : -1;
+      return {
+        expect: `awards=mergedAwards（${(d.luckyGift?.mergedAwards ?? []).length} 条合并奖励），createTime 两批一致且=${dbCt}`,
+        real: `awards=${JSON.stringify(d.awards)}，giftCt=${giftCt}，mileageCt=${mileageCt}，dbCt=${dbCt}`,
+        pass: awardsOk && giftCt > 0 && giftCt === mileageCt && giftCt === dbCt,
+      };
+    });
+
+    await this.check('/records 抽奖记录（接口 v1.6.0）：批次含 createTime+mileage+awards，mileage=对应 /draw totalMileage', async (): Promise<CheckResult> => {
+      this.needActive();
+      const page = await this.didibus.records(USER_A, LOCALE, this.ts(), 0, 50);
+      const rec1 = page.records.find((r) => int(r.id) === int(this.draw1.luckyGift?.id));
+      const rec2 = page.records.find((r) => int(r.id) === int(this.draw2.luckyGift?.id));
+      const ok1 = rec1 !== undefined && int(rec1.mileage) === int(this.draw1.totalMileage) && int(rec1.createTime) > 0;
+      const ok2 = rec2 !== undefined && int(rec2.mileage) === int(this.draw2.totalMileage)
+        && JSON.stringify(rec2.awards ?? null) === JSON.stringify(this.draw2.awards ?? null);
+      return {
+        expect: `rec(draw1).mileage=${int(this.draw1.totalMileage)}、rec(draw2).mileage=${int(this.draw2.totalMileage)} 且 awards 与 /draw 一致`,
+        real: `total=${page.records.length}，rec1=${rec1 ? `mileage=${rec1.mileage}` : '缺失'}，rec2=${rec2 ? `mileage=${rec2.mileage}, awards=${JSON.stringify(rec2.awards)}` : '缺失'}`,
+        pass: ok1 && ok2,
       };
     });
   }

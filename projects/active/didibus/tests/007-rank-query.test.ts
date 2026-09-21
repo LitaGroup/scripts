@@ -20,14 +20,14 @@ const U2 = RANK_USERS[1]; // 13129
 const U3 = RANK_USERS[2]; // 13130
 
 /**
- * 007-rank-query —— 榜单查询 + /gifts 礼物清单
+ * 007-rank-query —— 榜单查询 + /gifts 礼物清单（含图鉴礼物 albumGifts，接口 v1.5.0/v1.7.0）
  * 模拟时间：全部 T_D1。榜单数据用 Redis ZADD 直接造数（003 已覆盖 consumer 真实链路）。
  * 造数（in）：送礼 A=100、U1=300、U2=200；收礼 B=100、C=500。（vi）：送礼 U3=50 —— 大区隔离验证。
  */
 class RankQuery007 extends DidibusTestBase {
   constructor() {
     super();
-    this.total = 9;
+    this.total = 10;
   }
 
   private ts(locale: string): string {
@@ -131,7 +131,7 @@ class RankQuery007 extends DidibusTestBase {
 
     await this.check('/gifts 礼物清单：仅 ticketGifts 5 个礼物架礼物、价格升序、type 含 coin/diamond、buff=1.0', async (): Promise<CheckResult> => {
       this.needActive();
-      const gifts = await this.didibus.gifts(USER_A, 'in', this.ts('in'));
+      const { gifts } = await this.didibus.gifts(USER_A, 'in', this.ts('in'));
       const ids = gifts.map((g) => int(g.giftId));
       const idsOk = ids.length === TICKET_GIFTS.length && TICKET_GIFTS.every((id) => ids.includes(id));
       const noBackpack = gifts.every((g) => !BACKPACK_GIFTS.includes(int(g.giftId)));
@@ -144,6 +144,20 @@ class RankQuery007 extends DidibusTestBase {
         expect: `ids=${JSON.stringify(TICKET_GIFTS)}（价格升序，背包礼物不返回；type=coin/diamond，buff 全 1.0）`,
         real: `ids=${JSON.stringify(ids)}，prices=${JSON.stringify(prices)}，types=${gifts.map((g) => g.type).join(',')}，buffs=${gifts.map((g) => g.buff).join(',')}`,
         pass: idsOk && noBackpack && sortedOk && typesOk && diamondOk && buffOk,
+      };
+    });
+
+    await this.check('/gifts 图鉴礼物（接口 v1.5.0/v1.7.0）：albumGifts 含 awardId=4381、type=HEADBOX（去 N-S- 前缀）、含 unitNum/unit', async (): Promise<CheckResult> => {
+      this.needActive();
+      const { albumGifts } = await this.didibus.gifts(USER_A, 'in', this.ts('in'));
+      const hit = albumGifts.find((g) => int(g.awardId) === 4381);
+      const ok = hit !== undefined && hit.type === 'HEADBOX'
+        && int(hit.unitNum) > 0 && typeof hit.unit === 'string' && hit.unit.length > 0;
+      return {
+        expect: 'albumGifts 含 {awardId:4381, type:HEADBOX, unitNum>0, unit 非空}（仅展示，不参与计榜/发券）',
+        real: albumGifts.length === 0 ? 'albumGifts 为空' : JSON.stringify(albumGifts),
+        pass: ok,
+        message: albumGifts.length === 0 ? '预置数据缺失：mod_common_award album_award（init.sql 2026-09-17 版起新增）' : undefined,
       };
     });
   }
