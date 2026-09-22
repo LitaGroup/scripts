@@ -68,6 +68,18 @@ export class RedisTestResource {
     return this.getClient().lrange(key, start, stop);
   }
 
+  async hset(key: string, field: string, value: string | number): Promise<number> {
+    return this.getClient().hset(key, field, String(value));
+  }
+
+  async hget(key: string, field: string): Promise<string | null> {
+    return this.getClient().hget(key, field);
+  }
+
+  async hgetall(key: string): Promise<Record<string, string>> {
+    return this.getClient().hgetall(key);
+  }
+
   async set(key: string, value: string, exSeconds?: number): Promise<boolean> {
     const client = this.getClient();
     if (exSeconds !== undefined) {

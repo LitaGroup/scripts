@@ -1,8 +1,11 @@
-import { DIDIBUS_BIZ, DIDIBUS_ACCOUNT_NAME } from '../../../../../src/services/DidibusService.ts';
+import { DIDIBUS_BIZ, DIDIBUS_ACCOUNT_NAME, DIDIBUS_ALARM_INCOME_KEY, DIDIBUS_ALARM_EXPEND_KEY } from '../../../../../src/services/DidibusService.ts';
 
 export const BIZ = DIDIBUS_BIZ;
 /** 探险券账户标识（v1.5.0 mod_account 体系，对应 mod_account.name） */
 export const ACCOUNT_NAME = DIDIBUS_ACCOUNT_NAME;
+/** 超发风控计数（框架 common:alarm 模式，Redis Hash field=大区；income=普通礼物消耗、expend=活动发出背包礼物） */
+export const ALARM_INCOME_KEY = DIDIBUS_ALARM_INCOME_KEY;
+export const ALARM_EXPEND_KEY = DIDIBUS_ALARM_EXPEND_KEY;
 
 export const LOCALE = 'in';
 export const LOCALES = ['in', 'vi', 'ph', 'ko'];

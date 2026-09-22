@@ -17,6 +17,7 @@
 - 里程生效：`bus.forward` 同步推进，越过探索点自动发奖（背包礼物+道具）；**单地图 map-1**（distance=100，探索点 lv1~lv6 @10/25/45/65/85/100，距离为占位值待策划确认）+ 循环（enableLoop），每圈可重复获得探索点奖励
 - 榜单：送礼总榜+日榜（单实例 gift-send：mainRound+timeRound，**日榜 Top3 自动发奖**，2026-09-16 配置表 topN 6→3）、收礼总榜 gift-recv（Top3 + 贡献 Top1）；`/m/{topic}/rank` 响应含 `round`/`rankResult`/`my`/`myAll`
 - 礼物与榜单加成（**2026-09-16 需求澄清 + 配置表，v1.9.0**）：`gifts` 白名单 12 礼物，**全部白名单礼物赠送时均计榜**（送/收总榜+日榜），计分 = 礼物价值 × buff（1金币/钻石=1积分）；三档：礼物架普通礼物 10797~10801 buff **1.0**（**唯一发探索券**，进 `/gifts` 清单+超发风控 income）、奖池背包礼物 10794/10795/10796 buff **1.1**、探索点背包礼物 10789/10791/10792/10793 buff **1.3**；背包礼物**仅计榜不发券、不登记风控**；探索越点发奖仅入背包、不直接加分（004#16 按此口径断言，见问题 #17）
+- 超发风控（**2026-09-21 需求新增2**，框架 common:alarm 模式）：消耗 income=普通礼物（ticketGifts）消耗流水（送礼 consumer `recordOverflowIncome` 登记，transNo=orderNo 幂等）；支出 expend=活动发出的所有背包礼物价值（有 ID，含奖池+探索点）；Redis Hash `{biz}:common:alarm:income|expend`（field=大区，与 crazy-lamb/floral-isle/loong_awaken/new_recharge 四活动实测一致）。**支出÷消耗 ≥ 102.5% 时 lucky-gift 奖池不出 GIFT 奖励**（里程/道具/探索点奖励不受影响），回落 < 102.5% 后恢复；用例 011 覆盖拦截/恢复/边界=102.5%/大区隔离
 - 轮播（接口 v1.3.0）：条目 `{playerId, nickname, avatar, mileage}`（昵称/头像读取时实时填充），内容=本次抽奖合计里程、仅 totalMileage>0 写入；Redis List 最近 20 条，按 locale 隔离
 - 抽奖记录与合并奖励（接口 v1.6.0 / v1.9.0 / v1.10.0）：
   - `/records`（v1.6.0）：lucky-gift 批次记录 + `createTime` + 本次里程 `mileage`（Active 层按同一次 /draw 的 createTime 合并 lucky-mileage 批次，无匹配/查询失败降级 0）；条目含 `awards`（= 模块层 mergedAwards，v1.10.0）
@@ -193,10 +194,35 @@
 | 幂等 | check | 三个时区 cron 依次触发，仅首次生效，重复安全 |
 | 活动外触发 | check | time=T_D1（活动未结束）触发不结算总榜 |
 
+### 011-overissue-control —— 超发风控：支出占比 ≥102.5% 停发奖池礼物（2026-09-21 需求新增2）
+
+> 前置：服务端已实现风控（Redis `{biz}:common:alarm:income|expend`）+ `bus.normal`/`bus.flying` 奖池预置完整（问题#19 修复）。
+> 造数：income 走真实送礼链路（顺带验证登记）；expend 用 Redis HSET 直写精确构造占比。
+> 实现未部署时对应步骤 fail 并明确提示（充当验收用例）。
+
+| 步骤 | 类型 | 校验点 |
+|---|---|---|
+| 清理 A/B、历史发奖记录、Redis 与 alarm 计数 | act | — |
+| 预置校验：读奖池 GIFT 条目/权重与价格 | act | `bus.normal`/`bus.flying` 非空且含 GIFT 条目；按 GIFT 权重计算恢复期抽样批数（99.9% 置信度，≤3 批）；池缺失 → fail 提示环境未修复 |
+| 准备余额 200000 券 | act | — |
+| 真实送礼 10797 × totalCoin=1000（in，T_D1） | act | — |
+| income 登记消耗流水 | check | `alarm income(in)`=1000（key 不存在 → 提示需求未部署） |
+| 造数超发：expend(in)=1030（103%≥102.5%） | act | — |
+| 超发期抽奖：normal×50 + flying×50 | act | — |
+| 超发拦截 | check | 100 次抽奖 GIFT=0（`mod_luckydraw_record_item` award_type=GIFT + 响应 awards 均为 0） |
+| 非礼物奖励不受影响 | check | 里程必得（两池 totalMileage>0，拦截范围仅 lucky-gift 奖池）+ 扣费正确 |
+| 恢复驱动：再送 10797×1000（占比 51.5%） | act+check | `alarm income(in)`=2000 |
+| 恢复后抽样：flying×50×N 批（中即止） | act | — |
+| 恢复 | check | 新增 DB GIFT item ≥1、award_id ∈ 飞行池 GIFT、与响应一致 |
+| 支出登记 | check | 发出背包礼物后 `expend(in)` > 1030 |
+| 边界：expend(in)=2050（2000×1.025 恰好等于阈值）+ normal×50 | act+check | 新增 GIFT=0（≥ 含等于，防严格大于实现） |
+| 大区隔离：ko income=1000/expend=1000（100%）+ flying×50×N（locale=ko） | act+check | ko GIFT 正常出现（in 超发不串扰 ko） |
+| 收尾清理：用户数据 + alarm 计数 | act | — |
+
 ## 执行顺序与依赖
 
 ```
-001 → 002 → 003 → 004 → 005 → 006 → 007 → 008 → 009 → 010
+001 → 002 → 003 → 004 → 005 → 006 → 007 → 008 → 009 → 010 → 011
 （001 是其余所有用例的前置；003/004 为 007~010 提供造数手段，但各用例自清理、可独立重跑）
 ```
 
@@ -207,6 +233,7 @@
 3. ~~**里程档位与权重**~~ ✅ v1.4.0 已确定：normal +1/+3/+5/+10（0.40/0.30/0.20/0.10）、flying +3/+5/+10/+20（0.35/0.30/0.25/0.10），两巴士独立奖池；用例从 `mod_common_award` 动态读取（001 分池校验权重和=1.0，004 按实际档位断言），不硬编码
 4. **大区时间模拟**：`/enter` 与结算的大区时间依赖 `debugTimestamp`（l-debug-timestamp），沿用 pk 用例的做法；但活动有效性门槛走真实时间（见「模拟时间约定」⚠️）
 5. **checks/ 线上巡检**：上线后另补（各阶段 config/榜单/结算结果只读巡检），本次先不建。
+6. **超发风控（需求新增2）实现待部署**（2026-09-22 调研）：测试环境尚无 `didibus-v202609:common:alarm:*` key（crazy-lamb/floral-isle/loong_awaken/new_recharge 四活动均有同模式计数 `{biz}:common:alarm:income|expend`，Hash field=大区）；技术设计 v1.12.0 仅含送礼 consumer 的 `recordOverflowIncome` 调用、无 102.5% 拦截逻辑；且 `bus.normal`/`bus.flying` 道具池为空（见问题#19）。011 在服务端实现部署 + init.sql 重灌前运行，会于「预置校验 / income 登记」步骤明确 fail。若实现的风控 key 命名与 `{biz}:common:alarm:*` 不符，只需同步调整 `DidibusService` 的 `DIDIBUS_ALARM_INCOME_KEY`/`DIDIBUS_ALARM_EXPEND_KEY` 常量。
 
 ## 已发现问题跟踪
 

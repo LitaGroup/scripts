@@ -6,6 +6,11 @@ export const DIDIBUS_BIZ = 'didibus-v202609';
 /** 探险券账户标识（v1.5.0 mod_account 体系，对应 mod_account.name；旧 active_coin/N-A-DIDIBUS 已废弃） */
 export const DIDIBUS_ACCOUNT_NAME = 'DIDIBUS-MILEAGE';
 
+/** 超发风控消耗计数 key（框架 common:alarm 模式：Hash field=大区；income=普通礼物=ticketGifts 消耗流水，送礼 consumer 登记） */
+export const DIDIBUS_ALARM_INCOME_KEY = `${DIDIBUS_BIZ}:common:alarm:income`;
+/** 超发风控支出计数 key（expend=活动发出的所有背包礼物价值（有 ID），奖池/探索点发放登记） */
+export const DIDIBUS_ALARM_EXPEND_KEY = `${DIDIBUS_BIZ}:common:alarm:expend`;
+
 const DB_ACTIVE = 'lita_active';
 
 export interface DidibusServiceDeps {
@@ -593,6 +598,31 @@ export class DidibusService {
     if (opts.player !== undefined) sql += ` AND player=${quoteNum(opts.player)}`;
     sql += ' ORDER BY id';
     return this.mysql.query(sql, DB_ACTIVE);
+  }
+
+  // ==================== 超发风控计数（common:alarm，Redis Hash field=locale） ====================
+
+  /** 消耗计数（income：普通礼物=ticketGifts 消耗流水；键/field 不存在返回 0） */
+  async alarmIncome(locale: string): Promise<number> {
+    const v = await this.redis.hget(DIDIBUS_ALARM_INCOME_KEY, locale);
+    return v === null ? 0 : Number(v);
+  }
+
+  /** 支出计数（expend：活动发出的背包礼物价值；键/field 不存在返回 0） */
+  async alarmExpend(locale: string): Promise<number> {
+    const v = await this.redis.hget(DIDIBUS_ALARM_EXPEND_KEY, locale);
+    return v === null ? 0 : Number(v);
+  }
+
+  /** 直写超发风控计数（造数用：精确构造支出占比，值须为整数） */
+  async seedAlarm(locale: string, values: { income?: number; expend?: number }): Promise<void> {
+    if (values.income !== undefined) await this.redis.hset(DIDIBUS_ALARM_INCOME_KEY, locale, quoteNum(values.income));
+    if (values.expend !== undefined) await this.redis.hset(DIDIBUS_ALARM_EXPEND_KEY, locale, quoteNum(values.expend));
+  }
+
+  /** 清理超发风控计数（income/expend 整键删除） */
+  async cleanAlarm(): Promise<void> {
+    await this.redis.del(DIDIBUS_ALARM_INCOME_KEY, DIDIBUS_ALARM_EXPEND_KEY);
   }
 
   // ==================== 造数 / 清理 ====================
