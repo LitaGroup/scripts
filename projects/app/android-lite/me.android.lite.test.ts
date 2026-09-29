@@ -58,6 +58,7 @@ const ACT = {
   userDetail: '.ui.user.UserDetailActivity',
   album: '.ui.view.album.NewAlbumActivity',
   newMoment: '.ui.moment.activity.NewMomentActivity',
+  momentDetail: '.ui.moment.activity.MomentDetailActivity',
   wallet: '.ui.wallet.WalletActivity',
   familyPlaza: '.ui.family.FamilyPlazaActivity',
   nobleCenter: '.ui.noble.NobleCenterActivity',
@@ -101,6 +102,8 @@ const ID = {
   postMomentLayout: `${APP_PACKAGE}:id/postMomentLayout`, // 右下角发布按钮
   momentItemMoreIv: `${APP_PACKAGE}:id/momentItemMoreIv`, // 单条动态「…」
   momentItemNameTv: `${APP_PACKAGE}:id/momentItemNameTv`, // 动态昵称（列表非空判定）
+  momentItemDescriptionTv: `${APP_PACKAGE}:id/momentItemDescriptionTv`, // 动态正文
+  momentDetailMoreView: `${APP_PACKAGE}:id/moreView`, // 动态详情页右上角「…」
   // 通用选择弹窗（发布来源 / 删除菜单）
   commonFirstTv: `${APP_PACKAGE}:id/commonFirstTv`,
   commonSecondTv: `${APP_PACKAGE}:id/commonSecondTv`,
@@ -146,6 +149,18 @@ function albumPhotoCell(index = 1): Locator {
   return by.xpath(`(//*[@resource-id='${xid('img_photo')}'])[${index}]/..`);
 }
 
+/** 个人主页动态列表中含指定正文的条目内的「…」更多按钮（发布/删除按正文唯一定位） */
+function momentItemMoreByText(text: string): Locator {
+  return by.xpath(
+    `//*[@resource-id='${xid('rlItemAllView')}'][.//*[@resource-id='${xid('momentItemDescriptionTv')}' and contains(@text,${JSON.stringify(text)})]]//*[@resource-id='${xid('momentItemMoreIv')}']`,
+  );
+}
+
+/** 个人主页动态列表中含指定正文的描述 TextView（删除后校验不再展示用） */
+function momentDescByText(text: string): Locator {
+  return by.xpath(`//*[@resource-id='${xid('momentItemDescriptionTv')}' and contains(@text,${JSON.stringify(text)})]`);
+}
+
 /**
  * 我的页头像：user_avatar 本身不可点，但其点击区域仅在头像矩形 [14,203][329,518] 内
  * （top_part_container 整个头部可点，但中心落在昵称区不触发跳个人主页，故直接点 user_avatar，
@@ -155,9 +170,9 @@ function meAvatarLocator(): Locator {
   return by.id(`${APP_PACKAGE}:id/user_avatar`);
 }
 
-/** 贵族中心第 index 个 tab 的可点击节点（tabTv 不可点，取可点父节点） */
-function nobleTab(index: number): Locator {
-  return by.xpath(`(//*[@resource-id='${xid('tabTv')}'])[${index}]/ancestor::*[@clickable='true'][1]`);
+/** 贵族中心指定文案 tab 的可点击节点（tabTv 不可点，取可点父节点；按文案定位不依赖 index） */
+function nobleTabByText(text: string): Locator {
+  return by.xpath(`//*[@resource-id='${xid('tabTv')}' and @text=${JSON.stringify(text)}]/ancestor::*[@clickable='true'][1]`);
 }
 
 class MeCheck extends AppBaseClass {
@@ -563,24 +578,60 @@ class MeCheck extends AppBaseClass {
     });
 
     await this.check('个人主页展示新发布的动态', async () => {
-      const shown = await this.driver.waitFor(by.id(ID.momentItemNameTv), 8_000);
+      const shown = await this.driver.waitFor(momentDescByText(text), 8_000);
       return {
-        expect: '个人主页动态列表展示新动态',
+        expect: `个人主页动态列表展示新动态（${text}）`,
         real: shown ? '已展示' : '未展示',
         pass: shown,
       };
     });
 
     await this.act('删除刚发布的动态（清理测试数据）', async () => {
-      const more = by.id(ID.momentItemMoreIv);
+      const more = momentItemMoreByText(text);
+      // 个人主页动态「…」与右下角发布按钮 postMomentLayout 在列表滚到底部时重叠，
+      // 且发布后列表仍在刷新，点「…」可能落到卡片上跳转详情页、或误触发布按钮弹出
+      // 「来自图库」菜单。因此用「删除」文本精确匹配删除菜单项，并对三种情况分别兜底重试。
+      const deleteMenu = by.xpath(`//*[@resource-id='${xid('commonFirstTv')}' and @text='删除']`);
       if (!(await this.driver.waitFor(more, 8_000))) {
-        throw new Error('未找到动态的「…」按钮，无法删除');
+        throw new Error('未找到新动态的「…」按钮，无法删除');
       }
-      await this.driver.click(more);
-      await this.clickSheetItem(by.id(ID.commonFirstTv), '删除菜单');
+      let opened = false;
+      for (let attempt = 0; attempt < 3 && !opened; attempt++) {
+        await this.driver.click(more);
+        opened = await this.driver.waitFor(deleteMenu, 3_000);
+        if (opened) break;
+        if (await this.driver.exists(by.id(ID.commonCancelTv))) {
+          // 误触发布按钮弹出「来自图库」：取消后重试
+          await this.driver.click(by.id(ID.commonCancelTv));
+          await sleep(800);
+          continue;
+        }
+        if (await this.isActivity(ACT.momentDetail)) {
+          // 落到卡片跳转详情页：等详情页加载完成后点右上角「…」打开删除菜单
+          await this.waitForElement(by.id(ID.momentDetailMoreView), '详情页右上角「…」', 10_000);
+          await sleep(1_000);
+          await this.driver.click(by.id(ID.momentDetailMoreView));
+          opened = await this.driver.waitFor(deleteMenu, 5_000);
+          break;
+        }
+        await sleep(1_000);
+      }
+      if (!opened) {
+        throw new Error('多次尝试后仍未打开删除菜单');
+      }
+      await this.clickSheetItem(deleteMenu, '删除菜单');
       await this.waitForElement(by.id(ID.dialogPositive), '删除确认弹窗', 5_000);
       await this.driver.click(by.id(ID.dialogPositive));
       await sleep(2_000);
+    });
+
+    await this.check('新动态已删除（个人主页不再展示）', async () => {
+      const gone = !(await this.driver.exists(momentDescByText(text)));
+      return {
+        expect: '个人主页动态列表不再展示该动态',
+        real: gone ? '已删除' : '仍存在',
+        pass: gone,
+      };
     });
 
     await this.act('返回我的页面', async () => {
@@ -719,7 +770,11 @@ class MeCheck extends AppBaseClass {
     });
 
     await this.act('点击第 6 个 Duke Tab', async () => {
-      await this.driver.click(nobleTab(6));
+      // 贵族中心 tab 为横向滚动（HorizontalScrollView），且进入后 tab 文案异步渲染，
+      // 刚进页面时 tabTv 可能尚未出现（findElement 会 404）。先等 tab 渲染完成，
+      // 再按「Duke」文案定位点击（Duke 为最末 tab，可点父节点中心仍在屏幕内）。
+      await this.waitForElement(by.id(ID.nobleTabTv), '贵族 Tab 栏', 10_000);
+      await this.driver.click(nobleTabByText('Duke'));
       await sleep(1_000);
     });
 
