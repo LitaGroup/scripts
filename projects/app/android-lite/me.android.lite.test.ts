@@ -587,16 +587,20 @@ class MeCheck extends AppBaseClass {
     });
 
     await this.act('删除刚发布的动态（清理测试数据）', async () => {
-      const more = momentItemMoreByText(text);
-      // 个人主页动态「…」与右下角发布按钮 postMomentLayout 在列表滚到底部时重叠，
-      // 且发布后列表仍在刷新，点「…」可能落到卡片上跳转详情页、或误触发布按钮弹出
-      // 「来自图库」菜单。因此用「删除」文本精确匹配删除菜单项，并对三种情况分别兜底重试。
+      // 个人主页动态「…」与右下角发布按钮 postMomentLayout 在列表滚到底部时重叠，且发布后
+      // 列表仍在刷新，「…」坐标会漂移导致点击落空/落到卡片/误触发布按钮。这里先等新动态
+      // 「…」出现并让列表刷新稳定，再按「删除」文本精确匹配菜单项，对跳详情页、误触发布按钮兜底重试。
       const deleteMenu = by.xpath(`//*[@resource-id='${xid('commonFirstTv')}' and @text='删除']`);
+      const more = momentItemMoreByText(text);
       if (!(await this.driver.waitFor(more, 8_000))) {
         throw new Error('未找到新动态的「…」按钮，无法删除');
       }
+      await sleep(2_000); // 等发布后列表刷新/滚动结束，避免点击坐标漂移落空
       let opened = false;
-      for (let attempt = 0; attempt < 3 && !opened; attempt++) {
+      for (let attempt = 0; attempt < 4 && !opened; attempt++) {
+        if (!(await this.driver.waitFor(more, 5_000))) {
+          throw new Error('重试时未找到新动态的「…」按钮');
+        }
         await this.driver.click(more);
         opened = await this.driver.waitFor(deleteMenu, 3_000);
         if (opened) break;
