@@ -5,6 +5,39 @@ package：`com.litalite.android`
 
 ---
 
+## 全量串联（lite-all，推荐入口）
+
+按业务顺序依次跑各模块**完整**独立脚本（各自建 Appium 会话，stdout 实时透传）：
+
+| 顺序 | 模块 | 脚本 |
+|------|------|------|
+| 1 | 登录 | `login-phone-password.android.lite.test.ts` |
+| 2 | 首页 | `home.android.lite.test.ts` |
+| 3 | 语音房 | `voice-room.android.lite.test.ts` |
+| 4 | 直播间 | `live.android.lite.test.ts` |
+| 5 | 热门&关注 | `moment.android.lite.test.ts` |
+| 6 | 消息 | `im-conversation-list` → `im-private-chat` → `im-group-chat` |
+| 7 | 我的 | `me.android.lite.test.ts` |
+
+```bash
+cd /path/to/scripts
+
+SCRIPT_APPIUM_URL=http://127.0.0.1:4723/ SCRIPT_ENV=TEST \
+  SCRIPT_CONFIG=config.app.json \
+  node projects/app/android-lite/lite-all.android.lite.test.ts
+```
+
+可选：
+
+```bash
+--modules=login,home,voice     # 只跑指定模块
+--continue-on-fail             # 某模块失败后继续后续（默认 fail-fast）
+```
+
+配置：首页 / 热门&关注 / 我的 默认读 `config.home.android.lite.json`（含 `accounts.game` / `accounts.friend`）；其余模块默认 `config.app.json`（或你传入的 `SCRIPT_CONFIG`）。
+
+---
+
 ## 准备
 
 1. 模拟器或真机已安装 Lite App  
