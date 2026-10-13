@@ -7,17 +7,17 @@ package：`com.litalite.android`
 
 ## 全量串联（lite-all，推荐入口）
 
-按业务顺序依次跑各模块**完整**独立脚本（各自建 Appium 会话，stdout 实时透传）：
+**单 Appium 会话**挂载各模块 `runCase()`，模拟真实用户连贯操作：只登录一次，中间不重建会话、不强制登出切号。
 
-| 顺序 | 模块 | 脚本 |
-|------|------|------|
-| 1 | 登录 | `login-phone-password.android.lite.test.ts` |
-| 2 | 首页 | `home.android.lite.test.ts` |
-| 3 | 语音房 | `voice-room.android.lite.test.ts` |
-| 4 | 直播间 | `live.android.lite.test.ts` |
-| 5 | 热门&关注 | `moment.android.lite.test.ts` |
-| 6 | 消息 | `im-conversation-list` → `im-private-chat` → `im-group-chat` |
-| 7 | 我的 | `me.android.lite.test.ts` |
+| 顺序 | 模块 | 脚本类 |
+|------|------|--------|
+| 1 | 登录一次 | lite-all 内 `ensureAndroidLoggedIn` |
+| 2 | 首页（仅游戏段） | `HomeCheck` |
+| 3 | 语音房 → 退房回主页 | `VoiceRoomTest` |
+| 4 | 直播间 → 回主页 | `LiveAndroidLiteTest` |
+| 5 | 热门&关注 | `MomentPublishCheck` |
+| 6 | 消息 | IM 列表 → 私聊 → 群聊 |
+| 7 | 我的（末尾登出） | `MeCheck` |
 
 ```bash
 cd /path/to/scripts
@@ -34,7 +34,13 @@ SCRIPT_APPIUM_URL=http://127.0.0.1:4723/ SCRIPT_ENV=TEST \
 --continue-on-fail             # 某模块失败后继续后续（默认 fail-fast）
 ```
 
-配置：首页 / 热门&关注 / 我的 默认读 `config.home.android.lite.json`（含 `accounts.game` / `accounts.friend`）；其余模块默认 `config.app.json`（或你传入的 `SCRIPT_CONFIG`）。
+配置：`SCRIPT_CONFIG`（默认 `config.app.json`）。独立跑首页/热门/我的时仍可用 `config.home.android.lite.json`。
+
+串联行为（`SCRIPT_LITE_ALL=1` 自动设置）：
+
+- 首页**不会** `logout` 再切交友号（只跑游戏段）
+- 各模块 `ensure*LoggedIn` 发现已登录则直接继续，禁止「登录成功又登录」
+- 语音房 / 直播结束后会回到主页底栏，再进下一模块
 
 ---
 

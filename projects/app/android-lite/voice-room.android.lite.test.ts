@@ -34,6 +34,7 @@ import {
   type Locator,
 } from '../../../src/resources/AppiumResource.ts';
 import { loginWithPhonePassword } from '../core/_lib/androidLoginFlow.ts';
+import { isExecutedAsMain, isLiteAllChain } from '../core/_lib/androidLiteAllAttach.ts';
 
 /** 平台常注入 localhost；Node 26 fetch 会走 IPv6 导致 fetch failed。探测可达地址后再建会话。 */
 function normalizeAppiumBase(raw: string): string {
@@ -2200,7 +2201,7 @@ abstract class VoiceRoomSampleBase extends AppBaseClass {
   }
 }
 
-class VoiceRoomTest extends VoiceRoomSampleBase {
+export class VoiceRoomTest extends VoiceRoomSampleBase {
   private readonly message: string;
   private readonly skipEnter: boolean;
   private micResult: 'on-mic' | 'queued' | null = null;
@@ -2469,7 +2470,16 @@ class VoiceRoomTest extends VoiceRoomSampleBase {
         pass: onMic || queued,
       };
     });
+
+    // lite-all 串联：退房回主页，方便下一模块（直播）连贯继续
+    if (isLiteAllChain()) {
+      await this.act('串联：退出语音房回到主页', async () => {
+        await this.leaveRoomToMain();
+      });
+    }
   }
 }
 
-await new VoiceRoomTest().execute();
+if (isExecutedAsMain(import.meta.url)) {
+  await new VoiceRoomTest().execute();
+}

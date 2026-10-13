@@ -25,6 +25,8 @@
 import { AppBaseClass, type AppAccount } from '../../../src/base/AppBaseClass.ts';
 import { by, sleep, type AppiumCapabilities, type Locator } from '../../../src/resources/AppiumResource.ts';
 import { alignLiteConfigPath, querySmsCode as querySmsCodeFromDb } from '../core/_lib/androidSmsOtp.ts';
+import { ensureAndroidLoggedIn } from '../core/_lib/androidLoginFlow.ts';
+import { isExecutedAsMain, isLiteAllChain } from '../core/_lib/androidLiteAllAttach.ts';
 
 // 账号与 userToken 统一从 SCRIPT_CONFIG 读取（accounts.game + userToken）
 alignLiteConfigPath();
@@ -120,7 +122,7 @@ function momentDescByText(text: string): Locator {
   return by.xpath(`//*[@resource-id='${xid('momentItemDescriptionTv')}' and contains(@text,${JSON.stringify(text)})]`);
 }
 
-class MomentPublishCheck extends AppBaseClass {
+export class MomentPublishCheck extends AppBaseClass {
   constructor() {
     super('android', 'lite');
     this.total = 15; // 预估步数（仅 start 元数据）
@@ -345,7 +347,13 @@ class MomentPublishCheck extends AppBaseClass {
   private async ensureLoggedInAs(timeoutMs = 45_000): Promise<void> {
     const state = await this.enterMeTab();
     if (state === 'logged-in') {
-      this.log(`账号 ${this.account().username} 已登录，无需重新登录`);
+      this.log(`账号已登录，无需重新登录`);
+      return;
+    }
+    // 串联模式走共用登录流（支持测网 +62），避免强制 +86 卡住
+    if (isLiteAllChain()) {
+      this.log('串联模式补登：共用登录流');
+      await ensureAndroidLoggedIn(this, this.account());
       return;
     }
     this.log(`当前未登录，使用账号 ${this.account().username} 执行登录`);
@@ -499,4 +507,6 @@ class MomentPublishCheck extends AppBaseClass {
   }
 }
 
-await new MomentPublishCheck().execute();
+if (isExecutedAsMain(import.meta.url)) {
+  await new MomentPublishCheck().execute();
+}

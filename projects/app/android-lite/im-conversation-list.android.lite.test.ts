@@ -32,8 +32,9 @@ import {
   loginWithPhonePassword,
   registerAndroidLoginStates,
 } from '../core/_lib/androidLoginFlow.ts';
+import { isExecutedAsMain } from '../core/_lib/androidLiteAllAttach.ts';
 
-class AndroidImConversationListSmoke extends AppBaseClass {
+export class AndroidImConversationListSmoke extends AppBaseClass {
   private imReady = false;
   private hasGroup = false;
 
@@ -421,4 +422,6 @@ class AndroidImConversationListSmoke extends AppBaseClass {
   }
 }
 
-await new AndroidImConversationListSmoke().execute();
+if (isExecutedAsMain(import.meta.url)) {
+  await new AndroidImConversationListSmoke().execute();
+}

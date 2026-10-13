@@ -30,8 +30,9 @@ import {
   loginWithPhonePassword,
   registerAndroidLoginStates,
 } from '../core/_lib/androidLoginFlow.ts';
+import { isExecutedAsMain } from '../core/_lib/androidLiteAllAttach.ts';
 
-class AndroidImGroupChatSmoke extends AppBaseClass {
+export class AndroidImGroupChatSmoke extends AppBaseClass {
   private groupIndex: number | null = null;
   private lastSent = '';
   private lastAt = '';
@@ -178,4 +179,6 @@ class AndroidImGroupChatSmoke extends AppBaseClass {
   }
 }
 
-await new AndroidImGroupChatSmoke().execute();
+if (isExecutedAsMain(import.meta.url)) {
+  await new AndroidImGroupChatSmoke().execute();
+}

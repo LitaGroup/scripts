@@ -33,6 +33,8 @@
 import { AppBaseClass, type AppAccount } from '../../../src/base/AppBaseClass.ts';
 import { by, sleep, type AppiumCapabilities, type Locator } from '../../../src/resources/AppiumResource.ts';
 import { alignLiteConfigPath, querySmsCode as querySmsCodeFromDb } from '../core/_lib/androidSmsOtp.ts';
+import { ensureAndroidLoggedIn } from '../core/_lib/androidLoginFlow.ts';
+import { isExecutedAsMain, isLiteAllChain } from '../core/_lib/androidLiteAllAttach.ts';
 
 // 本脚本账号与 userToken 统一从 SCRIPT_CONFIG 指定的单一配置文件读取：
 //   - 账号：AppBaseClass.account() 读 SCRIPT_CONFIG 的 accounts.game
@@ -175,7 +177,7 @@ function nobleTabByText(text: string): Locator {
   return by.xpath(`//*[@resource-id='${xid('tabTv')}' and @text=${JSON.stringify(text)}]/ancestor::*[@clickable='true'][1]`);
 }
 
-class MeCheck extends AppBaseClass {
+export class MeCheck extends AppBaseClass {
   constructor() {
     super('android', 'lite');
     this.total = 40; // 预估步数（仅 start 元数据；实际以 done.total 为准）
@@ -412,7 +414,12 @@ class MeCheck extends AppBaseClass {
   private async ensureLoggedInAs(timeoutMs = 45_000): Promise<void> {
     const state = await this.enterMeTab();
     if (state === 'logged-in') {
-      this.log(`账号 ${this.account().username} 已登录，无需重新登录`);
+      this.log(`账号已登录，无需重新登录`);
+      return;
+    }
+    if (isLiteAllChain()) {
+      this.log('串联模式补登：共用登录流');
+      await ensureAndroidLoggedIn(this, this.account());
       return;
     }
     this.log(`当前未登录，使用账号 ${this.account().username} 执行登录`);
@@ -535,7 +542,12 @@ class MeCheck extends AppBaseClass {
     await this.caseCompanionWorkbench();
     await this.caseDarkMode();
     await this.caseBeauty();
-    await this.caseLogout();
+    // 串联套件末尾仍可登出；若后续还要挂模块可设 SCRIPT_LITE_ALL_KEEP_LOGIN=1 跳过
+    if ((process.env.SCRIPT_LITE_ALL_KEEP_LOGIN ?? '').trim() === '1') {
+      this.log('SCRIPT_LITE_ALL_KEEP_LOGIN=1：跳过退出登录');
+    } else {
+      await this.caseLogout();
+    }
   }
 
   /** 7.1 个人主页：点击头像进个人主页 → 发布动态（来自图库）→ 校验展示 → 删除清理 */
@@ -1043,4 +1055,6 @@ class MeCheck extends AppBaseClass {
   }
 }
 
-await new MeCheck().execute();
+if (isExecutedAsMain(import.meta.url)) {
+  await new MeCheck().execute();
+}

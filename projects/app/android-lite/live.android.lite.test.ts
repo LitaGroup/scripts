@@ -29,6 +29,7 @@ import {
 } from '../../../src/resources/AppiumResource.ts';
 import { loginWithPhonePassword, ensureAndroidLoggedIn } from '../core/_lib/androidLoginFlow.ts';
 import { resolveAndroidStrings } from '../core/_lib/androidAppStrings.ts';
+import { isExecutedAsMain, isLiteAllChain } from '../core/_lib/androidLiteAllAttach.ts';
 
 /**
  * Appium 建连：与 voice-room 同一套。
@@ -236,7 +237,7 @@ const RUNTIME_PERMISSIONS = [
   'android.permission.READ_EXTERNAL_STORAGE',
 ];
 
-class LiveAndroidLiteTest extends AppBaseClass {
+export class LiveAndroidLiteTest extends AppBaseClass {
   /** 与语音房一致：显式传入地址；真正建连前再 waitForReachableAppiumUrl 刷新 env */
   protected override readonly driver = new AppiumResource(
     process.env.SCRIPT_APPIUM_URL ?? 'http://127.0.0.1:4723/',
@@ -701,6 +702,46 @@ class LiveAndroidLiteTest extends AppBaseClass {
       await this.dismissLiveGiftPanel();
       await this.leaveAudienceLiveRoom();
     });
+
+    // lite-all 串联：确保回到带底栏的主页，方便下一模块（热门&关注）连贯继续
+    if (isLiteAllChain()) {
+      await this.act('串联：退出直播相关页回到主页', async () => {
+        await this.ensureBackToMainForChain();
+      });
+    }
+  }
+
+  /** 串联收尾：离开 VideoRoom / 开播编辑页，回到可见底栏的主页 */
+  protected async ensureBackToMainForChain(): Promise<void> {
+    if (await this.isActivity(VIDEO_ROOM_ACTIVITY)) {
+      try {
+        await this.leaveAudienceLiveRoom();
+      } catch (e) {
+        this.log(`退出直播间失败，尝试 back: ${e instanceof Error ? e.message : String(e)}`);
+        await this.driver.back();
+        await sleep(800);
+      }
+    }
+    for (const act of [ACT.editInfo, ACT.chooseRoom, ACT.chooseGame]) {
+      if (await this.isActivity(act)) {
+        await this.driver.back();
+        await sleep(600);
+      }
+    }
+    const deadline = Date.now() + 15_000;
+    while (Date.now() < deadline) {
+      await this.closePopups();
+      if (
+        (await this.driver.exists(by.id(ID.tabParty))) ||
+        (await this.driver.exists(by.id(ID.tabHome)))
+      ) {
+        this.log('已回到主页底栏');
+        return;
+      }
+      await this.driver.back();
+      await sleep(600);
+    }
+    this.log('串联回主页超时，后续模块将自行导航');
   }
 
   // ─── helpers ───────────────────────────────────────────────
@@ -1465,4 +1506,6 @@ class LiveAndroidLiteTest extends AppBaseClass {
   }
 }
 
-await new LiveAndroidLiteTest().execute();
+if (isExecutedAsMain(import.meta.url)) {
+  await new LiveAndroidLiteTest().execute();
+}

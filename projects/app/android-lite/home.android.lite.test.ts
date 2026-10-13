@@ -34,6 +34,8 @@
 import { AppBaseClass, type AppAccount } from '../../../src/base/AppBaseClass.ts';
 import { by, sleep, type AppiumCapabilities, type Locator } from '../../../src/resources/AppiumResource.ts';
 import { alignLiteConfigPath, querySmsCode as querySmsCodeFromDb } from '../core/_lib/androidSmsOtp.ts';
+import { ensureAndroidLoggedIn } from '../core/_lib/androidLoginFlow.ts';
+import { isExecutedAsMain, isLiteAllChain } from '../core/_lib/androidLiteAllAttach.ts';
 
 // 本脚本账号与 userToken 统一从 SCRIPT_CONFIG 指定的单一配置文件读取：
 //   - 账号：AppBaseClass.account() 读 SCRIPT_CONFIG 的 accounts.{game|friend}
@@ -149,7 +151,7 @@ function inContainer(containerRaw: string, childRaw: string): Locator {
   return by.xpath(`//*[@resource-id='${xid(containerRaw)}']//*[@resource-id='${xid(childRaw)}']`);
 }
 
-class HomeCheck extends AppBaseClass {
+export class HomeCheck extends AppBaseClass {
   constructor() {
     super('android', 'lite');
     this.total = 33; // 预估步数（仅 start 元数据；实际以 done.total 为准，含跳过分支时动态变化）
@@ -413,6 +415,28 @@ class HomeCheck extends AppBaseClass {
       const n = await this.closePopups();
       if (n > 0) this.log(`关闭弹窗 ${n} 个`);
     });
+
+    // lite-all 串联：登录模块已登入 → 禁止再 logout 切号（否则会退出到登录页卡住）
+    if (isLiteAllChain()) {
+      await this.act('串联模式：保持当前登录（不退出/不切号）', async () => {
+        const state = await this.enterMeTab();
+        if (state === 'logged-in') {
+          this.log('已登录，直接跑首页游戏段');
+          return;
+        }
+        this.log('串联模式下未登录，补登（共用登录流，不强制 +86）');
+        this.currentAccount = 'game';
+        try {
+          await ensureAndroidLoggedIn(this, this.account());
+        } catch {
+          // game 账号可能缺失：回退 default/test
+          await ensureAndroidLoggedIn(this, super.account());
+        }
+      });
+      await this.runGameSection();
+      this.log('串联模式：跳过交友账号切换（2.2），避免打断后续模块');
+      return;
+    }
 
     // ---------- 2.1 游戏段（accounts.game） ----------
     await this.act('确保登录游戏账号（accounts.game）', async () => {
@@ -971,4 +995,6 @@ class HomeCheck extends AppBaseClass {
   }
 }
 
-await new HomeCheck().execute();
+if (isExecutedAsMain(import.meta.url)) {
+  await new HomeCheck().execute();
+}
