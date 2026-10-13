@@ -26,6 +26,26 @@
  */
 import { hostname } from 'node:os';
 import { AppBaseClass, type AppAccount } from '../../../src/base/AppBaseClass.ts';
+
+import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
+
+/** 被 node 直接执行（非被 lite-all import）时才建会话 */
+function isExecutedAsMain(metaUrl: string): boolean {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  try {
+    return metaUrl === pathToFileURL(resolve(entry)).href;
+  } catch {
+    return false;
+  }
+}
+
+/** lite-all 串联（SCRIPT_LITE_ALL=1）：禁止中途 logout / 切号 */
+function isLiteAllChain(): boolean {
+  return (process.env.SCRIPT_LITE_ALL ?? '').trim() === '1';
+}
+
 import {
   AppiumResource,
   by,
@@ -34,7 +54,6 @@ import {
   type Locator,
 } from '../../../src/resources/AppiumResource.ts';
 import { loginWithPhonePassword } from '../core/_lib/androidLoginFlow.ts';
-import { isExecutedAsMain, isLiteAllChain } from './androidLiteAllAttach.ts';
 
 /** 平台常注入 localhost；Node 26 fetch 会走 IPv6 导致 fetch failed。探测可达地址后再建会话。 */
 function normalizeAppiumBase(raw: string): string {

@@ -34,7 +34,26 @@ import { AppBaseClass, type AppAccount } from '../../../src/base/AppBaseClass.ts
 import { by, sleep, type AppiumCapabilities, type Locator } from '../../../src/resources/AppiumResource.ts';
 import { alignLiteConfigPath, querySmsCode as querySmsCodeFromDb } from '../core/_lib/androidSmsOtp.ts';
 import { ensureAndroidLoggedIn } from '../core/_lib/androidLoginFlow.ts';
-import { isExecutedAsMain, isLiteAllChain } from './androidLiteAllAttach.ts';
+
+
+import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
+
+/** 被 node 直接执行（非被 lite-all import）时才建会话 */
+function isExecutedAsMain(metaUrl: string): boolean {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  try {
+    return metaUrl === pathToFileURL(resolve(entry)).href;
+  } catch {
+    return false;
+  }
+}
+
+/** lite-all 串联（SCRIPT_LITE_ALL=1）：禁止中途 logout / 切号 */
+function isLiteAllChain(): boolean {
+  return (process.env.SCRIPT_LITE_ALL ?? '').trim() === '1';
+}
 
 // 本脚本账号与 userToken 统一从 SCRIPT_CONFIG 指定的单一配置文件读取：
 //   - 账号：AppBaseClass.account() 读 SCRIPT_CONFIG 的 accounts.game

@@ -20,6 +20,26 @@
 import { hostname } from 'node:os';
 import http from 'node:http';
 import { AppBaseClass, type AppAccount } from '../../../src/base/AppBaseClass.ts';
+
+import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
+
+/** 被 node 直接执行（非被 lite-all import）时才建会话 */
+function isExecutedAsMain(metaUrl: string): boolean {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  try {
+    return metaUrl === pathToFileURL(resolve(entry)).href;
+  } catch {
+    return false;
+  }
+}
+
+/** lite-all 串联（SCRIPT_LITE_ALL=1）：禁止中途 logout / 切号 */
+function isLiteAllChain(): boolean {
+  return (process.env.SCRIPT_LITE_ALL ?? '').trim() === '1';
+}
+
 import {
   AppiumResource,
   by,
@@ -29,7 +49,6 @@ import {
 } from '../../../src/resources/AppiumResource.ts';
 import { loginWithPhonePassword, ensureAndroidLoggedIn } from '../core/_lib/androidLoginFlow.ts';
 import { resolveAndroidStrings } from '../core/_lib/androidAppStrings.ts';
-import { isExecutedAsMain, isLiteAllChain } from './androidLiteAllAttach.ts';
 
 /**
  * Appium 建连：与 voice-room 同一套。

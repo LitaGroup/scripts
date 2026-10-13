@@ -31,7 +31,6 @@ import {
   registerAndroidLoginStates,
 } from '../core/_lib/androidLoginFlow.ts';
 import { ANDROID_LOC as LOC } from '../core/_lib/androidLocators.ts';
-import { runAttachedModule } from './androidLiteAllAttach.ts';
 import { HomeCheck } from './home.android.lite.test.ts';
 import { VoiceRoomTest } from './voice-room.android.lite.test.ts';
 import { LiveAndroidLiteTest } from './live.android.lite.test.ts';
@@ -42,6 +41,53 @@ import { AndroidImGroupChatSmoke } from './im-group-chat.android.lite.test.ts';
 import { MeCheck } from './me.android.lite.test.ts';
 
 process.env.SCRIPT_LITE_ALL = '1';
+
+/**
+ * 在已有会话上跑子模块 runCase（内联，避免平台不同步独立 helper 文件）
+ */
+async function runAttachedModule(
+  parent: AppBaseClass,
+  label: string,
+  createModule: () => AppBaseClass,
+): Promise<void> {
+  const mod = createModule();
+
+  Object.defineProperty(mod, 'driver', {
+    configurable: true,
+    enumerable: true,
+    get: () => parent['driver'],
+  });
+
+  Object.defineProperty(mod, 'failFastReason', {
+    configurable: true,
+    enumerable: true,
+    get: () => (parent as unknown as { failFastReason: string | null }).failFastReason,
+    set: (v: string | null) => {
+      (parent as unknown as { failFastReason: string | null }).failFastReason = v;
+    },
+  });
+
+  const p = parent as unknown as {
+    act: (title: string, fn: () => unknown | Promise<unknown>) => Promise<void>;
+    check: (
+      title: string,
+      fn: () =>
+        | { expect: string; real: string; pass?: boolean; message?: string }
+        | Promise<{ expect: string; real: string; pass?: boolean; message?: string }>,
+    ) => Promise<void>;
+    log: (msg: string) => void;
+    skip: (msg?: string) => never;
+  };
+
+  (mod as unknown as { act: typeof p.act }).act = (title, fn) => p.act(`${label} · ${title}`, fn);
+  (mod as unknown as { check: typeof p.check }).check = (title, fn) => p.check(`${label} · ${title}`, fn);
+  (mod as unknown as { log: typeof p.log }).log = (msg) => p.log(`[${label}] ${msg}`);
+  (mod as unknown as { skip: typeof p.skip }).skip = (msg) => p.skip(msg);
+
+  parent['log'](`── 开始模块 ${label}（同会话，保持登录）──`);
+  await (mod as unknown as { runCase: () => Promise<void> }).runCase();
+  parent['log'](`── 结束模块 ${label} ──`);
+}
 
 type ModuleId = 'login' | 'home' | 'voice' | 'live' | 'moment' | 'im' | 'me';
 
