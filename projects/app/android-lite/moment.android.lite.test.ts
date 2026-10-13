@@ -26,7 +26,7 @@ import { AppBaseClass, type AppAccount } from '../../../src/base/AppBaseClass.ts
 import { by, sleep, type AppiumCapabilities, type Locator } from '../../../src/resources/AppiumResource.ts';
 import { alignLiteConfigPath, querySmsCode as querySmsCodeFromDb } from '../core/_lib/androidSmsOtp.ts';
 import { ensureAndroidLoggedIn } from '../core/_lib/androidLoginFlow.ts';
-import { isExecutedAsMain, isLiteAllChain } from '../core/_lib/androidLiteAllAttach.ts';
+import { isExecutedAsMain, isLiteAllChain } from './androidLiteAllAttach.ts';
 
 // 账号与 userToken 统一从 SCRIPT_CONFIG 读取（accounts.game + userToken）
 alignLiteConfigPath();

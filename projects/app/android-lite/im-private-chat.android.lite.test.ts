@@ -33,7 +33,7 @@ import {
   loginWithPhonePassword,
   registerAndroidLoginStates,
 } from '../core/_lib/androidLoginFlow.ts';
-import { isExecutedAsMain } from '../core/_lib/androidLiteAllAttach.ts';
+import { isExecutedAsMain } from './androidLiteAllAttach.ts';
 
 export class AndroidImPrivateChatSmoke extends AppBaseClass {
   private lastSent = '';

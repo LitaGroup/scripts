@@ -4,7 +4,7 @@
  */
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import type { AppBaseClass } from '../../../../src/base/AppBaseClass.ts';
+import type { AppBaseClass } from '../../../src/base/AppBaseClass.ts';
 
 /** 当前文件是否被 node 直接执行（而非被 import） */
 export function isExecutedAsMain(metaUrl: string): boolean {

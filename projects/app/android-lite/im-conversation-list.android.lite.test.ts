@@ -32,7 +32,7 @@ import {
   loginWithPhonePassword,
   registerAndroidLoginStates,
 } from '../core/_lib/androidLoginFlow.ts';
-import { isExecutedAsMain } from '../core/_lib/androidLiteAllAttach.ts';
+import { isExecutedAsMain } from './androidLiteAllAttach.ts';
 
 export class AndroidImConversationListSmoke extends AppBaseClass {
   private imReady = false;

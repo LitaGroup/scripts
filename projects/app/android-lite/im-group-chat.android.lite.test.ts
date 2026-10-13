@@ -30,7 +30,7 @@ import {
   loginWithPhonePassword,
   registerAndroidLoginStates,
 } from '../core/_lib/androidLoginFlow.ts';
-import { isExecutedAsMain } from '../core/_lib/androidLiteAllAttach.ts';
+import { isExecutedAsMain } from './androidLiteAllAttach.ts';
 
 export class AndroidImGroupChatSmoke extends AppBaseClass {
   private groupIndex: number | null = null;

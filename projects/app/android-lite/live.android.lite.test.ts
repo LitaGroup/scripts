@@ -29,7 +29,7 @@ import {
 } from '../../../src/resources/AppiumResource.ts';
 import { loginWithPhonePassword, ensureAndroidLoggedIn } from '../core/_lib/androidLoginFlow.ts';
 import { resolveAndroidStrings } from '../core/_lib/androidAppStrings.ts';
-import { isExecutedAsMain, isLiteAllChain } from '../core/_lib/androidLiteAllAttach.ts';
+import { isExecutedAsMain, isLiteAllChain } from './androidLiteAllAttach.ts';
 
 /**
  * Appium 建连：与 voice-room 同一套。

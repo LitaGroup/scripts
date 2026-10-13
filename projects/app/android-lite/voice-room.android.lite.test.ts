@@ -34,7 +34,7 @@ import {
   type Locator,
 } from '../../../src/resources/AppiumResource.ts';
 import { loginWithPhonePassword } from '../core/_lib/androidLoginFlow.ts';
-import { isExecutedAsMain, isLiteAllChain } from '../core/_lib/androidLiteAllAttach.ts';
+import { isExecutedAsMain, isLiteAllChain } from './androidLiteAllAttach.ts';
 
 /** 平台常注入 localhost；Node 26 fetch 会走 IPv6 导致 fetch failed。探测可达地址后再建会话。 */
 function normalizeAppiumBase(raw: string): string {

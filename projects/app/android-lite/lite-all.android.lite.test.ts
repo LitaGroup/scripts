@@ -31,7 +31,7 @@ import {
   registerAndroidLoginStates,
 } from '../core/_lib/androidLoginFlow.ts';
 import { ANDROID_LOC as LOC } from '../core/_lib/androidLocators.ts';
-import { runAttachedModule } from '../core/_lib/androidLiteAllAttach.ts';
+import { runAttachedModule } from './androidLiteAllAttach.ts';
 import { HomeCheck } from './home.android.lite.test.ts';
 import { VoiceRoomTest } from './voice-room.android.lite.test.ts';
 import { LiveAndroidLiteTest } from './live.android.lite.test.ts';
