@@ -262,25 +262,25 @@ class PkAllExport extends ExportBaseClass {
 
   private async enrichUsers(uids: Array<string | number>): Promise<Map<string, Row>> {
     const rows = await queryInChunks('odps', uids, (inSql) =>
-      `SELECT id, \`no\`, nick, vip_level, country_name, locale, gender FROM lita.user_info WHERE id IN (${inSql})`);
+      `SELECT id, \`no\`, nick, vip_level, country_name, locale, gender FROM user_info WHERE id IN (${inSql})`);
     return new Map(rows.map((r) => [String(r.id), r]));
   }
 
   private async enrichRooms(roomIds: Array<string | number>): Promise<Map<string, Row>> {
     const rows = await queryInChunks('odps', roomIds, (inSql) =>
-      `SELECT room_id, room_name, room_type, user_id, create_time, locale, country FROM lita.lita_voice_room WHERE room_id IN (${inSql})`);
+      `SELECT room_id, room_name, room_type, user_id, create_time, locale, country FROM lita_voice_room WHERE room_id IN (${inSql})`);
     return new Map(rows.map((r) => [String(r.room_id), r]));
   }
 
   private async enrichFamilies(familyIds: Array<string | number>): Promise<Map<string, Row>> {
     const rows = await queryInChunks('odps', familyIds, (inSql) =>
-      `SELECT id, family_no, family_name, user_id, create_time, locale, family_level FROM lita.lita_family WHERE id IN (${inSql})`);
+      `SELECT id, family_no, family_name, user_id, create_time, locale, family_level FROM lita_family WHERE id IN (${inSql})`);
     return new Map(rows.map((r) => [String(r.id), r]));
   }
 
   private async familyMemberCounts(familyIds: Array<string | number>): Promise<Map<string, number>> {
     const rows = await queryInChunks('odps', familyIds, (inSql) =>
-      `SELECT family_id, COUNT(*) AS cnt FROM lita.lita_family_user WHERE family_id IN (${inSql}) GROUP BY family_id`);
+      `SELECT family_id, COUNT(*) AS cnt FROM lita_family_user WHERE family_id IN (${inSql}) GROUP BY family_id`);
     return new Map(rows.map((r) => [String(r.family_id), Number(r.cnt)]));
   }
 
