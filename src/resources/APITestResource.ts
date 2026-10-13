@@ -1,3 +1,5 @@
+import { attachCurl, buildCurl } from './curl.ts';
+
 export interface APITestOptions {
   method?: string;
   body?: unknown;
@@ -28,10 +30,13 @@ function asRecord(v: unknown): Record<string, unknown> {
  * - 不带 l-user-token（与测试环境接入方式一致）
  * - 总是带 l-debug-timestamp（未指定则取当前时间）
  * - 返回响应体 data.data；HTTP>=400 或 status!=0 时抛错
+ * - 失败请求的错误信息附带可复现 curl（敏感头脱敏），便于排查参数问题
  */
 export class APITestResource {
   private readonly host: string;
   private readonly defaultTimeoutMs: number;
+  /** 最近一次请求的 curl（无论成败，供静默失败排查） */
+  lastCurl = '';
 
   constructor(options?: { host?: string; timeoutMs?: number }) {
     this.host = options?.host ?? DEFAULT_HOST;
@@ -48,11 +53,14 @@ export class APITestResource {
     if (options.locale !== undefined) headers['l-user-locale'] = options.locale;
     headers['l-debug-timestamp'] = formatDebugTimestamp(options.debugTimestamp);
     if (options.extraHeaders) Object.assign(headers, options.extraHeaders);
+    const timeoutMs = options.timeoutMs ?? this.defaultTimeoutMs;
+    const curl = buildCurl(url, method, headers, options.body, timeoutMs);
+    this.lastCurl = curl;
 
     const init: RequestInit = {
       method,
       headers,
-      signal: AbortSignal.timeout(options.timeoutMs ?? this.defaultTimeoutMs),
+      signal: AbortSignal.timeout(timeoutMs),
     };
     if (options.body !== undefined) {
       init.body = typeof options.body === 'string' ? options.body : JSON.stringify(options.body);
@@ -64,9 +72,9 @@ export class APITestResource {
     } catch (e) {
       const err = e as Error;
       if (err.name === 'TimeoutError' || err.name === 'AbortError') {
-        throw new Error(`APITestResource: request to ${url} timed out after ${options.timeoutMs ?? this.defaultTimeoutMs}ms`);
+        throw attachCurl(new Error(`APITestResource: request to ${url} timed out after ${timeoutMs}ms`), curl);
       }
-      throw new Error(`APITestResource: network error calling ${url}: ${err.message}`);
+      throw attachCurl(new Error(`APITestResource: network error calling ${url}: ${err.message}`), curl);
     }
 
     let data: unknown;
@@ -74,17 +82,17 @@ export class APITestResource {
       data = await res.json();
     } catch {
       const text = await res.text().catch(() => '');
-      throw new Error(`APITestResource: 非 JSON 响应: ${res.status} ${text.slice(0, 500)}`);
+      throw attachCurl(new Error(`APITestResource: 非 JSON 响应: ${res.status} ${text.slice(0, 500)}`), curl);
     }
 
     const body = asRecord(data);
     if (res.status >= 400) {
       const msg = body.msg ?? body.message ?? res.statusText;
-      throw new Error(`APITestResource: HTTP ${res.status}: ${msg}`);
+      throw attachCurl(new Error(`APITestResource: HTTP ${res.status}: ${msg}`), curl);
     }
     const status = body.status;
     if (status !== undefined && status !== 0) {
-      throw new Error(`APITestResource: 业务错误 status=${status}: ${body.msg ?? ''}`);
+      throw attachCurl(new Error(`APITestResource: 业务错误 status=${status}: ${body.msg ?? ''}`), curl);
     }
     return body.data;
   }

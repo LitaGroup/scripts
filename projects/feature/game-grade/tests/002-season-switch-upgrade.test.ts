@@ -86,9 +86,9 @@ class SeasonSwitchUpgrade002 extends GameGradeTestBase {
         consumerError = '';
       } catch (e) {
         consumerError = (e as Error).message;
-        this.log(`接口返回错误：${consumerError}`);
       }
       this.log(`trans_no=${transNoA} amount=${GAME_AMOUNT} biz=${CAUSE_BIZ}`);
+      this.log(`请求 curl: ${this.gameGrade.api.lastCurl}`);
     });
 
     await this.check('场景A 懒切换已触发：存在 SEASON_SWITCH 经验流水（经验=新等级 experienceLimit）', async (): Promise<CheckResult> => {

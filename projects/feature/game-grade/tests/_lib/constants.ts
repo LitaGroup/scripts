@@ -21,21 +21,23 @@ export const TS_SWITCH_EARLY = '2026-10-26T06:00:00+08:00';
 export const TS_SWITCH_LATE = '2026-10-27T17:00:00+08:00';
 
 /**
- * 首轮锚定容差：当前 202610 yaml 的 startTime 解析存在时区偏移（实际轮次锚点为 10-26 16:00+08），
- * 断言按“锚定在赛季开始日 00:00 ~ 16:00(+08)”区间放行，两种解析口径均覆盖。
+ * 首轮锚定：赛季 startTime = 2026-10-26 00:00:00 北京时间（需求文档），轮次按自然日边界锚定
+ * （日蛋 00:00→次日 00:00），XXL cron 固定每天北京时间 00:01:00 结算到期轮次。
+ * 断言按精确锚点校验（2026-10-13 回归实测 00:00 锚点；修复前 GMT-8 误解析到 16:00 的行为已消除）。
  */
-export const ANCHOR_TOLERANCE_MS = 16 * 3_600_000;
+export const ANCHOR_TOLERANCE_MS = 0;
 
 /** 轮次周期（日蛋 86400s、周蛋 604800s） */
 export const DAY_MS = 86_400_000;
 export const WEEK_MS = 604_800_000;
 
-/** 测试用户（合成大 UID，测试前后均清理；勿复用真实用户） */
-export const USER_CONSUMER = 910111; // 用例2：consumer 触发
-export const USER_ENTRANCE = 910112; // 用例2：entrance 触发
-export const USER_FRESH = 910113;    // 用例2：纯新用户对照
-export const USER_PROBE = 910114;    // 用例1：biz 观察用户（GET 不落库）
-export const EGG_USERS = [910121, 910122, 910123]; // 用例3：鸡蛋结算参与用户
+/** 测试用户：必须使用真实测试用户（管道按 user_id 校验用户，合成 UID 会静默不落库）；用例前后清理其 game-grade 数据 */
+export const TEST_USER_POOL = [16525, 16524, 16523, 16522, 16521, 16519, 16518, 16504, 16501, 16500, 16499];
+export const USER_CONSUMER = 16525; // 用例2：consumer 触发
+export const USER_ENTRANCE = 16524; // 用例2：entrance 触发
+export const USER_FRESH = 16523;    // 用例2：纯新用户对照
+export const USER_PROBE = 16522;    // 用例1：biz 观察用户（GET 不落库）
+export const EGG_USERS = [16521, 16519, 16518]; // 用例3：鸡蛋结算参与用户
 
 /** 造数等级（期望衰减值动态查 game_grade.next_season_grade，勿硬编码断言） */
 export const SEED_GRADE_CONSUMER = 'Legend I'; // -> Epic I（limit 100000）

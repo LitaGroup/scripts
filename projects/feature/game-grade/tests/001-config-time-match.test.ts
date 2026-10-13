@@ -115,7 +115,7 @@ class ConfigTimeMatch001 extends GameGradeTestBase {
       if (fresh.length === 0) {
         const all = after.map((r) => `#${r['id']} ${bj(r['start_time'])}~${bj(r['end_time'])}`).join('；') || '无';
         return {
-          expect: `RUNNING 首轮 start∈[${bj(SEASON_START_MS)}, ${bj(SEASON_START_MS + ANCHOR_TOLERANCE_MS)}]`,
+          expect: `RUNNING 首轮 start=${bj(SEASON_START_MS)}（周期 24h）`,
           real: `202610 RUNNING 轮：${all}`,
           pass: false,
         };
@@ -123,8 +123,8 @@ class ConfigTimeMatch001 extends GameGradeTestBase {
       const r = fresh[fresh.length - 1];
       firstRound = { id: int(r['id']), round: String(r['round']) };
       if (!createdNew.includes(firstRound.round)) createdNew.push(firstRound.round);
-      this.log(`202610 首轮 ${firstRound.round} start=${bj(r['start_time'])}（当前配置 startTime 解析偏移约 16h，容差内放行）`);
-      return { expect: '存在锚定赛季开始日的 RUNNING 首轮', real: `首轮 ${firstRound.round}`, pass: true };
+      this.log(`202610 首轮 ${firstRound.round} start=${bj(r['start_time'])} end=${bj(r['end_time'])}（结算 cron 每天 00:01:00 北京时间，首轮按自然日锚定 10-26 00:00）`);
+      return { expect: '存在锚定赛季开始日（10-26 00:00+08）的 RUNNING 首轮', real: `首轮 ${firstRound.round}`, pass: true };
     });
     await this.check('跨赛季日结算不再产生 202608 新轮（旧赛季被 endTime 上界守卫挡住）', async (): Promise<CheckResult> => {
       this.needService();

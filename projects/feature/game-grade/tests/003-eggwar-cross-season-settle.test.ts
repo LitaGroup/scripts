@@ -9,9 +9,9 @@ import {
 } from './_lib/constants.ts';
 
 const TS_PHASE_A = '2026-10-25T20:00:00+08:00'; // 旧赛季最后一晚（settle 归属 202608）
-/** 参与积分：value 降序 = 910121 > 910122 > 910123 */
-const DAILY_VALUES: Record<number, number> = { 910121: 5000, 910122: 3000, 910123: 1000 };
-const WEEKLY_VALUES: Record<number, number> = { 910121: 8000, 910122: 2000 };
+/** 参与积分：value 降序 = 16521 > 16519 > 16518 */
+const DAILY_VALUES: Record<number, number> = { 16521: 5000, 16519: 3000, 16518: 1000 };
+const WEEKLY_VALUES: Record<number, number> = { 16521: 8000, 16519: 2000 };
 
 /**
  * 003-跨赛季鸡蛋结算（旧赛季末轮结算 + 新赛季首轮初始化）
@@ -141,12 +141,12 @@ class EggwarCrossSeasonSettle003 extends GameGradeTestBase {
       for (const r of newRounds(newDailyBefore, after)) this.createdRounds.push(String(r['round']));
       const first = after.filter((r) => anchoredFirstRound(r as { start_time: number; end_time: number }, DAY_MS, SEASON_START_MS, ANCHOR_TOLERANCE_MS));
       return {
-        expect: `RUNNING 首轮 start∈[${bj(SEASON_START_MS)}, ${bj(SEASON_START_MS + ANCHOR_TOLERANCE_MS)}] 周期=24h`,
+        expect: `RUNNING 首轮 start=${bj(SEASON_START_MS)} 周期=24h`,
         real: first.length > 0
           ? first.map((r) => `${r['round']}(${bj(r['start_time'])}~${bj(r['end_time'])})`).join('，')
           : (after.map((r) => `${r['round']}(${bj(r['start_time'])}~${bj(r['end_time'])})`).join('，') || '无 RUNNING 轮'),
         pass: first.length > 0,
-        message: '锚点容差 16h：当前 yaml startTime 按 GMT-8 解析（10-26 16:00+08），两种解析口径均在容差内',
+        message: '精确锚点：赛季 startTime=10-26 00:00:00+08（结算 cron 每天 00:01:00 北京时间）',
       };
     });
     await this.check('阶段B 不再产生 202608 新轮（赛季 endTime 上界守卫）', async (): Promise<CheckResult> => {
@@ -171,7 +171,7 @@ class EggwarCrossSeasonSettle003 extends GameGradeTestBase {
       for (const r of newRounds(newWeeklyBefore, after)) this.createdRounds.push(String(r['round']));
       const first = after.filter((r) => anchoredFirstRound(r as { start_time: number; end_time: number }, WEEK_MS, SEASON_START_MS, ANCHOR_TOLERANCE_MS));
       return {
-        expect: `RUNNING 首轮 start∈[${bj(SEASON_START_MS)}, ${bj(SEASON_START_MS + ANCHOR_TOLERANCE_MS)}] 周期=7d`,
+        expect: `RUNNING 首轮 start=${bj(SEASON_START_MS)} 周期=7d`,
         real: first.length > 0
           ? first.map((r) => `${r['round']}(${bj(r['start_time'])}~${bj(r['end_time'])})`).join('，')
           : (after.map((r) => `${r['round']}(${bj(r['start_time'])}~${bj(r['end_time'])})`).join('，') || '无 RUNNING 轮'),

@@ -46,14 +46,14 @@ node projects/feature/game-grade/tests/003-eggwar-cross-season-settle.test.ts
 | --- | --- |
 | 001 配置按时间匹配 | 17/17 全绿 |
 | 002 懒式切换晋级 | 18 过 / 1 fail（场景A：`handleUserDealAccountLog2` 不落库，见上）/ 6 skip（依赖场景A） |
-| 003 跨赛季鸡蛋结算 | 16/16 全绿（结算、名次 910121>910122>910123、奖励、首轮锚定 10-26 00:00、上界守卫） |
+| 003 跨赛季鸡蛋结算 | 16/16 全绿（结算、名次 16521>16519>16518、奖励 6000/3000/1000、首轮精确锚定 10-26 00:00+08、上界守卫） |
 
 ## 数据与清理
 
-- 测试用户为合成大 UID（910111~910114、910121~910123），前后均清理 `user_game_grade` / `_log` / `_experience` / `_award`（biz=202608、202610）。
+- 测试用户：**必须使用真实测试用户**（`TEST_USER_POOL`：16525、16524、16523、16522、16521、16519、16518、16504、16501、16500、16499 等 11 个，见 `_lib/constants.ts`）——结算发奖、用户昵称/头像回填等写路径按 user_id 校验用户，合成 UID 会被静默跳过（实测：合成用户结算有名次无奖励明细，真实用户正常发放）。用例前后清理其 game-grade 数据（biz=202608、202610 四件套）。
 - 鸡蛋合成轮次名固定 `20261025090001`（日）/ `20261025090002`（周），settle 副产物轮按 diff 追踪收尾清理；真实轮次（如 `20261013000003` 链）不触碰，即便误结算也会被真实 cron 按 cadence 自愈。
 - 造数依据：上赛季等级行 `user_game_grade`（season 取 biz 尾部数字）；衰减期望动态查 `lita_basic.game_grade`（biz=`game_grade_default`）的 `next_season_grade` / `experience_limit`，不硬编码。
-- transNo 断言只校验 `SEASON_SWITCH_` 前缀：transNo 中的 season 取自 yaml `season` 字段，未配置时代码默认 `202506`（技术文档已知注意点 #1）。
+- transNo 断言只校验 `SEASON_SWITCH_` 前缀：transNo 中的 season 取自 yaml `season` 字段。
 
 ## 服务层
 

@@ -1,4 +1,5 @@
 import { loadConfig } from './config.ts';
+import { attachCurl, buildCurl } from './curl.ts';
 import type { Database } from './databases.ts';
 
 export interface APIProdConfig {
@@ -81,29 +82,37 @@ export class APIProdResource {
     if (options.body !== undefined) {
       init.body = typeof options.body === 'string' ? options.body : JSON.stringify(options.body);
     }
+    const curl = buildCurl(url, method, headers, options.body, options.timeoutMs ?? this.defaultTimeoutMs);
     try {
       return await fetch(url, init);
     } catch (e) {
       const err = e as Error;
       if (err.name === 'TimeoutError' || err.name === 'AbortError') {
-        throw new Error(`APIProdResource: request to ${url} timed out after ${options.timeoutMs ?? this.defaultTimeoutMs}ms`);
+        throw attachCurl(new Error(`APIProdResource: request to ${url} timed out after ${options.timeoutMs ?? this.defaultTimeoutMs}ms`), curl);
       }
-      throw new Error(`APIProdResource: network error calling ${url}: ${err.message}`);
+      throw attachCurl(new Error(`APIProdResource: network error calling ${url}: ${err.message}`), curl);
     }
   }
 
   async query(database: Database, sql: string): Promise<QueryResult> {
+    const curl = buildCurl(
+      joinUrl(this.host, QUERY_PATH),
+      'POST',
+      { 'Content-Type': 'application/json', 'l-user-token': '***' },
+      { database, sql },
+      this.defaultTimeoutMs,
+    );
     const res = await this.request(QUERY_PATH, {
       method: 'POST',
       body: { database, sql },
     });
     if (!res.ok) {
       const text = await res.text().catch(() => '');
-      throw new Error(`APIProdResource: query HTTP ${res.status} ${res.statusText}. Response: ${text}`);
+      throw attachCurl(new Error(`APIProdResource: query HTTP ${res.status} ${res.statusText}. Response: ${text}`), curl);
     }
     const result = await res.json() as QueryResponse;
     if (result.status !== 0) {
-      throw new Error(`APIProdResource: query failed (status=${result.status}): ${result.msg}`);
+      throw attachCurl(new Error(`APIProdResource: query failed (status=${result.status}): ${result.msg}`), curl);
     }
     return result.data;
   }
