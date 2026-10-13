@@ -12,21 +12,6 @@
 import { AppBaseClass, type AppAccount } from '../../../src/base/AppBaseClass.ts';
 import { sleep } from '../../../src/resources/AppiumResource.ts';
 import { ANDROID_IM_ACT, ANDROID_IM_LOC as IM } from '../core/_lib/androidImLocators.ts';
-
-import { resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
-
-/** 被 node 直接执行（非被 lite-all import）时才建会话 */
-function isExecutedAsMain(metaUrl: string): boolean {
-  const entry = process.argv[1];
-  if (!entry) return false;
-  try {
-    return metaUrl === pathToFileURL(resolve(entry)).href;
-  } catch {
-    return false;
-  }
-}
-
 import {
   backToMainFromChat,
   enterMessageTab,
@@ -46,7 +31,7 @@ import {
   registerAndroidLoginStates,
 } from '../core/_lib/androidLoginFlow.ts';
 
-export class AndroidImGroupChatSmoke extends AppBaseClass {
+class AndroidImGroupChatSmoke extends AppBaseClass {
   private groupIndex: number | null = null;
   private lastSent = '';
   private lastAt = '';
@@ -193,6 +178,4 @@ export class AndroidImGroupChatSmoke extends AppBaseClass {
   }
 }
 
-if (isExecutedAsMain(import.meta.url)) {
-  await new AndroidImGroupChatSmoke().execute();
-}
+await new AndroidImGroupChatSmoke().execute();

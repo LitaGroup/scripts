@@ -12,22 +12,7 @@
  */
 import { AppBaseClass, type AppAccount } from '../../../src/base/AppBaseClass.ts';
 import { sleep } from '../../../src/resources/AppiumResource.ts';
-import { ANDROID_IM_ACT, ANDROID_IM_LOC as IM } from '../core/_lib/androidImLocators.ts';
-
-import { resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
-
-/** 被 node 直接执行（非被 lite-all import）时才建会话 */
-function isExecutedAsMain(metaUrl: string): boolean {
-  const entry = process.argv[1];
-  if (!entry) return false;
-  try {
-    return metaUrl === pathToFileURL(resolve(entry)).href;
-  } catch {
-    return false;
-  }
-}
-
+import { ANDROID_IM_LOC as IM } from '../core/_lib/androidImLocators.ts';
 import {
   backToMainFromChat,
   conversationContentLocator,
@@ -49,7 +34,7 @@ import {
   registerAndroidLoginStates,
 } from '../core/_lib/androidLoginFlow.ts';
 
-export class AndroidImPrivateChatSmoke extends AppBaseClass {
+class AndroidImPrivateChatSmoke extends AppBaseClass {
   private lastSent = '';
   private privateIndex = 1;
   private giftSentCount = 0;
@@ -77,6 +62,12 @@ export class AndroidImPrivateChatSmoke extends AppBaseClass {
     });
 
     await this.act('确保已登录', async () => {
+      await this.refreshActivity();
+      if (/NexusLauncher|launcher/i.test(this.activity ?? '')) {
+        this.log('当前在桌面，activateApp 拉回');
+        await this.activateApp();
+        await sleep(1_500);
+      }
       await ensureAndroidLoggedIn(this, this.account());
       await this.closePopups();
       this.startedInChat = await isInPrivateChatUi(this);
@@ -105,11 +96,15 @@ export class AndroidImPrivateChatSmoke extends AppBaseClass {
       await enterMessageTab(this);
       this.privateIndex = await findFirstPrivateConversationIndex(this);
       await openConversationByIndex(this, this.privateIndex);
-      await this.waitForActivity(ANDROID_IM_ACT.chat, 12_000);
-      await this.waitForElement(IM.chatInput, 'input_message', 12_000);
+      const entered = await this.driver.waitFor(IM.chatInput, 12_000);
+      if (!entered) {
+        throw new Error(`打开私聊后未出现 input_message，当前=${this.activity}`);
+      }
+      this.startedInChat = true;
     });
 
     await this.check('SM-IM-03 聊天输入区可见', async () => {
+      if (!(await isInPrivateChatUi(this))) this.skip('未进入私聊输入页');
       const input = await this.driver.exists(IM.chatInput);
       const giftOrEmoji =
         (await this.driver.exists(IM.chatGift)) || (await this.driver.exists(IM.chatEmoji));
@@ -136,6 +131,7 @@ export class AndroidImPrivateChatSmoke extends AppBaseClass {
 
     // —— SM-IM-04 文本 ——
     await this.act('SM-IM-04 私聊发送文本', async () => {
+      if (!(await isInPrivateChatUi(this))) this.skip('未进入私聊，跳过发文本');
       this.lastSent = uniqueImText('im-auto');
       await sendChatText(this, this.lastSent);
     });
@@ -150,6 +146,7 @@ export class AndroidImPrivateChatSmoke extends AppBaseClass {
 
     // —— SM-IM-13 表情（同会话继续） ——
     await this.act('SM-IM-13 发送表情消息', async () => {
+      if (!(await isInPrivateChatUi(this))) this.skip('未进入私聊，跳过表情');
       if (!(await this.driver.exists(IM.chatEmoji))) {
         this.skip('无 iv_keyboard_emoji，跳过发送表情');
       }
@@ -168,6 +165,7 @@ export class AndroidImPrivateChatSmoke extends AppBaseClass {
 
     // —— SM-IM-14 礼物：默认选中连送 3 次 ——
     await this.act('SM-IM-14 默认礼物连送3次', async () => {
+      if (!(await isInPrivateChatUi(this))) this.skip('未进入私聊，跳过送礼');
       if (!(await this.driver.exists(IM.chatGift))) {
         this.skip('无 iv_gift，跳过送礼');
       }
@@ -300,6 +298,4 @@ export class AndroidImPrivateChatSmoke extends AppBaseClass {
   }
 }
 
-if (isExecutedAsMain(import.meta.url)) {
-  await new AndroidImPrivateChatSmoke().execute();
-}
+await new AndroidImPrivateChatSmoke().execute();

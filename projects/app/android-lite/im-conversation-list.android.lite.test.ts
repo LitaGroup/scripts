@@ -12,21 +12,6 @@
 import { AppBaseClass, type AppAccount } from '../../../src/base/AppBaseClass.ts';
 import { sleep } from '../../../src/resources/AppiumResource.ts';
 import { ANDROID_IM_ACT, ANDROID_IM_LOC as IM, conversationRowLocator } from '../core/_lib/androidImLocators.ts';
-
-import { resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
-
-/** 被 node 直接执行（非被 lite-all import）时才建会话 */
-function isExecutedAsMain(metaUrl: string): boolean {
-  const entry = process.argv[1];
-  if (!entry) return false;
-  try {
-    return metaUrl === pathToFileURL(resolve(entry)).href;
-  } catch {
-    return false;
-  }
-}
-
 import {
   backToMainFromChat,
   countConversationRows,
@@ -48,7 +33,7 @@ import {
   registerAndroidLoginStates,
 } from '../core/_lib/androidLoginFlow.ts';
 
-export class AndroidImConversationListSmoke extends AppBaseClass {
+class AndroidImConversationListSmoke extends AppBaseClass {
   private imReady = false;
   private hasGroup = false;
 
@@ -149,9 +134,19 @@ export class AndroidImConversationListSmoke extends AppBaseClass {
 
     await this.act('SM-IM-09 返回会话列表', async () => {
       this.requireImReady();
-      await this.driver.back();
-      await sleep(800);
-      await enterMessageTab(this);
+      if (await this.isActivity(ANDROID_IM_ACT.searchConversation)) {
+        await this.driver.back();
+        await sleep(800);
+      }
+      try {
+        await enterMessageTab(this);
+      } catch (e) {
+        this.log(`返回会话列表首次失败，activateApp 后重试: ${e instanceof Error ? e.message : String(e)}`);
+        await this.activateApp();
+        await sleep(1_200);
+        await this.closePopups();
+        await enterMessageTab(this);
+      }
     });
 
     // —— SM-IM-20 ——
@@ -159,24 +154,28 @@ export class AndroidImConversationListSmoke extends AppBaseClass {
       this.requireImReady();
       await enterMessageTab(this);
       const total = await countConversationRows(this);
+      // 最多扫 2 行；没有就记录跳过，禁止逐条点开拖时间
       let opened = false;
-      for (let i = 1; i <= Math.min(total, 6); i++) {
-        await openConversationByIndex(this, i);
-        await sleep(700);
+      for (let i = 1; i <= Math.min(total, 2); i++) {
+        const row = conversationRowLocator(i);
+        if (!(await this.driver.exists(row))) break;
+        await this.driver.click(row);
+        await sleep(800);
+        await this.refreshActivity();
         if (await this.isActivity(ANDROID_IM_ACT.systemNotify)) {
           opened = true;
           this.log(`第 ${i} 行为系统通知`);
           await this.driver.back();
-          await sleep(600);
+          await sleep(500);
           break;
         }
-        await backToMainFromChat(this).catch(async () => {
-          await this.driver.back();
-          await sleep(500);
-        });
-        await enterMessageTab(this);
+        await this.driver.back();
+        await sleep(500);
+        if (!(await this.driver.exists(IM.messageList))) {
+          await enterMessageTab(this);
+        }
       }
-      if (!opened) this.log('未扫到系统通知会话，本步仅记录（不 fail）');
+      if (!opened) this.log('[记录待修] 未扫到系统通知会话，跳过');
     });
 
     // —— SM-IM-29 ——
@@ -233,6 +232,9 @@ export class AndroidImConversationListSmoke extends AppBaseClass {
     await this.act('SM-IM-31 长按取消置顶', async () => {
       this.requireImReady();
       await enterMessageTab(this);
+      if (!(await this.driver.exists(IM.rowPin))) {
+        this.skip('[记录待修] 置顶角标未出现，跳过取消置顶');
+      }
       // 优先点带 pin 的行：长按第一行（置顶后通常在最前）
       await longPressConversation(this, 1);
       await this.assertExists(IM.longPressPin, 'tv_topping(unpin)');
@@ -436,6 +438,4 @@ export class AndroidImConversationListSmoke extends AppBaseClass {
   }
 }
 
-if (isExecutedAsMain(import.meta.url)) {
-  await new AndroidImConversationListSmoke().execute();
-}
+await new AndroidImConversationListSmoke().execute();

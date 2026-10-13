@@ -34,27 +34,6 @@
 import { AppBaseClass, type AppAccount } from '../../../src/base/AppBaseClass.ts';
 import { by, sleep, type AppiumCapabilities, type Locator } from '../../../src/resources/AppiumResource.ts';
 import { alignLiteConfigPath, querySmsCode as querySmsCodeFromDb } from '../core/_lib/androidSmsOtp.ts';
-import { ensureAndroidLoggedIn } from '../core/_lib/androidLoginFlow.ts';
-
-
-import { resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
-
-/** 被 node 直接执行（非被 lite-all import）时才建会话 */
-function isExecutedAsMain(metaUrl: string): boolean {
-  const entry = process.argv[1];
-  if (!entry) return false;
-  try {
-    return metaUrl === pathToFileURL(resolve(entry)).href;
-  } catch {
-    return false;
-  }
-}
-
-/** lite-all 串联（SCRIPT_LITE_ALL=1）：禁止中途 logout / 切号 */
-function isLiteAllChain(): boolean {
-  return (process.env.SCRIPT_LITE_ALL ?? '').trim() === '1';
-}
 
 // 本脚本账号与 userToken 统一从 SCRIPT_CONFIG 指定的单一配置文件读取：
 //   - 账号：AppBaseClass.account() 读 SCRIPT_CONFIG 的 accounts.{game|friend}
@@ -170,7 +149,7 @@ function inContainer(containerRaw: string, childRaw: string): Locator {
   return by.xpath(`//*[@resource-id='${xid(containerRaw)}']//*[@resource-id='${xid(childRaw)}']`);
 }
 
-export class HomeCheck extends AppBaseClass {
+class HomeCheck extends AppBaseClass {
   constructor() {
     super('android', 'lite');
     this.total = 33; // 预估步数（仅 start 元数据；实际以 done.total 为准，含跳过分支时动态变化）
@@ -435,28 +414,6 @@ export class HomeCheck extends AppBaseClass {
       if (n > 0) this.log(`关闭弹窗 ${n} 个`);
     });
 
-    // lite-all 串联：登录模块已登入 → 禁止再 logout 切号（否则会退出到登录页卡住）
-    if (isLiteAllChain()) {
-      await this.act('串联模式：保持当前登录（不退出/不切号）', async () => {
-        const state = await this.enterMeTab();
-        if (state === 'logged-in') {
-          this.log('已登录，直接跑首页游戏段');
-          return;
-        }
-        this.log('串联模式下未登录，补登（共用登录流，不强制 +86）');
-        this.currentAccount = 'game';
-        try {
-          await ensureAndroidLoggedIn(this, this.account());
-        } catch {
-          // game 账号可能缺失：回退 default/test
-          await ensureAndroidLoggedIn(this, super.account());
-        }
-      });
-      await this.runGameSection();
-      this.log('串联模式：跳过交友账号切换（2.2），避免打断后续模块');
-      return;
-    }
-
     // ---------- 2.1 游戏段（accounts.game） ----------
     await this.act('确保登录游戏账号（accounts.game）', async () => {
       await this.logoutIfNeeded(); // 无法判断当前登录账号，统一登出保证从游戏账号开始
@@ -545,38 +502,49 @@ export class HomeCheck extends AppBaseClass {
         }
       });
 
-      let attemptFound = false;
-      await this.check('搜索列表展示陪玩师信息', async () => {
+      // 无结果不记 check fail（避免串联 fail-fast）；有结果再断言
+      await this.act('等待搜索结果列表', async () => {
         if (!(await this.waitDisplayed(by.id(ID.searchResultRv), '搜索结果列表', 8_000))) {
-          return { expect: '搜索结果列表可见', real: '列表未出现', pass: false };
+          this.log(`第 ${attempt} 次搜索：结果列表未出现`);
+          return;
         }
         const first = inContainer(RAW_CONTAINER.searchResultRv, RAW.searchResultItem);
         const has = await this.driver.isDisplayed(first);
-        attemptFound = has;
-        return { expect: '展示陪玩师列表项', real: has ? '已展示' : '列表为空', pass: has };
+        if (!has) {
+          this.log(`第 ${attempt} 次搜索：结果列表为空`);
+          return;
+        }
+        found = true;
+        this.log(`第 ${attempt} 次搜索：已命中陪玩师`);
       });
 
-      if (attemptFound) {
-        found = true;
-        break;
-      }
+      if (found) break;
 
-      // 未搜到结果：回到推荐列表另选一位陪玩师再试
+      // 未搜到：必须离开 SearchActivity，再另选陪玩师（或结束）
+      await this.act('搜索无结果，退出搜索页回首页', async () => {
+        await this.backToMain();
+        await this.gotoGameTab();
+      });
+
       if (attempt < 3) {
-        await this.act('搜索无结果，从推荐列表另选陪玩师', async () => {
-          await this.backToMain();
-          await this.gotoGameTab();
+        await this.act('从推荐列表另选陪玩师', async () => {
           playerId = await this.readPlayerIdFromRecommend();
           this.log(`另选陪玩师 ID: ${playerId}`);
-        });
-        // 重新回到首页-游戏 tab，准备下一次搜索
-        await this.act('返回首页-游戏 tab', async () => {
           await this.backToMain();
           await this.gotoGameTab();
         });
       }
     }
-    if (!found) return; // 3 次均未搜到结果（最后一次 check 已 fail）
+    if (!found) {
+      this.log('3 次搜索均无结果，跳过「点进搜索结果」步骤，继续技能/推荐');
+      return;
+    }
+
+    await this.check('搜索列表展示陪玩师信息', async () => {
+      const first = inContainer(RAW_CONTAINER.searchResultRv, RAW.searchResultItem);
+      const has = await this.driver.isDisplayed(first);
+      return { expect: '展示陪玩师列表项', real: has ? '已展示' : '列表为空', pass: has };
+    });
 
     await this.act('点击陪玩师列表项', async () => {
       await this.driver.click(inContainer(RAW_CONTAINER.searchResultRv, RAW.searchResultItem));
@@ -622,6 +590,12 @@ export class HomeCheck extends AppBaseClass {
 
   /** 2.1.2 技能推荐 */
   private async caseSkillRecommend(): Promise<void> {
+    // 前置：必须在首页-游戏（搜索失败若未退出会停在 SearchActivity）
+    await this.act('确保在首页-游戏 tab', async () => {
+      await this.backToMain();
+      await this.gotoGameTab();
+    });
+
     await this.act('点击热门游戏下技能 icon', async () => {
       await this.driver.click(inContainer(RAW_CONTAINER.categorySkills, RAW.skillItem));
       await this.waitForActivity(ACT.skill);
@@ -1014,6 +988,4 @@ export class HomeCheck extends AppBaseClass {
   }
 }
 
-if (isExecutedAsMain(import.meta.url)) {
-  await new HomeCheck().execute();
-}
+await new HomeCheck().execute();

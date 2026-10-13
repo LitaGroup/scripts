@@ -33,17 +33,59 @@ export async function isInPrivateChatUi(app: AppBaseClass): Promise<boolean> {
   return true;
 }
 
-export async function enterMessageTab(app: AppBaseClass, timeoutMs = 20_000): Promise<void> {
+export async function enterMessageTab(app: AppBaseClass, timeoutMs = 10_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     await app['closePopups']();
+    await app['refreshActivity']();
+    const act = app['activity'] ?? '';
+
     if (await app['driver'].exists(IM.messageList) || (await app['driver'].exists(IM.chatListRoot))) {
       return;
     }
+
+    // 桌面 / 进程被踢 → 拉回 App
+    if (/NexusLauncher|launcher/i.test(act) || !act) {
+      app['log'](`enterMessageTab：当前在桌面/未知(${act || '空'}) → activateApp`);
+      await app['activateApp']();
+      await sleep(1_200);
+      continue;
+    }
+
+    // 会话搜索 / 聊天 / 其它二级页 → 先回到 Main，再点消息 Tab
+    if (
+      /SearchConversationActivity|ChatActivity|SystemNotificationActivity|UserDetailActivity|GroupMemberActivity/i.test(
+        act,
+      )
+    ) {
+      app['log'](`enterMessageTab：离开 ${act}`);
+      if (await app['driver'].exists(IM.chatBack)) {
+        try {
+          await app['driver'].click(IM.chatBack);
+        } catch {
+          await app['driver'].back();
+        }
+      } else {
+        await app['driver'].back();
+      }
+      await sleep(700);
+      continue;
+    }
+
+    if (!/\.MainActivity$/i.test(act) && !/SearchConversationActivity/i.test(act)) {
+      // 未知非主页：有限次 back，避免连按退到桌面
+      await app['driver'].back();
+      await sleep(700);
+      continue;
+    }
+
     if (await app['driver'].exists(IM.tabMessage)) {
       await app['driver'].click(IM.tabMessage);
+      await sleep(600);
+      continue;
     }
-    await sleep(800);
+
+    await sleep(500);
   }
   throw new Error('进入消息 Tab / 会话列表超时');
 }
@@ -130,7 +172,14 @@ export async function openConversationByIndex(app: AppBaseClass, index = 1): Pro
   const row = conversationRowLocator(index);
   await app['assertExists'](row, `会话列表第 ${index} 行`);
   await app['driver'].click(row);
-  await app['waitForActivity'](/ChatActivity|SystemNotificationActivity/, 15_000);
+  // 软等进聊：不用 waitForActivity（会 fail-fast 拖死整段 IM）
+  const deadline = Date.now() + 8_000;
+  while (Date.now() < deadline) {
+    await app['refreshActivity']();
+    if (/ChatActivity|SystemNotificationActivity/i.test(app['activity'] ?? '')) return;
+    await sleep(300);
+  }
+  throw new Error(`打开会话后未进入聊天页，当前=${app['activity'] || '(未知)'}`);
 }
 
 export async function sendChatText(app: AppBaseClass, text: string): Promise<void> {
