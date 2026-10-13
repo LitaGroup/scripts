@@ -4,20 +4,19 @@ import { int, pollUntil, randSuffix, bj } from './_lib/helpers.ts';
 import {
   NEW_BIZ, LAST_BIZ, LOCALE, CAUSE_BIZ,
   TS_OLD, TS_SWITCH_EARLY,
-  USER_CONSUMER, USER_ENTRANCE, USER_FRESH,
+  USER_CONSUMER, USER_ENTRANCE, USER_FRESH, USER_FRESH2,
   SEED_GRADE_CONSUMER, SEED_GRADE_ENTRANCE,
 } from './_lib/constants.ts';
 
 const ALL_BIZ = [LAST_BIZ, NEW_BIZ];
-const USERS = [USER_CONSUMER, USER_ENTRANCE, USER_FRESH];
+const USERS = [USER_CONSUMER, USER_ENTRANCE, USER_FRESH, USER_FRESH2];
 const GAME_AMOUNT = 100_000; // 积分（分），experience = amount/100 = 1000
 
 /** 构造与 Kafka funbit.user_deal_account_log.new-game-user 同构的消息体（字段形态对齐真实数据：biz/room_id/gameName/details/in18_key） */
-function buildDealLog(userId: number, transNo: string, amount: number): Record<string, unknown> {
-  const now = Date.now();
-  const businessNo = new Date(now).toLocaleString('sv-SE', { timeZone: 'Asia/Shanghai' }).replace(/[- :]/g, '').slice(0, 14);
+function buildDealLog(userId: number, transNo: string, amount: number, createTimeMs: number): Record<string, unknown> {
+  const businessNo = new Date(createTimeMs).toLocaleString('sv-SE', { timeZone: 'Asia/Shanghai' }).replace(/[- :]/g, '').slice(0, 14);
   return {
-    id: now,
+    id: createTimeMs,
     biz: CAUSE_BIZ,
     type: 'ADD_MONEY',
     direction: 'IN',
@@ -28,7 +27,7 @@ function buildDealLog(userId: number, transNo: string, amount: number): Record<s
     total_amount: amount,
     room_id: 17100226,
     remark: 'result',
-    create_time: now,
+    create_time: createTimeMs,
     details: {
       attrs: { balance: { diamond: 97375297 }, gameName: ' Lucky 77', businessNo },
       infos: { diamond: { amount } },
@@ -82,7 +81,7 @@ class SeasonSwitchUpgrade002 extends GameGradeTestBase {
       this.needService();
       transNoA = `gg002a-${randSuffix()}`;
       try {
-        await this.gameGrade.handleUserDealAccountLog(buildDealLog(USER_CONSUMER, transNoA, GAME_AMOUNT), TS_SWITCH_EARLY);
+        await this.gameGrade.handleUserDealAccountLog(buildDealLog(USER_CONSUMER, transNoA, GAME_AMOUNT, Date.parse(TS_SWITCH_EARLY)), TS_SWITCH_EARLY);
         consumerError = '';
       } catch (e) {
         consumerError = (e as Error).message;
@@ -105,8 +104,10 @@ class SeasonSwitchUpgrade002 extends GameGradeTestBase {
         return {
           expect: 'SEASON_SWITCH_* 经验流水 1 条',
           real: consumerError
-            ? `无（接口返回错误：${consumerError}）——消息已通过 biz 白名单进入处理链路，管道内模块抛错中断（直调排查指向 honor-wheel 模块非包含性异常），user-game-grade 未执行`
-            : `无（experience 流水 ${rows.length} 条，接口无报错）——消息被 biz 白名单静默丢弃或消费链路未生效`,
+            ? `无（接口返回错误：${consumerError}）——消息已通过 biz 白名单进入处理链路，管道内模块抛错中断，user-game-grade 未执行`
+            : rows.length > 0
+              ? `无（experience 流水 ${rows.length} 条：游戏经验已入账但未记录 SEASON_SWITCH）——该用户已存在服务端赛季切换状态（直连清库不失效），重复运行同一用户不再触发切换`
+              : `无（experience 流水 0 条，接口无报错）——消息未进入处理链路，或消息事件时间（create_time）不在赛季窗口`,
           pass: false,
         };
       }
@@ -157,7 +158,7 @@ class SeasonSwitchUpgrade002 extends GameGradeTestBase {
 
     await this.act('场景A 幂等：同 transNo 重发 consumer 消息', async () => {
       if (!this.aGate) this.skip('场景A 懒切换未触发（见失败原因）');
-      await this.gameGrade.handleUserDealAccountLog(buildDealLog(USER_CONSUMER, transNoA, GAME_AMOUNT), TS_SWITCH_EARLY);
+      await this.gameGrade.handleUserDealAccountLog(buildDealLog(USER_CONSUMER, transNoA, GAME_AMOUNT, Date.parse(TS_SWITCH_EARLY)), TS_SWITCH_EARLY);
     });
     await this.check('场景A 幂等：同 transNo 重发后经验只加一次、SEASON_SWITCH 仍 1 条', async (): Promise<CheckResult> => {
       if (!this.aGate) this.skip('场景A 懒切换未触发（见失败原因）');
@@ -261,34 +262,38 @@ class SeasonSwitchUpgrade002 extends GameGradeTestBase {
     });
 
     let freshResp: Record<string, unknown> = {};
-    await this.act(`场景C2 纯新用户窗口内 GET（ts=${TS_SWITCH_EARLY}）`, async () => {
+    await this.act(`场景C2 纯新用户窗口内 GET（user=${USER_FRESH2}，ts=${TS_SWITCH_EARLY}）`, async () => {
       this.needService();
-      freshResp = await this.gameGrade.gradeGet(USER_FRESH, LOCALE, TS_SWITCH_EARLY);
+      freshResp = await this.gameGrade.gradeGet(USER_FRESH2, LOCALE, TS_SWITCH_EARLY);
       this.log(`返回 biz=${(freshResp['gameGrade'] as Record<string, unknown> | undefined)?.['biz']} grade=${(freshResp['gameGrade'] as Record<string, unknown> | undefined)?.['grade']}`);
     });
-    await this.check('场景C2 纯新用户不产生切换数据（无等级行、无 SEASON_SWITCH）', async (): Promise<CheckResult> => {
+    await this.check('场景C2 纯新用户窗口内初始化为 None（experience=0），且无 SEASON_SWITCH', async (): Promise<CheckResult> => {
       this.needService();
-      const row = await this.gameGrade.userGradeRow(USER_FRESH, NEW_BIZ);
-      const logs = await this.gameGrade.userGradeLogs(USER_FRESH, NEW_BIZ);
+      const row = await pollUntil(
+        () => this.gameGrade.userGradeRow(USER_FRESH2, NEW_BIZ),
+        (r) => r !== null,
+      );
+      const logs = await this.gameGrade.userGradeLogs(USER_FRESH2, NEW_BIZ);
       const swCount = logs.filter((r) => String(r['trans_no']).startsWith('SEASON_SWITCH_')).length;
+      const inited = row !== null && String(row['grade']) === 'None' && int(row['experience']) === 0;
       return {
-        expect: '无 202610 等级行、SEASON_SWITCH=0',
-        real: `行=${row ? '有' : '无'}，SEASON_SWITCH=${swCount}`,
-        pass: !row && swCount === 0,
+        expect: '存在 grade=None experience=0 的 202610 行、SEASON_SWITCH=0',
+        real: row ? `grade=${row['grade']} experience=${int(row['experience'])}，SEASON_SWITCH=${swCount}` : '无等级行',
+        pass: inited && swCount === 0,
       };
     });
 
     await this.act('场景C3 纯新用户经验变更（UPDATE，ts=窗口内）走 None 初始化', async () => {
       this.needService();
-      await this.gameGrade.gradeUpdate(USER_FRESH, { causeBiz: CAUSE_BIZ, transNo: `gg002c-${randSuffix()}`, amount: 1000 }, TS_SWITCH_EARLY);
+      await this.gameGrade.gradeUpdate(USER_FRESH2, { causeBiz: CAUSE_BIZ, transNo: `gg002c-${randSuffix()}`, amount: 1000 }, TS_SWITCH_EARLY);
     });
     await this.check('场景C3 初始化为 None 且无 SEASON_SWITCH 流水（衰减不适用）', async (): Promise<CheckResult> => {
       this.needService();
       const row = await pollUntil(
-        () => this.gameGrade.userGradeRow(USER_FRESH, NEW_BIZ),
+        () => this.gameGrade.userGradeRow(USER_FRESH2, NEW_BIZ),
         (r) => r !== null,
       );
-      const logs = await this.gameGrade.userGradeLogs(USER_FRESH, NEW_BIZ);
+      const logs = await this.gameGrade.userGradeLogs(USER_FRESH2, NEW_BIZ);
       const swCount = logs.filter((r) => String(r['trans_no']).startsWith('SEASON_SWITCH_')).length;
       const gradeOk = row !== null && String(row['grade']) === 'None' && int(row['experience']) === 10;
       return {

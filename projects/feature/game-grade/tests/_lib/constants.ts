@@ -35,7 +35,8 @@ export const WEEK_MS = 604_800_000;
 export const TEST_USER_POOL = [16525, 16524, 16523, 16522, 16521, 16519, 16518, 16504, 16501, 16500, 16499];
 export const USER_CONSUMER = 16525; // 用例2：consumer 触发
 export const USER_ENTRANCE = 16524; // 用例2：entrance 触发
-export const USER_FRESH = 16523;    // 用例2：纯新用户对照
+export const USER_FRESH = 16523;    // 用例2：时间窗外对照用户
+export const USER_FRESH2 = 16504;   // 用例2：场景C2/C3 纯新用户（须与 C1 用不同用户，避免 C1 的 GET 落库初始化污染）
 export const USER_PROBE = 16522;    // 用例1：biz 观察用户（GET 不落库）
 export const EGG_USERS = [16521, 16519, 16518]; // 用例3：鸡蛋结算参与用户
 
