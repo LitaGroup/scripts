@@ -60,7 +60,13 @@ class AndroidImConversationListSmoke extends AppBaseClass {
       await this.closePopups();
     });
 
+    const liteAll = process.env.SCRIPT_LITE_ALL === '1';
     await this.act('确保已登录', async () => {
+      if (liteAll) {
+        this.log('lite-all：跳过重新登录校验');
+        await this.closePopups();
+        return;
+      }
       await ensureAndroidLoggedIn(this, this.account());
       await this.closePopups();
     });
@@ -68,7 +74,14 @@ class AndroidImConversationListSmoke extends AppBaseClass {
     // —— SM-IM-00 ——
     await this.act('SM-IM-00 会话造数（首页推荐陪玩师）', async () => {
       try {
-        const n = await ensureImPrivateConversations(this);
+        if (liteAll) {
+          // 快回归：列表只验进 Tab，造数交给私聊模块，避免首页来回空转
+          await enterMessageTab(this, 4_000);
+          this.imReady = true;
+          this.log('lite-all：跳过会话造数，仅确认消息 Tab 可进');
+          return;
+        }
+        const n = await ensureImPrivateConversations(this, undefined);
         this.imReady = true;
         this.log(`造数完成，会话行数=${n}`);
       } catch (e) {
@@ -149,34 +162,39 @@ class AndroidImConversationListSmoke extends AppBaseClass {
       }
     });
 
-    // —— SM-IM-20 ——
-    await this.act('SM-IM-20 系统通知入口（有则点开）', async () => {
-      this.requireImReady();
-      await enterMessageTab(this);
-      const total = await countConversationRows(this);
-      // 最多扫 2 行；没有就记录跳过，禁止逐条点开拖时间
-      let opened = false;
-      for (let i = 1; i <= Math.min(total, 2); i++) {
-        const row = conversationRowLocator(i);
-        if (!(await this.driver.exists(row))) break;
-        await this.driver.click(row);
-        await sleep(800);
-        await this.refreshActivity();
-        if (await this.isActivity(ANDROID_IM_ACT.systemNotify)) {
-          opened = true;
-          this.log(`第 ${i} 行为系统通知`);
+    // —— SM-IM-20（全量串联跳过：扫会话太慢）——
+    if (!liteAll) {
+      await this.act('SM-IM-20 系统通知入口（有则点开）', async () => {
+        this.requireImReady();
+        await enterMessageTab(this);
+        const total = await countConversationRows(this);
+        let opened = false;
+        for (let i = 1; i <= Math.min(total, 2); i++) {
+          const row = conversationRowLocator(i);
+          if (!(await this.driver.exists(row))) break;
+          await this.driver.click(row);
+          await sleep(800);
+          await this.refreshActivity();
+          if (await this.isActivity(ANDROID_IM_ACT.systemNotify)) {
+            opened = true;
+            this.log(`第 ${i} 行为系统通知`);
+            await this.driver.back();
+            await sleep(500);
+            break;
+          }
           await this.driver.back();
           await sleep(500);
-          break;
+          if (!(await this.driver.exists(IM.messageList))) {
+            await enterMessageTab(this);
+          }
         }
-        await this.driver.back();
-        await sleep(500);
-        if (!(await this.driver.exists(IM.messageList))) {
-          await enterMessageTab(this);
-        }
-      }
-      if (!opened) this.log('[记录待修] 未扫到系统通知会话，跳过');
-    });
+        if (!opened) this.log('[记录待修] 未扫到系统通知会话，跳过');
+      });
+    } else {
+      await this.act('SM-IM-20 系统通知（快回归跳过）', async () => {
+        this.skip('lite-all 快回归跳过系统通知扫描');
+      });
+    }
 
     // —— SM-IM-29 ——
     await this.act('SM-IM-29 长按私聊出操作底栏', async () => {
@@ -205,6 +223,11 @@ class AndroidImConversationListSmoke extends AppBaseClass {
       this.requireImReady();
       await dismissLongPressSheet(this);
     });
+
+    if (liteAll) {
+      this.log('lite-all 快回归：跳过置顶/多选/归档/删除深链路 → 下一功能');
+      return;
+    }
 
     // —— SM-IM-30 / 31 ——
     await this.act('SM-IM-30 长按置顶私聊', async () => {

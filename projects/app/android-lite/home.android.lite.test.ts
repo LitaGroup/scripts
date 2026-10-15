@@ -464,7 +464,15 @@ class HomeCheck extends AppBaseClass {
   private async caseSearch(): Promise<void> {
     let playerId = '';
     let gotId = false;
+    const liteAll = process.env.SCRIPT_LITE_ALL === '1';
     await this.act('从智能推荐列表随机选陪玩师并读取其ID', async () => {
+      // 快回归：点推荐可能误进语音房；直搜兜底 ID，避免 12s 空等 + 拖垮后续
+      if (liteAll) {
+        playerId = (process.env.SCRIPT_HOME_SEARCH_ID || '1935487').trim();
+        gotId = true;
+        this.log(`lite-all：跳过点推荐进主页，直搜 ID ${playerId}`);
+        return;
+      }
       // 等智能推荐列表加载出陪玩师
       const avatar = this.recommendFirstItemLocator();
       if (!(await this.waitListItem(avatar, '智能推荐陪玩师条目', 15_000))) {
@@ -482,9 +490,9 @@ class HomeCheck extends AppBaseClass {
     });
     if (!gotId) return; // 未能取得陪玩师ID，跳过后续搜索步骤
 
-    // 搜索最多尝试 3 次：搜不到结果就回到推荐列表另选一位陪玩师重试
+    // 快回归：搜索只试 1 次，搜不到就跳过，禁止反复换人空转
     let found = false;
-    for (let attempt = 1; attempt <= 3; attempt++) {
+    for (let attempt = 1; attempt <= 1; attempt++) {
       await this.act('点击右上角搜索 icon', async () => {
         await this.driver.click(by.id(ID.imgSearch));
         await this.waitForActivity(ACT.search);

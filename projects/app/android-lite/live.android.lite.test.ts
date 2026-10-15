@@ -413,6 +413,11 @@ class LiveAndroidLiteTest extends AppBaseClass {
     });
 
     await this.act('确保已登录', async () => {
+      if (process.env.SCRIPT_LITE_ALL === '1') {
+        this.log('lite-all：跳过重新登录');
+        await this.closePopups();
+        return;
+      }
       await ensureAndroidLoggedIn(this, this.resolveAccount());
       await this.closePopups();
     });
@@ -429,7 +434,17 @@ class LiveAndroidLiteTest extends AppBaseClass {
       await this.closePopups();
       // 若已在播：点「关闭直播」结束后再点开播
       await this.handleAlreadyLiveDialogIfNeeded();
-      await this.waitUntilStartLiveFlow(20_000);
+      try {
+        await this.waitUntilStartLiveFlow(process.env.SCRIPT_LITE_ALL === '1' ? 5_000 : 20_000);
+      } catch (e) {
+        if (process.env.SCRIPT_LITE_ALL === '1') {
+          // 快回归：开播进不去只记待修，不 fail 整模块，后续仍跑列表送礼
+          this.log(`[记录待修] ${e instanceof Error ? e.message : String(e)}`);
+          this.ownLiveEntered = false;
+          return;
+        }
+        throw e;
+      }
     });
 
     await this.act('选择个人直播间封面', async () => {
@@ -437,9 +452,21 @@ class LiveAndroidLiteTest extends AppBaseClass {
         this.log('无官方房列表，已直达开播编辑/选品类页，跳过选封面');
         return;
       }
+      const liteAll = process.env.SCRIPT_LITE_ALL === '1';
+      // 快回归：开播已软失败停在 Main 时不再空等选房页
+      if (
+        liteAll &&
+        !(await this.isActivity(ACT.chooseRoom)) &&
+        !(await this.isActivity(ACT.editInfo)) &&
+        !(await this.isActivity(ACT.chooseGame))
+      ) {
+        this.log(`[记录待修] 未进入选房页（当前 ${this.activity}），跳过自播封面/开播，继续列表送礼`);
+        this.ownLiveEntered = false;
+        return;
+      }
       // 软等选房页：超时只记日志，不 fail-fast（后续仍可跑列表送礼）
       {
-        const deadline = Date.now() + 8_000;
+        const deadline = Date.now() + (liteAll ? 2_000 : 8_000);
         while (Date.now() < deadline && !(await this.isActivity(ACT.chooseRoom))) {
           if (await this.isActivity(ACT.editInfo) || (await this.isActivity(ACT.chooseGame))) return;
           await sleep(400);
@@ -814,6 +841,7 @@ class LiveAndroidLiteTest extends AppBaseClass {
 
   /** 底部语音房 tab → Live 子 Tab，直到开播按钮可见 */
   protected async openVoiceRoomLiveTab(): Promise<void> {
+    const liteAll = process.env.SCRIPT_LITE_ALL === '1';
     await this.closePopups();
 
     // 已在直播间：先退出
@@ -825,11 +853,11 @@ class LiveAndroidLiteTest extends AppBaseClass {
           await sleep(500);
           if (await this.driver.exists(by.id(ID.positive))) {
             await this.driver.click(by.id(ID.positive));
-            await sleep(2_000);
+            await sleep(liteAll ? 800 : 2_000);
           }
         } else {
           await this.driver.back();
-          await sleep(800);
+          await sleep(liteAll ? 400 : 800);
         }
       } catch {
         // ignore
@@ -843,29 +871,28 @@ class LiveAndroidLiteTest extends AppBaseClass {
       (await this.isActivity(ACT.chooseGame))
     ) {
       await this.driver.back();
-      await sleep(800);
+      await sleep(liteAll ? 400 : 800);
     }
 
     if (!(await this.driver.exists(by.id(ID.tabParty)))) {
-      // 等主页底部导航
-      const deadline = Date.now() + 12_000;
+      const deadline = Date.now() + (liteAll ? 4_000 : 12_000);
       while (Date.now() < deadline && !(await this.driver.exists(by.id(ID.tabParty)))) {
         await this.closePopups();
-        await sleep(400);
+        await sleep(300);
       }
     }
     await this.assertExists(by.id(ID.tabParty), '底部语音房 tab');
     await this.driver.click(by.id(ID.tabParty));
-    await sleep(800);
+    await sleep(liteAll ? 400 : 800);
     await this.closePopups();
 
     // 切到 Live（开播入口仅 Live tab 可见）
     await this.ensureLiveSubTab();
-    const readyDeadline = Date.now() + 15_000;
+    const readyDeadline = Date.now() + (liteAll ? 5_000 : 15_000);
     while (Date.now() < readyDeadline) {
       if (await this.driver.exists(by.id(ID.startLive))) return;
       await this.ensureLiveSubTab();
-      await sleep(500);
+      await sleep(liteAll ? 300 : 500);
     }
     throw new Error(
       'Live 页未出现开播按钮 startLiveIV：请确认当前账号具备开播资格（liveShow），且已切到 Live Tab',

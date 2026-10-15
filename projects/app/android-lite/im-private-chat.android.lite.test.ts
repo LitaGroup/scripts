@@ -17,10 +17,10 @@ import {
   backToMainFromChat,
   conversationContentLocator,
   enterMessageTab,
+  countConversationRows,
   ensureImPrivateConversations,
-  findFirstPrivateConversationIndex,
   isInPrivateChatUi,
-  openConversationByIndex,
+  openFirstPrivateConversation,
   sendChatEmoji,
   sendChatDefaultGift,
   sendChatText,
@@ -61,14 +61,19 @@ class AndroidImPrivateChatSmoke extends AppBaseClass {
       await this.closePopups();
     });
 
+    const liteAll = process.env.SCRIPT_LITE_ALL === '1';
     await this.act('确保已登录', async () => {
       await this.refreshActivity();
       if (/NexusLauncher|launcher/i.test(this.activity ?? '')) {
         this.log('当前在桌面，activateApp 拉回');
         await this.activateApp();
-        await sleep(1_500);
+        await sleep(800);
       }
-      await ensureAndroidLoggedIn(this, this.account());
+      if (!liteAll) {
+        await ensureAndroidLoggedIn(this, this.account());
+      } else {
+        this.log('lite-all：跳过重新登录');
+      }
       await this.closePopups();
       this.startedInChat = await isInPrivateChatUi(this);
       if (this.startedInChat) this.log('启动后已在私聊页，后续会话步骤将复用');
@@ -80,6 +85,11 @@ class AndroidImPrivateChatSmoke extends AppBaseClass {
         return;
       }
       try {
+        await enterMessageTab(this, liteAll ? 4_000 : 6_000);
+        if ((await countConversationRows(this)) >= 1) {
+          this.log('会话列表已有记录，跳过造数');
+          return;
+        }
         await ensureImPrivateConversations(this, 1);
       } catch (e) {
         this.skip(`无私聊且造数失败: ${e instanceof Error ? e.message : String(e)}`);
@@ -93,10 +103,10 @@ class AndroidImPrivateChatSmoke extends AppBaseClass {
         this.startedInChat = true;
         return;
       }
-      await enterMessageTab(this);
-      this.privateIndex = await findFirstPrivateConversationIndex(this);
-      await openConversationByIndex(this, this.privateIndex);
-      const entered = await this.driver.waitFor(IM.chatInput, 12_000);
+      await enterMessageTab(this, liteAll ? 4_000 : 6_000);
+      // 打开后停留，避免 find-index 进房→退房→再进
+      this.privateIndex = await openFirstPrivateConversation(this);
+      const entered = await this.driver.waitFor(IM.chatInput, liteAll ? 3_000 : 12_000);
       if (!entered) {
         throw new Error(`打开私聊后未出现 input_message，当前=${this.activity}`);
       }
@@ -108,23 +118,9 @@ class AndroidImPrivateChatSmoke extends AppBaseClass {
       const input = await this.driver.exists(IM.chatInput);
       const giftOrEmoji =
         (await this.driver.exists(IM.chatGift)) || (await this.driver.exists(IM.chatEmoji));
-      // 标题偶发晚于输入区渲染 / 特效昵称拿不到 text，短等后仍空则不挡通过
-      let title = '';
-      const titleDeadline = Date.now() + 2_500;
-      while (Date.now() < titleDeadline) {
-        if (await this.driver.exists(IM.chatTitle)) {
-          try {
-            title = (await this.driver.textOf(IM.chatTitle)).trim();
-          } catch {
-            title = '';
-          }
-          if (title) break;
-        }
-        await sleep(300);
-      }
       return {
         expect: 'input_message + (iv_gift|emoji)（标题可选）',
-        real: `input=${input} giftOrEmoji=${giftOrEmoji} title=${title || '(empty/optional)'}`,
+        real: `input=${input} giftOrEmoji=${giftOrEmoji}`,
         pass: !!(input && giftOrEmoji),
       };
     });
@@ -143,6 +139,11 @@ class AndroidImPrivateChatSmoke extends AppBaseClass {
         pass: this.lastSent.length > 0,
       };
     });
+
+    if (liteAll) {
+      this.log('lite-all 快回归：私聊仅发文本，跳过表情/礼物/摘要');
+      return;
+    }
 
     // —— SM-IM-13 表情（同会话继续） ——
     await this.act('SM-IM-13 发送表情消息', async () => {

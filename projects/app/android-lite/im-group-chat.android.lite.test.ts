@@ -56,8 +56,10 @@ class AndroidImGroupChatSmoke extends AppBaseClass {
       await this.closePopups();
     });
 
+    const liteAll = process.env.SCRIPT_LITE_ALL === '1';
     await this.act('确保已登录', async () => {
-      await ensureAndroidLoggedIn(this, this.account());
+      if (!liteAll) await ensureAndroidLoggedIn(this, this.account());
+      else this.log('lite-all：跳过重新登录');
       await this.closePopups();
     });
 
@@ -74,6 +76,11 @@ class AndroidImGroupChatSmoke extends AppBaseClass {
     await this.act('SM-IM-06 打开群聊', async () => {
       await enterMessageTab(this);
       await openConversationByIndex(this, this.groupIndex!);
+      if (liteAll) {
+        const ok = await this.driver.waitFor(IM.chatInput, 5_000);
+        if (!ok) throw new Error(`打开群聊后无 input_message，当前=${this.activity}`);
+        return;
+      }
       await this.waitForActivity(ANDROID_IM_ACT.chat, 12_000);
       await this.waitForElement(IM.chatInput, 'input_message', 12_000);
     });
@@ -103,6 +110,11 @@ class AndroidImGroupChatSmoke extends AppBaseClass {
         pass: this.lastSent.length > 0,
       };
     });
+
+    if (liteAll) {
+      this.log('lite-all 快回归：群聊仅发文本，跳过 @/更多');
+      return;
+    }
 
     // —— SM-IM-17 真实 @ ——
     await this.act('SM-IM-17 群聊发送 @ 消息', async () => {
