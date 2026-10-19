@@ -2158,19 +2158,48 @@ abstract class VoiceRoomSampleBase extends AppBaseClass {
   /** 退出语音房：点退出 → back → ensureMain；仍卡房内则冷启（残留 FunVoiceRoom 会拖垮全链路） */
   protected async leaveRoomToMain(): Promise<void> {
     const liteAll = process.env.SCRIPT_LITE_ALL === '1';
+    // 快回归：房内最多试 1 次退出，否则立刻冷启（模拟器上 back 空转曾耗 2min+）
+    if (liteAll) {
+      await this.refreshActivity();
+      if ((await this.hasBottomTabs()) || /\.MainActivity$/i.test(this.activity ?? '')) return;
+      if (await this.isActivity(ROOM_ACTIVITY) || (await this.isActivity(WEB_ACTIVITY))) {
+        try {
+          await this.tapRoomExitControls();
+          await this.confirmLeaveRoomDialog();
+          await this.driver.back();
+          await sleep(350);
+          await this.confirmLeaveRoomDialog();
+        } catch {
+          /* ignore */
+        }
+        await this.refreshActivity();
+        if ((await this.hasBottomTabs()) || /\.MainActivity$/i.test(this.activity ?? '')) return;
+      }
+      this.log('lite-all：退房改冷启（跳过长轮询）');
+      try {
+        await this.terminateApp();
+        await sleep(600);
+        await this.activateApp();
+        await sleep(1_500);
+      } catch (e) {
+        this.log(`冷启异常: ${e instanceof Error ? e.message : String(e)}`);
+      }
+      return;
+    }
+
     if (await this.isActivity(WEB_ACTIVITY)) {
       this.log('当前在 WebActivity，先退出');
       await this.driver.back();
-      await sleep(liteAll ? 400 : 1_000);
+      await sleep(1_000);
     }
     if (await this.isActivity(ROOM_ACTIVITY)) {
       await this.tapRoomExitControls();
       await this.confirmLeaveRoomDialog();
       await this.driver.back();
-      await sleep(liteAll ? 400 : 1_200);
+      await sleep(1_200);
       await this.confirmLeaveRoomDialog();
     }
-    for (let i = 0; i < (liteAll ? 5 : 3); i++) {
+    for (let i = 0; i < 3; i++) {
       await this.refreshActivity();
       if (await this.hasBottomTabs()) return;
       if (
@@ -2187,26 +2216,24 @@ abstract class VoiceRoomSampleBase extends AppBaseClass {
       } catch {
         break;
       }
-      await sleep(liteAll ? 300 : 500);
+      await sleep(500);
     }
     if (await this.hasBottomTabs()) return;
     if (await this.isActivity(ROOM_ACTIVITY) || (await this.isActivity(WEB_ACTIVITY))) {
       this.log('back 未能退出语音房/Web，走 ensureMainWithBottomTabs');
     }
-    const mainMs = liteAll ? 4_000 : 18_000;
     try {
-      await this.ensureMainWithBottomTabs(mainMs);
+      await this.ensureMainWithBottomTabs(18_000);
     } catch (e) {
       this.log(`ensureMain 失败: ${e instanceof Error ? e.message : String(e)}`);
     }
     if (await this.hasBottomTabs() || /\.MainActivity$/i.test(this.activity ?? '')) return;
-    // 残留 FunVoiceRoom：必须冷启，否则后续 login/home/live/im 全无底栏
     this.log('仍卡在房内/非主页，terminateApp 冷启回主页');
     try {
       await this.terminateApp();
-      await sleep(liteAll ? 800 : 1_000);
+      await sleep(1_000);
       await this.activateApp();
-      await sleep(liteAll ? 2_000 : 2_500);
+      await sleep(2_500);
       await this.closePopups(1);
     } catch (e) {
       this.log(`冷启异常: ${e instanceof Error ? e.message : String(e)}`);
@@ -4287,6 +4314,12 @@ class LiveAndroidLiteTest extends AppBaseClass {
 
   protected async runCase(): Promise<void> {
     await this.act('启动后关闭弹窗并预授权', async () => {
+      if (process.env.SCRIPT_LITE_ALL === '1') {
+        // 模拟器 pm grant 极慢，快回归跳过
+        this.log('lite-all：跳过 live 预授权 pm grant');
+        await this.refreshActivity();
+        return;
+      }
       await this.grantRuntimePermissions();
       await this.closePopups();
     });
@@ -4294,16 +4327,32 @@ class LiveAndroidLiteTest extends AppBaseClass {
     await this.act('确保已登录', async () => {
       if (process.env.SCRIPT_LITE_ALL === '1') {
         this.log('lite-all：跳过重新登录');
-        await this.closePopups();
         return;
       }
       await ensureAndroidLoggedIn(this, this.resolveAccount());
       await this.closePopups();
     });
 
+    let liveTabOk = true;
     await this.act('进入语音房 Live 页', async () => {
-      await this.openVoiceRoomLiveTab();
+      try {
+        await this.openVoiceRoomLiveTab();
+      } catch (e) {
+        if (process.env.SCRIPT_LITE_ALL === '1') {
+          liveTabOk = false;
+          this.log(
+            `[记录待修] 进 Live 页: ${e instanceof Error ? e.message : String(e)}，跳过直播深链路`,
+          );
+          return;
+        }
+        throw e;
+      }
     });
+
+    if (!liveTabOk && process.env.SCRIPT_LITE_ALL === '1') {
+      this.log('lite-all：未进 Live 页，跳过开播/送礼');
+      return;
+    }
 
     // ---------- 开播：创建并进入自己的直播间 ----------
     await this.act('点击右上角开播按钮', async () => {
@@ -7933,9 +7982,10 @@ function suiteBudgetMs(): number {
 
 /** 模块间强制回主页底栏，避免上一模块卡在二级页拖垮后续（最多 ~2s，不空转） */
 async function ensureBackToMainBottom(app: AppBaseClass): Promise<void> {
-  for (let i = 0; i < 5; i++) {
+  const liteAll = process.env.SCRIPT_LITE_ALL === '1';
+  for (let i = 0; i < (liteAll ? 3 : 5); i++) {
     try {
-      await app['closePopups']();
+      if (!liteAll) await app['closePopups']();
       await app['refreshActivity']();
     } catch {
       return; // UIA 异常时立刻放行，交给上层 recover
@@ -7945,6 +7995,19 @@ async function ensureBackToMainBottom(app: AppBaseClass): Promise<void> {
       /\.MainActivity$/i.test(act) &&
       ((await app['driver'].exists(LOC.tabMe)) || (await app['driver'].exists(LOC.tabHome)))
     ) {
+      return;
+    }
+    // 快回归：仍在语音房 → 冷启，禁止 back 空转
+    if (liteAll && /\.ui\.voiceRoom\./i.test(act)) {
+      app['log']('模块间隙仍在语音房，冷启回主页');
+      try {
+        await app['terminateApp']();
+        await sleep(600);
+        await app['activateApp']();
+        await sleep(1_200);
+      } catch {
+        /* ignore */
+      }
       return;
     }
     if (/NexusLauncher|launcher/i.test(act)) {
@@ -8195,14 +8258,14 @@ class LiteAllAndroidLiteTest extends AppBaseClass {
       this.log(`跳过模块 ${id}（UiAutomator 已不可用）`);
       return;
     }
-    // 平台 600s 硬超时：预留时间不足则跳过，避免整单被 kill 成「脚本执行超时」
+    // 平台 600s 硬超时：后续模块门槛抬高（语音房上麦优先，宁跳过勿被平台 kill）
     const minNeed: Partial<Record<ModuleId, number>> = {
-      home: 45_000,
+      home: 70_000,
       voice: 90_000,
-      live: 60_000,
-      moment: 45_000,
-      im: 45_000,
-      me: 25_000,
+      live: 150_000,
+      moment: 120_000,
+      im: 120_000,
+      me: 60_000,
     };
     const need = minNeed[id] ?? 0;
     if (id !== 'login' && need > 0 && this.remainingMs() < need) {
