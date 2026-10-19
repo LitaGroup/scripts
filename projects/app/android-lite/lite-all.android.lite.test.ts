@@ -3690,8 +3690,9 @@ class VoiceRoomTest extends VoiceRoomSampleBase {
             );
           }
         }
-      }
-    }
+      } // if (!alreadyInPreferred) 搜索进房
+      } // else：未已在目标房
+    } // else：非 skipEnter
 
     // 搜索进房已置 enteredPreferredRoom 时，短等 Fun Activity（避免刚进房闪一下被误判）
     if (this.enteredPreferredRoom && !(await this.isInFunRoom())) {
