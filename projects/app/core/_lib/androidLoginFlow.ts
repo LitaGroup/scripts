@@ -699,13 +699,18 @@ export async function isAndroidLoggedInMe(app: AppBaseClass): Promise<boolean> {
  * 若停在首页会先点底部「我的」。
  */
 export async function assertAndroidLoggedInMe(app: AppBaseClass, timeoutMs = 20_000): Promise<void> {
-  await app['closePopups']();
-  if (await softExists(app, LOC.tabMe) && !(await isAndroidLoggedInMe(app))) {
-    await app['driver'].click(LOC.tabMe);
-    await sleep(1_000);
-    await app['closePopups']();
+  const liteAll = process.env.SCRIPT_LITE_ALL === '1';
+  if (!liteAll) await app['closePopups']();
+  if (await isAndroidLoggedInMe(app)) {
+    app['log']('已到达「我的」页 → 登录成功');
+    return;
   }
-  const deadline = Date.now() + timeoutMs;
+  if (await softExists(app, LOC.tabMe)) {
+    await app['driver'].click(LOC.tabMe);
+    await sleep(liteAll ? 400 : 1_000);
+    if (!liteAll) await app['closePopups']();
+  }
+  const deadline = Date.now() + (liteAll ? Math.min(timeoutMs, 6_000) : timeoutMs);
   while (Date.now() < deadline) {
     if (await isAndroidLoggedInMe(app)) {
       app['log']('已到达「我的」页 → 登录成功');
@@ -713,10 +718,10 @@ export async function assertAndroidLoggedInMe(app: AppBaseClass, timeoutMs = 20_
     }
     if (await softExists(app, LOC.tabMe)) {
       await app['driver'].click(LOC.tabMe);
-      await sleep(800);
-      await app['closePopups']();
+      await sleep(liteAll ? 400 : 800);
+      if (!liteAll) await app['closePopups']();
     }
-    await sleep(400);
+    await sleep(liteAll ? 250 : 400);
   }
   throw new Error('登录后未进入「我的」页（无 mePage / user_no）');
 }
@@ -730,8 +735,25 @@ async function finishOnMeTab(app: AppBaseClass): Promise<void> {
 
 /** 确保已登录：未登录则走手机号密码；已登录则停留在我的页 */
 export async function ensureAndroidLoggedIn(app: AppBaseClass, account: AppAccount): Promise<void> {
-  await app['closePopups']();
-  const gateMs = process.env.SCRIPT_LITE_ALL === '1' ? 12_000 : 30_000;
+  const liteAll = process.env.SCRIPT_LITE_ALL === '1';
+  // 快路径：我的页已可见，跳过 closePopups + MeGate（模拟器上可省数分钟）
+  if (await isAndroidLoggedInMe(app)) {
+    app['log']('当前已登录（我的页可见）');
+    return;
+  }
+  if (!liteAll) await app['closePopups']();
+  await app['refreshActivity']();
+  if (liteAll && /\.MainActivity$/i.test(app['activity'] ?? '')) {
+    if (await softExists(app, LOC.tabMe)) {
+      await app['driver'].click(LOC.tabMe);
+      await sleep(500);
+      if (await isAndroidLoggedInMe(app)) {
+        app['log']('当前已登录');
+        return;
+      }
+    }
+  }
+  const gateMs = liteAll ? 8_000 : 30_000;
   const gate = await enterAndroidMeGate(app, gateMs);
   if (gate === 'logged-in') {
     app['log']('当前已登录');

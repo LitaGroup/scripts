@@ -312,10 +312,20 @@ export abstract class AppBaseClass extends CheckBaseClass {
 
   /** 循环关闭弹窗（可能有多层），返回关闭的弹窗数量 */
   protected async closePopups(maxRounds = 10): Promise<number> {
-    const popups = this._states.filter((s) => s.kind === 'popup');
+    const liteAll = process.env.SCRIPT_LITE_ALL === '1';
+    // 快回归：模拟器上每个 exists 可能数秒，全量扫 popup 状态可空耗 1min+
+    if (liteAll) maxRounds = Math.min(maxRounds, 2);
+    let popups = this._states.filter((s) => s.kind === 'popup');
     let closed = 0;
     for (let round = 0; round < maxRounds; round++) {
       const cur = await this.refreshActivity();
+      if (liteAll && round === 0) {
+        // 无 activity 门控的 popup 只保留权限/升级/引导类，避免 MainActivity 上盲扫几十个 detect
+        popups = popups.filter((p) => {
+          if (p.activity !== undefined) return this.matchActivity(cur, p.activity);
+          return /permission|allow|update|whatsapp|guide|claim|评分|升级|协议/i.test(p.name);
+        });
+      }
       let hit = false;
       for (const p of popups) {
         if (p.activity !== undefined && !this.matchActivity(cur, p.activity)) continue;
