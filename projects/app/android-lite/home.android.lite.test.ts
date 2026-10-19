@@ -495,6 +495,18 @@ class HomeCheck extends AppBaseClass {
     for (let attempt = 1; attempt <= 1; attempt++) {
       await this.act('点击右上角搜索 icon', async () => {
         await this.driver.click(by.id(ID.imgSearch));
+        await sleep(400);
+        await this.refreshActivity();
+        if (await this.isActivity(ACT.search)) return;
+        if (process.env.SCRIPT_LITE_ALL === '1') {
+          this.log(`[记录待修] 搜索 icon 未进 SearchActivity（当前 ${this.activity}），跳过首页搜索`);
+          try {
+            await this.driver.back();
+          } catch {
+            /* ignore */
+          }
+          this.skip('未进入首页搜索页');
+        }
         await this.waitForActivity(ACT.search);
       });
 

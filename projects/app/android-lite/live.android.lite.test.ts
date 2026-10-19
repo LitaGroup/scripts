@@ -956,7 +956,11 @@ class LiveAndroidLiteTest extends AppBaseClass {
     }
     if (!closed) return;
 
-    // 关播冷却约 20s（live_room_broadcast35）
+    // 关播冷却约 20s；快回归不空等，记待修后直接返回（后续走列表送礼）
+    if (process.env.SCRIPT_LITE_ALL === '1') {
+      this.log('[记录待修] 已关播，快回归跳过 ~22s 冷却，不重试开播');
+      return;
+    }
     this.log('等待关播冷却 ~22s');
     await sleep(22_000);
     await this.closePopups();
