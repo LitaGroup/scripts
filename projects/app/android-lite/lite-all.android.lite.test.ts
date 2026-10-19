@@ -50,7 +50,6 @@ import {
   findFirstPrivateConversationIndex,
   longPressConversation,
   openConversationByIndex,
-  openFirstPrivateConversation,
   conversationContentLocator,
   isInPrivateChatUi,
   sendChatEmoji,
@@ -61,6 +60,38 @@ import {
   sendChatGift,
   sendGroupAtMention,
 } from '../core/_lib/androidImFlow.ts';
+
+/**
+ * 打开第一条可用私聊并停留在聊天页（快回归用）。
+ * 内联在本文件，避免依赖 androidImFlow 是否已导出 openFirstPrivateConversation。
+ */
+async function openFirstPrivateConversation(
+  app: AppBaseClass,
+  maxScan = 8,
+): Promise<number> {
+  const liteAll = process.env.SCRIPT_LITE_ALL === '1';
+  const total = await countConversationRows(app);
+  const limit = Math.min(Math.max(total, 1), liteAll ? Math.min(maxScan, 3) : maxScan);
+  const pause = liteAll ? 250 : 800;
+  const tabMs = liteAll ? 3_000 : 6_000;
+  for (let i = 1; i <= limit; i++) {
+    await openConversationByIndex(app, i);
+    await sleep(pause);
+    if (await app['isActivity'](ANDROID_IM_ACT.systemNotify)) {
+      await app['driver'].back();
+      await sleep(pause);
+      continue;
+    }
+    if ((await app['driver'].exists(IM.chatInput)) && !(await isGroupChatUi(app))) {
+      return i;
+    }
+    await backToMainFromChat(app).catch(async () => {
+      await app['driver'].back();
+    });
+    await enterMessageTab(app, tabMs);
+  }
+  throw new Error('未找到可用的私聊会话（可先跑 SM-IM-00 造数）');
+}
 
 const HomeMod = await (async () => {
 // 本脚本账号与 userToken 统一从 SCRIPT_CONFIG 指定的单一配置文件读取：
