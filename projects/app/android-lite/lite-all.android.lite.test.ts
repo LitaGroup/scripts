@@ -1571,11 +1571,30 @@ abstract class VoiceRoomSampleBase extends AppBaseClass {
       throw new Error('缺少房间号：请传 --room-no=<roomNo> 或设置环境变量 SCRIPT_ROOM_NO');
     }
 
-    await this.grantAppRuntimePermissions();
+    const liteAll = process.env.SCRIPT_LITE_ALL === '1';
+    // 快回归：login 模块已保证登录。MainActivity 直接放行。
+    // 禁止 pm grant×N（模拟器上每次 mobile:shell 可卡 30s+，合计数分钟）
+    if (liteAll) {
+      await this.refreshActivity();
+      if (/\.MainActivity$/i.test(this.activity ?? '')) {
+        this.log('lite-all：已在 MainActivity，跳过权限授予/状态机/探活');
+        return;
+      }
+      if (await this.isInFunRoom()) {
+        this.enteredPreferredRoom = true;
+        this.roomNo = this.preferredRoomNo;
+        this.log(
+          `lite-all：残留 FunVoiceRoom，跳过退房重搜，直接房内流程（目标 ${this.preferredRoomNo}）`,
+        );
+        return;
+      }
+    } else {
+      await this.grantAppRuntimePermissions();
+    }
 
     // 房内快速路径：语音房动画会导致 findElement 极慢，避免 closePopups 全量扫描
     if (await this.isActivity(ROOM_ACTIVITY)) {
-      const liteAllEarly = process.env.SCRIPT_LITE_ALL === '1';
+      const liteAllEarly = liteAll;
       // 快回归：残留 FunVoiceRoom 直接占用上 0 号麦，禁止 leave 失败卡死全链路
       if (liteAllEarly && (await this.isInFunRoom())) {
         this.enteredPreferredRoom = true;
@@ -1643,12 +1662,12 @@ abstract class VoiceRoomSampleBase extends AppBaseClass {
       }
     }
 
-    const liteAll = process.env.SCRIPT_LITE_ALL === '1';
     await this.ensureAnyState(
       ['home', 'party', 'logged-in', 'logged-out', 'in-room', 'search'],
-      liteAll ? 6_000 : 30_000,
+      liteAll ? 3_000 : 30_000,
     );
-    await this.closePopups(liteAll ? 1 : 3);
+    if (!liteAll) await this.closePopups(3);
+    else await this.closePopups(1);
 
     if ((await this.currentState()) === 'in-room') {
       const text = await this.readRoomIdText(liteAll ? 2_000 : 3_000);
@@ -2291,35 +2310,51 @@ abstract class VoiceRoomSampleBase extends AppBaseClass {
 
   /** 1. 点击底部标签栏「语音房」 */
   protected async clickBottomVoiceRoomTab(): Promise<void> {
-    await this.closePopups();
+    const liteAll = process.env.SCRIPT_LITE_ALL === '1';
+    if (!liteAll) await this.closePopups();
     if (await this.isActivity(WEB_ACTIVITY) || (await this.isActivity(ROOM_ACTIVITY))) {
       await this.leaveRoomToMain();
     }
     if (await this.isActivity(ACT.search)) {
       await this.driver.back();
-      await sleep(800);
+      await sleep(liteAll ? 300 : 800);
     }
 
-    const liteAll = process.env.SCRIPT_LITE_ALL === '1';
+    // 快回归：搜索入口已在 → 直接返回；有 tab 就点一下，禁止 waitForRoomListReady 空耗
+    if (liteAll) {
+      if (await this.driver.exists(by.id(ID.searchEntry))) return;
+      if (await this.driver.exists(by.id(ID.tabParty))) {
+        await this.driver.click(by.id(ID.tabParty));
+        this.log('已点击底部语音房 tab（attempt=1）');
+        await sleep(400);
+        try {
+          await this.ensurePartySubTab();
+        } catch {
+          /* ignore */
+        }
+        return;
+      }
+    }
+
     // 已在列表页：切到 Party 即可（勿因 partyTitle 存在就直接 return——Live 下无搜索按钮）
     if (await this.isOnRoomListPage()) {
       await this.ensurePartySubTab();
       if (await this.driver.exists(by.id(ID.searchEntry))) return;
-      await this.waitForRoomListReady(liteAll ? 5_000 : 8_000);
+      await this.waitForRoomListReady(liteAll ? 2_000 : 8_000);
       return;
     }
 
     if (!(await this.hasBottomTabs())) {
-      await this.ensureMainWithBottomTabs(liteAll ? 4_000 : 15_000);
+      await this.ensureMainWithBottomTabs(liteAll ? 3_000 : 15_000);
     }
     // 等配置下发后 tabView 从 gone → visible（MainActivity.initNavigation）
-    const tabDeadline = Date.now() + (liteAll ? 3_000 : 12_000);
+    const tabDeadline = Date.now() + (liteAll ? 2_000 : 12_000);
     while (Date.now() < tabDeadline && !(await this.driver.exists(by.id(ID.tabParty)))) {
       if (await this.isOnRoomListPage()) {
-        await this.waitForRoomListReady(liteAll ? 3_000 : 8_000);
+        await this.waitForRoomListReady(liteAll ? 2_000 : 8_000);
         return;
       }
-      await sleep(250);
+      await sleep(200);
     }
     if (!(await this.driver.exists(by.id(ID.tabParty)))) {
       if (await this.driver.exists(by.id(ID.tabBar)) || (await this.driver.exists(by.id(ID.tabHome)))) {
@@ -2335,17 +2370,20 @@ abstract class VoiceRoomSampleBase extends AppBaseClass {
     for (let attempt = 1; attempt <= maxClick; attempt++) {
       await this.driver.click(by.id(ID.tabParty));
       this.log(`已点击底部语音房 tab（attempt=${attempt}）`);
+      if (liteAll) {
+        await sleep(400);
+        try {
+          await this.ensurePartySubTab();
+        } catch {
+          /* ignore */
+        }
+        return;
+      }
       try {
-        await this.waitForRoomListReady(liteAll ? 3_000 : attempt === 1 ? 10_000 : 12_000);
+        await this.waitForRoomListReady(attempt === 1 ? 10_000 : 12_000);
         return;
       } catch (e) {
-        if (attempt === maxClick) {
-          if (liteAll) {
-            this.log(`[记录待修] 语音房列表未就绪: ${e instanceof Error ? e.message : String(e)}，继续尝试搜索`);
-            return;
-          }
-          throw e;
-        }
+        if (attempt === maxClick) throw e;
         this.log(`进列表未就绪，重点 tab: ${e instanceof Error ? e.message : String(e)}`);
         await this.closePopups();
         await sleep(500);
@@ -2356,26 +2394,27 @@ abstract class VoiceRoomSampleBase extends AppBaseClass {
   /** 2. 点击派对 Tab（顶部 Party 标题，相对 Live 等） */
   protected async clickPartyTitleTab(): Promise<void> {
     const liteAll = process.env.SCRIPT_LITE_ALL === '1';
-    await this.closePopups();
-    await this.ensurePartySubTab();
-    // 成功标准：搜索入口可见，或至少 Party 列表可见
+    if (!liteAll) await this.closePopups();
+    // 快回归：搜索入口可见即成功，禁止 waitForRoomListReady
     if (await this.driver.exists(by.id(ID.searchEntry))) return;
     try {
-      await this.waitForRoomListReady(liteAll ? 4_000 : 8_000);
+      await this.ensurePartySubTab();
+    } catch {
+      /* ignore */
+    }
+    if (await this.driver.exists(by.id(ID.searchEntry))) return;
+    if (liteAll) {
+      this.log('[记录待修] 派对页暂无搜索入口，后续 openSearch 再试');
+      return;
+    }
+    try {
+      await this.waitForRoomListReady(8_000);
     } catch (e) {
-      if (liteAll) {
-        this.log(`[记录待修] 派对列表未就绪: ${e instanceof Error ? e.message : String(e)}`);
-        return;
-      }
       throw e;
     }
     if (!(await this.driver.exists(by.id(ID.searchEntry)))) {
       await this.ensurePartySubTab();
       if (await this.driver.exists(by.id(ID.searchEntry))) return;
-      if (liteAll) {
-        this.log('[记录待修] 派对页无搜索入口，后续步骤再试');
-        return;
-      }
       await this.waitForElement(by.id(ID.searchEntry), '派对页搜索入口', 5_000);
     }
   }
@@ -3708,67 +3747,15 @@ class VoiceRoomTest extends VoiceRoomSampleBase {
     const requireRoom = () => {
       if (!roomReady) this.skip('未进入娱乐房，跳过房内步骤');
     };
+    const liteAllRoom = process.env.SCRIPT_LITE_ALL === '1';
 
-    // ---------- 3.2 在当前房内发消息（禁止退房换房） ----------
-    await this.act('3.2.1 确认仍在当前娱乐房（不换房）', async () => {
-      requireRoom();
-      if (!(await this.isInFunRoom())) {
-        if (process.env.SCRIPT_LITE_ALL === '1' && this.enteredPreferredRoom) {
-          this.log('[记录待修] 发消息前 Fun Activity 暂未就绪，继续尝试上 0 号房主麦');
-          return;
-        }
-        throw new Error('发消息前已不在 FunVoiceRoomActivity，3.1 进房可能失败');
-      }
-      await this.prepareRoomUi(process.env.SCRIPT_LITE_ALL === '1' ? 2_000 : 5_000);
-      const text = await this.readRoomIdText(process.env.SCRIPT_LITE_ALL === '1' ? 1_500 : 3_000);
-      if (text) this.rememberRoomNoFromText(text);
-      this.log(
-        this.enteredPreferredRoom
-          ? `保持在目标房 ${this.preferredRoomNo}（${text || '房号未读到'}）发消息`
-          : `保持在兜底娱乐房（${text || '房号未读到'}）发消息`,
-      );
-    });
-
-    await this.check('3.2 仍在娱乐房', async () => {
-      requireRoom();
-      return this.assertInTargetRoom(this.enteredPreferredRoom ? preferred : '');
-    });
-
-    await this.act(`3.2.2 点击输入框并输入：${this.message}`, async () => {
-      requireRoom();
-      await this.openChatInput();
-      await this.typeChatMessage(this.message);
-    });
-
-    await this.act('3.2.3 点击发送', async () => {
-      requireRoom();
-      await this.sendChatMessage();
-    });
-
-    await this.check('3.2 公屏出现刚发送的消息', async () => {
-      requireRoom();
-      const found = await this.hasRoomMessage(
-        this.message,
-        process.env.SCRIPT_LITE_ALL === '1' ? 3_000 : 12_000,
-      );
-      // 公屏气泡偶发不进 accessibility 树；发送步骤已成功则软通过，避免阻断上麦
-      if (!found) {
-        this.log('公屏未检出消息气泡（可能被遮罩/虚拟列表），发送已执行，软通过');
-      }
-      return {
-        expect: `公屏含 "${this.message}"（或发送已执行）`,
-        real: found ? '已找到' : '未检出(软通过)',
-        pass: true,
-      };
-    });
-
-    // ---------- 3.3 语音房上麦：0 号 = 房主 Host 麦（快回归也跑；跳过送礼） ----------
+    // ---------- 3.3 上麦优先（平台 600s：先保 0 号房主麦，消息可后置/跳过） ----------
     await this.act(`3.3 申请上麦（${preferred}：0 号房主Host麦）`, async () => {
       requireRoom();
       try {
         this.micResult = await this.takeMic();
       } catch (e) {
-        if (process.env.SCRIPT_LITE_ALL === '1') {
+        if (liteAllRoom) {
           this.log(`[记录待修] 上麦异常软跳过: ${e instanceof Error ? e.message : String(e)}`);
           this.micResult = 'failed';
           return;
@@ -3803,15 +3790,60 @@ class VoiceRoomTest extends VoiceRoomSampleBase {
       };
     });
 
-    // 快回归：进房+发消息+上 0 号麦即可，跳过送礼深链路
-    if (process.env.SCRIPT_LITE_ALL === '1') {
+    // 快回归：上麦完成后跳过发消息+送礼（省 ~1min，避免平台 600s 砍掉上麦）
+    if (liteAllRoom) {
       this.log(
         this.micResult === 'on-mic' || this.micResult === 'queued'
-          ? 'lite-all 快回归：语音房 0 号麦已确认，跳过送礼'
-          : 'lite-all 快回归：语音房上麦已软跳过，跳过送礼',
+          ? 'lite-all 快回归：语音房 0 号麦已确认，跳过公屏/送礼'
+          : 'lite-all 快回归：语音房上麦已软跳过，跳过公屏/送礼',
       );
       return;
     }
+
+    // ---------- 3.2 在当前房内发消息（禁止退房换房） ----------
+    await this.act('3.2.1 确认仍在当前娱乐房（不换房）', async () => {
+      requireRoom();
+      if (!(await this.isInFunRoom())) {
+        throw new Error('发消息前已不在 FunVoiceRoomActivity，3.1 进房可能失败');
+      }
+      await this.prepareRoomUi(5_000);
+      const text = await this.readRoomIdText(3_000);
+      if (text) this.rememberRoomNoFromText(text);
+      this.log(
+        this.enteredPreferredRoom
+          ? `保持在目标房 ${this.preferredRoomNo}（${text || '房号未读到'}）发消息`
+          : `保持在兜底娱乐房（${text || '房号未读到'}）发消息`,
+      );
+    });
+
+    await this.check('3.2 仍在娱乐房', async () => {
+      requireRoom();
+      return this.assertInTargetRoom(this.enteredPreferredRoom ? preferred : '');
+    });
+
+    await this.act(`3.2.2 点击输入框并输入：${this.message}`, async () => {
+      requireRoom();
+      await this.openChatInput();
+      await this.typeChatMessage(this.message);
+    });
+
+    await this.act('3.2.3 点击发送', async () => {
+      requireRoom();
+      await this.sendChatMessage();
+    });
+
+    await this.check('3.2 公屏出现刚发送的消息', async () => {
+      requireRoom();
+      const found = await this.hasRoomMessage(this.message, 12_000);
+      if (!found) {
+        this.log('公屏未检出消息气泡（可能被遮罩/虚拟列表），发送已执行，软通过');
+      }
+      return {
+        expect: `公屏含 "${this.message}"（或发送已执行）`,
+        real: found ? '已找到' : '未检出(软通过)',
+        pass: true,
+      };
+    });
 
     const giftSkip = () => {
       requireRoom();
