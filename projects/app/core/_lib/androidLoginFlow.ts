@@ -291,6 +291,7 @@ export type AndroidOtpContext = {
 };
 
 export async function enterAndroidOtp(app: AppBaseClass, ctx: AndroidOtpContext = {}): Promise<void> {
+  const liteAll = process.env.SCRIPT_LITE_ALL === '1';
   const otp = await resolveAndroidOtp({
     phone: ctx.phone,
     countryCode: ctx.countryCode,
@@ -338,8 +339,8 @@ export async function enterAndroidOtp(app: AppBaseClass, ctx: AndroidOtpContext 
   const clearOtp = async (): Promise<void> => {
     if (!(await driver.exists(LOC.otpInput))) return;
     await driver.click(LOC.otpInput);
-    await sleep(200);
-    for (let i = 0; i < 8; i++) {
+    await sleep(liteAll ? 100 : 200);
+    for (let i = 0; i < (liteAll ? 5 : 8); i++) {
       try {
         await driver.execute('mobile: pressKey', [{ keycode: 67 }]); // DEL
       } catch {
@@ -352,44 +353,65 @@ export async function enterAndroidOtp(app: AppBaseClass, ctx: AndroidOtpContext 
     }
   };
 
-  /** 最稳：KEYCODE_0=7 … KEYCODE_9=16 逐位注入 */
+  /** 模拟器/快回归优先：adb input text（比逐键 keycode 稳且快） */
+  const typeByAdb = async (): Promise<void> => {
+    if (!(await driver.exists(LOC.otpInput))) return;
+    await driver.click(LOC.otpInput);
+    await sleep(liteAll ? 100 : 200);
+    await driver.execute('mobile: shell', [{ command: 'input', args: ['text', otp] }]);
+  };
+
+  /** KEYCODE_0=7 … KEYCODE_9=16 逐位注入 */
   const typeByKeycode = async (): Promise<void> => {
     if (!(await driver.exists(LOC.otpInput))) return;
     await driver.click(LOC.otpInput);
-    await sleep(200);
+    await sleep(liteAll ? 100 : 200);
     for (const ch of otp) {
       if (ch < '0' || ch > '9') continue;
       const keycode = 7 + (ch.charCodeAt(0) - '0'.charCodeAt(0));
       await driver.execute('mobile: pressKey', [{ keycode }]);
-      await sleep(120);
+      await sleep(liteAll ? 60 : 120);
     }
   };
 
-  for (let attempt = 0; attempt < 3; attempt++) {
+  const maxAttempts = liteAll ? 2 : 3;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
     if (await leftOtpPage()) {
       app['log']('OTP 提交后已离开验证码页');
       return;
     }
     try {
       await clearOtp();
-      await typeByKeycode();
+      // 快回归/模拟器：先 adb text，失败再 keycode / AppiumIME
+      if (liteAll || attempt === 0) {
+        try {
+          await typeByAdb();
+        } catch {
+          await typeByKeycode();
+        }
+      } else {
+        await typeByKeycode();
+      }
       let filled = await digitCount();
       if (filled < otp.length && (await driver.exists(LOC.otpInput))) {
-        // 回退：AppiumIME mobile:type / sendKeys
         await clearOtp();
         await driver.click(LOC.otpInput);
-        await sleep(200);
+        await sleep(liteAll ? 100 : 200);
         try {
           await driver.execute('mobile: type', [{ text: otp }]);
         } catch {
-          await driver.sendKeys(LOC.otpInput, otp);
+          try {
+            await typeByAdb();
+          } catch {
+            await driver.sendKeys(LOC.otpInput, otp);
+          }
         }
-        await sleep(400);
+        await sleep(liteAll ? 250 : 400);
         filled = await digitCount();
       }
       app['log'](`OTP 已填入 ${filled}/${otp.length} 位（第 ${attempt + 1} 次）`);
       if (filled >= otp.length || (await leftOtpPage())) {
-        await sleep(2_500);
+        await sleep(liteAll ? 800 : 2_500);
         return;
       }
     } catch (e) {
@@ -583,29 +605,31 @@ export async function loginWithPhonePassword(app: AppBaseClass, account: AppAcco
   };
 
   smsSince = new Date();
+  const liteAll = process.env.SCRIPT_LITE_ALL === '1';
   let stage: 'password' | 'otp' | 'phone' | 'unknown' = 'unknown';
-  for (let attempt = 0; attempt < 3 && stage !== 'password' && stage !== 'otp'; attempt++) {
+  const maxNext = liteAll ? 2 : 3;
+  const pollMax = liteAll ? 12 : 24; // lite-all: ~6s；全量 ~12s
+  for (let attempt = 0; attempt < maxNext && stage !== 'password' && stage !== 'otp'; attempt++) {
     await driver.click(LOC.phoneNext);
-    await sleep(1_200);
-    // 最多等 12s：密码 / OTP / WhatsApp 弹窗
-    for (let i = 0; i < 24; i++) {
+    await sleep(liteAll ? 600 : 1_200);
+    for (let i = 0; i < pollMax; i++) {
       stage = await afterPhoneNext();
       if (stage === 'password' || stage === 'otp') break;
       // WhatsApp 可能刚弹出：优先点「没有 WhatsApp」发短信，不依赖是否已 register 弹窗状态
       if (await driver.exists(LOC.noWhatsApp)) {
         await driver.click(LOC.noWhatsApp);
-        await sleep(800);
+        await sleep(liteAll ? 400 : 800);
         continue;
       }
       if (await driver.exists(LOC.whatsAppClose)) {
         await driver.click(LOC.whatsAppClose);
-        await sleep(800);
+        await sleep(liteAll ? 400 : 800);
         continue;
       }
       await app['closePopups']();
-      await sleep(500);
+      await sleep(liteAll ? 300 : 500);
     }
-    if (stage === 'phone') app['log'](`点 Next 后仍在手机号页，重试 (${attempt + 1}/3)`);
+    if (stage === 'phone') app['log'](`点 Next 后仍在手机号页，重试 (${attempt + 1}/${maxNext})`);
   }
 
   if (stage === 'otp') {
@@ -698,15 +722,17 @@ export async function assertAndroidLoggedInMe(app: AppBaseClass, timeoutMs = 20_
 }
 
 async function finishOnMeTab(app: AppBaseClass): Promise<void> {
-  await app['waitForActivity'](/\.MainActivity$/, 20_000);
-  await sleep(800);
-  await assertAndroidLoggedInMe(app, 20_000);
+  const liteAll = process.env.SCRIPT_LITE_ALL === '1';
+  await app['waitForActivity'](/\.MainActivity$/, liteAll ? 10_000 : 20_000);
+  await sleep(liteAll ? 400 : 800);
+  await assertAndroidLoggedInMe(app, liteAll ? 10_000 : 20_000);
 }
 
 /** 确保已登录：未登录则走手机号密码；已登录则停留在我的页 */
 export async function ensureAndroidLoggedIn(app: AppBaseClass, account: AppAccount): Promise<void> {
   await app['closePopups']();
-  const gate = await enterAndroidMeGate(app);
+  const gateMs = process.env.SCRIPT_LITE_ALL === '1' ? 12_000 : 30_000;
+  const gate = await enterAndroidMeGate(app, gateMs);
   if (gate === 'logged-in') {
     app['log']('当前已登录');
     return;

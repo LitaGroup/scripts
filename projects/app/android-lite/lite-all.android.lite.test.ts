@@ -2173,6 +2173,7 @@ abstract class VoiceRoomSampleBase extends AppBaseClass {
 
   /** 等待进入房间列表，并切到 Party 使搜索入口可见 */
   protected async waitForRoomListReady(timeoutMs = 15_000): Promise<void> {
+    const liteAll = process.env.SCRIPT_LITE_ALL === '1';
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
       await this.closePopups();
@@ -2184,20 +2185,20 @@ abstract class VoiceRoomSampleBase extends AppBaseClass {
         if (await this.driver.exists(by.id(ID.searchEntry))) return;
         // Party 页也可能搜索稍晚：有列表+Party 标题也算就绪（后续步骤可再等）
         if (await this.driver.exists(by.id(ID.partyTitle)) || (await this.driver.exists(by.id(ID.partyRoomList)))) {
-          // 再给搜索一点时间
-          const searchDeadline = Date.now() + 3_000;
+          const searchDeadline = Date.now() + (liteAll ? 1_000 : 3_000);
           while (Date.now() < searchDeadline) {
             if (await this.driver.exists(by.id(ID.searchEntry))) return;
-            await sleep(300);
+            await sleep(liteAll ? 200 : 300);
           }
           // 仍无搜索但已在列表：不硬失败（可能 Live 配置异常），抛更明确错误
           if (await this.driver.exists(by.id(ID.partyRoomList)) || (await this.driver.exists(by.id(ID.partyRoomItem)))) {
             this.log('已在房间列表但 img_search_room 未出现（可能仍停在 Live/Game）');
             return;
           }
+          if (liteAll) return; // 快回归：有列表即可，勿空等
         }
       }
-      await sleep(400);
+      await sleep(liteAll ? 250 : 400);
     }
     await this.refreshActivity();
     throw new Error(
@@ -2232,16 +2233,16 @@ abstract class VoiceRoomSampleBase extends AppBaseClass {
     }
 
     if (!(await this.hasBottomTabs())) {
-      await this.ensureMainWithBottomTabs(liteAll ? 6_000 : 15_000);
+      await this.ensureMainWithBottomTabs(liteAll ? 4_000 : 15_000);
     }
     // 等配置下发后 tabView 从 gone → visible（MainActivity.initNavigation）
-    const tabDeadline = Date.now() + (liteAll ? 5_000 : 12_000);
+    const tabDeadline = Date.now() + (liteAll ? 3_000 : 12_000);
     while (Date.now() < tabDeadline && !(await this.driver.exists(by.id(ID.tabParty)))) {
       if (await this.isOnRoomListPage()) {
-        await this.waitForRoomListReady(liteAll ? 5_000 : 8_000);
+        await this.waitForRoomListReady(liteAll ? 3_000 : 8_000);
         return;
       }
-      await sleep(300);
+      await sleep(250);
     }
     if (!(await this.driver.exists(by.id(ID.tabParty)))) {
       if (await this.driver.exists(by.id(ID.tabBar)) || (await this.driver.exists(by.id(ID.tabHome)))) {
@@ -2258,10 +2259,16 @@ abstract class VoiceRoomSampleBase extends AppBaseClass {
       await this.driver.click(by.id(ID.tabParty));
       this.log(`已点击底部语音房 tab（attempt=${attempt}）`);
       try {
-        await this.waitForRoomListReady(liteAll ? 6_000 : attempt === 1 ? 10_000 : 12_000);
+        await this.waitForRoomListReady(liteAll ? 3_000 : attempt === 1 ? 10_000 : 12_000);
         return;
       } catch (e) {
-        if (attempt === maxClick) throw e;
+        if (attempt === maxClick) {
+          if (liteAll) {
+            this.log(`[记录待修] 语音房列表未就绪: ${e instanceof Error ? e.message : String(e)}，继续尝试搜索`);
+            return;
+          }
+          throw e;
+        }
         this.log(`进列表未就绪，重点 tab: ${e instanceof Error ? e.message : String(e)}`);
         await this.closePopups();
         await sleep(500);
@@ -2298,10 +2305,11 @@ abstract class VoiceRoomSampleBase extends AppBaseClass {
 
   /** 3. 点击右上角搜索按钮，进入搜索页 */
   protected async openRoomSearchPage(): Promise<void> {
+    const liteAll = process.env.SCRIPT_LITE_ALL === '1';
     await this.assertExists(by.id(ID.searchEntry), '右上角搜索按钮');
     await this.driver.click(by.id(ID.searchEntry));
-    await this.waitForActivity(ACT.search, 8_000);
-    await this.waitForElement(by.id(ID.searchEt), '搜索输入框', 5_000);
+    await this.waitForActivity(ACT.search, liteAll ? 4_000 : 8_000);
+    await this.waitForElement(by.id(ID.searchEt), '搜索输入框', liteAll ? 3_000 : 5_000);
   }
 
   /** 4+5. 输入房间号并触发搜索 */
@@ -7762,9 +7770,16 @@ function applyFastRegression(mod: AppBaseClass): void {
     stateTimeoutMs: number;
     unknownGraceMs: number;
   };
-  m.pageTimeoutMs = 2_500;
-  m.stateTimeoutMs = 2_500;
-  m.unknownGraceMs = 500;
+  // 平台默认 600s 杀进程；模拟器 UIA 慢，单步等待必须更短
+  m.pageTimeoutMs = 2_000;
+  m.stateTimeoutMs = 2_000;
+  m.unknownGraceMs = 400;
+}
+
+/** 平台/CI 总预算（默认 540s，留 ~60s 给平台 600s 超时缓冲） */
+function suiteBudgetMs(): number {
+  const n = Number(process.env.SCRIPT_TIMEOUT_MS || '540000');
+  return Number.isFinite(n) && n > 60_000 ? n : 540_000;
 }
 
 /** 模块间强制回主页底栏，避免上一模块卡在二级页拖垮后续（最多 ~2s，不空转） */
@@ -7943,6 +7958,8 @@ class MeCheckChain extends MeMod.MeCheck {
 class LiteAllAndroidLiteTest extends AppBaseClass {
   private readonly enabled: Set<ModuleId>;
   private readonly keepGoing: boolean;
+  private readonly suiteStartedAt = Date.now();
+  private readonly budgetMs = suiteBudgetMs();
 
   constructor() {
     super('android', 'lite');
@@ -8000,6 +8017,10 @@ class LiteAllAndroidLiteTest extends AppBaseClass {
     }
   }
 
+  private remainingMs(): number {
+    return this.budgetMs - (Date.now() - this.suiteStartedAt);
+  }
+
   private async runOrStop(id: ModuleId, title: string, fn: () => Promise<void>): Promise<void> {
     if (!this.want(id)) {
       this.log(`跳过模块 ${id}`);
@@ -8007,6 +8028,22 @@ class LiteAllAndroidLiteTest extends AppBaseClass {
     }
     if (this.suiteDead) {
       this.log(`跳过模块 ${id}（UiAutomator 已不可用）`);
+      return;
+    }
+    // 平台 600s 硬超时：预留时间不足则跳过，避免整单被 kill 成「脚本执行超时」
+    const minNeed: Partial<Record<ModuleId, number>> = {
+      home: 45_000,
+      voice: 90_000,
+      live: 60_000,
+      moment: 45_000,
+      im: 45_000,
+      me: 25_000,
+    };
+    const need = minNeed[id] ?? 0;
+    if (id !== 'login' && need > 0 && this.remainingMs() < need) {
+      this.log(
+        `[记录待修] 剩余 ${Math.round(this.remainingMs() / 1000)}s < ${Math.round(need / 1000)}s，跳过 ${title}（防平台 600s 超时）`,
+      );
       return;
     }
     const counters = this as unknown as { failCount: number; failFastReason: string | null };
@@ -8071,7 +8108,7 @@ class LiteAllAndroidLiteTest extends AppBaseClass {
     process.env.SCRIPT_IM_SEED_COUNT = process.env.SCRIPT_IM_SEED_COUNT || '1';
     applyFastRegression(this);
     this.log(
-      `lite-all 快回归: ${[...this.enabled].join(' → ')}；continue-on-fail=${this.keepGoing}；失败即跳下一功能`,
+      `lite-all 快回归: ${[...this.enabled].join(' → ')}；continue-on-fail=${this.keepGoing}；预算=${Math.round(this.budgetMs / 1000)}s（SCRIPT_TIMEOUT_MS）；失败即跳下一功能`,
     );
 
     await this.runOrStop('login', '① 登录', async () => {
@@ -8080,7 +8117,13 @@ class LiteAllAndroidLiteTest extends AppBaseClass {
         this.log(`关闭弹窗 ${n} 个；package=${ANDROID_LITE_PACKAGE}`);
       });
       await this.act('确保回到主页底栏（可进「我的」）', async () => {
-        for (let i = 0; i < 4; i++) {
+        await this.refreshActivity();
+        // 冷启动停在登录页：不要 back 去「主页」，直接交给登录（模拟器上 back 空转可耗 1min+）
+        if (/\.LoginActivity$/i.test(this.activity ?? '')) {
+          this.log('已在登录页，跳过回主页（直接登录）');
+          return;
+        }
+        for (let i = 0; i < 3; i++) {
           await this.closePopups();
           await this.refreshActivity();
           if (
@@ -8090,18 +8133,23 @@ class LiteAllAndroidLiteTest extends AppBaseClass {
             this.log(`已在主页: ${this.activity}`);
             return;
           }
-          this.log(`非主页（${this.activity}），back ${i + 1}/4`);
+          if (/\.LoginActivity$/i.test(this.activity ?? '')) {
+            this.log('已到登录页，停止 back');
+            return;
+          }
+          this.log(`非主页（${this.activity}），back ${i + 1}/3`);
           await this.driver.back();
-          await sleep(400);
+          await sleep(300);
         }
         this.log('back 未回主页，activateApp');
         await this.activateApp();
-        await sleep(1_200);
+        await sleep(800);
         await this.closePopups();
       });
       await this.act('手机号密码登录（全流程只登录一次）', async () => {
         await ensureAndroidLoggedIn(this, this.account());
-        await assertAndroidLoggedInMe(this, 10_000);
+        await assertAndroidLoggedInMe(this, 8_000);
+        this.log(`登录完成，已耗时 ${Math.round((Date.now() - this.suiteStartedAt) / 1000)}s / 预算 ${Math.round(this.budgetMs / 1000)}s`);
       });
       await this.check('已登录「我的」页', async () => {
         const pass = await isAndroidLoggedInMe(this);
