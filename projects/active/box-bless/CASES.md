@@ -1,47 +1,49 @@
 # 魔盒-幸运赐福（box-bless）冒烟测试大纲
 
-> 来源文档：需求 `documents/80`（2026-10-20）、技术设计 `documents/85`（TECHNICAL_DESIGN.md **v2.1**，2026-10-20）——均来自项目 117 <http://project.cinta.team/projects/117>
-> 冒烟范围：核心链路 7 条（配置 → 累加 → 发放 → 生效核销 → 队列过期 → 衰减 → 进度查询）。公屏广播文案、R9 下发明细导出、魔盒换新 new 标签不在本次范围（见待确认 #8）
-> 测试环境：test；送礼通过 `POST active/v3/__consumer/funbit.gift_send` 模拟（ApiService.runConsumer），衰减通过 `POST active/v3/__cron`（runScheduledTask，time 精确到 cron 分钟）触发
+> 来源文档：需求 `documents/80`（2026-10-20）、技术设计 `TECHNICAL_DESIGN.md`（**v3.8**，2026-10-21）——项目 117 <http://project.cinta.team/projects/117>
+> 实现已落地：active-v3 `active/magicbox/bless/` + `business/magicbox/bless/`；biz = **`magicbox-bless-v202611`**（alias `magicbox-bless`）
+> 冒烟范围：核心链路 7 条（配置 → 累加 → 发放 → 生效核销 → 多券与过期 → 衰减 → 进度查询）。公屏广播文案、R9 下发明细导出、魔盒换新 new 标签不在本次范围
+> 测试环境：test；送礼累加主路径走测试接口 `POST /active/v3/magicbox-bless/test/giftSend`（同步返回 value/stepNow），真实链路负例走 `POST active/v3/__consumer/funbit.gift_send`；衰减走 `POST active/v3/__cron`（body `{biz, time}`，time 为 ISO 带偏移、按 cron 表达式匹配）
 
-## 活动要点（用例设计依据）
+## 活动要点（用例设计依据，v3.8 口径）
 
-- **双服务分工**：active-v3（送礼累加 TaskModule / 日切衰减 cron / `/app/room` boxBless 聚合块 / 赐福抽取写队列）+ lita-basic（`treasure_box_bless_config/_user/_user_record` 三表、`gift_award_queue` 消费发放 BOX_BLESS_* 分支、`openBoxAward` 开奖生效核销）；funbit-api 依赖改造（`sendGift` 新增 `discount`，结算价=配置价×折扣/10，主播按折后分账）
-- **赐福值进度零建表**（TaskModule，`stageType: REPEAT`，name=`bless`）：`mod_common_round`（一轮次=整活动期，按大区各一行）/ `mod_task_user_round`（value=当前赐福值；MAIN_NAME `-` 行存已结算最高 step 高水位）/ `mod_task_user_round_log`（唯一键 (biz,topic,round,user_id,trans_no)：累加 transNo=`{orderNo}`、衰减 transNo=`decay-{yyyyMMdd}`）/ `mod_task_user_round_step`（结算账本，settles 仅 DATA_RANGER 打点，发奖由 Active 层完成）
-- **累加**：`@ActiveConsumer(GIFT_SEND)`（事件源 funbit gift_send 流水 → basic-scanner → Kafka）；白名单 = yaml `magicboxBless.gifts` 比例表 keys（按大区覆盖）；`add = 比例(giftId) × giftCount`；**背包送礼同样累加**（消息无 boxFree 信息，累加看所有送礼、核销只看购买送礼）
-- **触发**：一次跨越多档 `stepDelta>0` → 循环抽取 stepDelta 次 → 写 `gift_award_queue`（`order_no={orderNo}:{k}`，唯一索引防重复）+ 房间公屏广播（触发时直接投递，房间=送礼时 roomId）
-- **抽取范围**：yaml `pools ∩ treasure_box_bless_config(box_gift_id, state=1)` 加权随机一种；交集为空=配置错误告警不触发；倒计时 `expireSeconds → expires_second`；效果参数 `awardId/count → award_id/award_count`
-- **六种赐福**（award_type 语义）：`BOX_BLESS_GUARANTEE` 保底券（award_id=必出礼物、count=数量）/ `BOX_BLESS_FREE` 免费券 / `BOX_BLESS_DISCOUNT` 优惠券（award_id=折扣值 1-9）/ `BOX_BLESS_DOUBLE` 开一送一 / `BOX_BLESS_PROB_UP` 概率提升（boxType='bless' 概率表）/ `GIFT` 背包礼物赐福（现有类型直达背包）
-- **发放**（lita-basic `GiftAwardAutoTimer` @Timer 2s → `UnionAwardService`）：①config 校验（不支持该类型 → award_status=fail+飞书告警）②INSERT `_record`(type=GET, trans_no=队列 order_no) 幂等闸门 ③INSERT `_user`（该用户该魔盒无 ACTIVE 且无 WAITING → **ACTIVE**：active_time=now、expire_time=now+expires_second；否则 **WAITING**）④回填 record.bless_user_id；GIFT 走现有分支进 `user_gift_package` 背包（**不写 _user**）
-- **生效核销**（`openBoxAwardCommon`，查 ACTIVE 且 expire_time>now，过期懒流转）：背包库存送礼（boxFree=true）跳过生效不核销（Q5 推荐口径，待产品拍板）；按类型改写——FREE→boxFree=true（0 扣费）/ DISCOUNT→item 带 discount / DOUBLE→拆两条（原数量扣费+追加同数量 free 条）/ GUARANTEE→整箱跳过概率全出 award_ref×bless_count（free=true，与 bizhong 计数互不影响）/ PROB_UP→boxType 强制 bless（优先级高于 svip/collect_box）；送礼成功 → 核销（UPDATE ... WHERE status='ACTIVE' 乐观防双消）+ USE 流水（trans_no=use_batch_no）+ 激活最早 WAITING（**重算倒计时**）；失败不核销；核销口径=一次赠送动作核销 1 张（无论 count 与收礼人数）
-- **队列顺序**：WAITING 按 id 升序=触发顺序；当前赐福被核销或过期后，最早 WAITING 顶上变 ACTIVE 并重新起算倒计时
-- **衰减**：`@ActiveCron`×3 大区日切（北京 23:05=ko 00:05、00:05=ph、01:05=in/vi，即各大区本地 00:05）；`decayAmount = floor(target × decayPercent / 100)`（默认 10%）；候选=value>0 且当天无正流水（衰减写的负流水不影响判定）；`update(upset=true, transNo=decay-{yyyyMMdd}, value=max(0, 当前值-decayAmount))` 扣到 0 不置负；step 回退不触发结算、MAIN 高水位防重复发奖；按日幂等可补跑
-- **查询**：`POST /active/v3/app/room` 聚合块 `boxBless.boxes[]`：`{boxGiftId, value, target, addValue, active: {type, discount, expireTime, waitingCount} | null}`；魔盒清单 = yaml 比例表 keys（当前用户 locale 对应实例组）
-- **R9 数据需求**（本期不导出、用例断言覆盖）：`_user`（locale / 魔盒 / status∈{WAITING,ACTIVE}=未使用 / create_time=下发时间 / use_time=使用时间）+ `_record`（GET/USE/EXPIRE 全量流水）联合完整覆盖
+- **双服务分工**：active-v3（送礼累加 TaskModule / 日切衰减 cron / 独立查询接口 / 触发判断与发放写队列）+ lita-basic（`treasure_box_bless_config/_user/_user_record` 三表、`gift_award_queue` 消费发放 BOX_BLESS_* 分支、`openBoxAward` 开奖生效核销）；funbit-api 依赖改造（`sendGift` 新增 `discount`，结算价=配置价×折扣/10 向上取整，主播按折后分账）
+- **赐福值进度零建表**（TaskModule，`stageType: REPEAT`）：3 个大区组实例 topic=`bless-default`(in/vi) / `bless-ko`(ko) / `bless-ph`(ph/ar)；**name=`bless_{boxId}`（6 魔盒各一行）**；一轮次=整活动期（P30D，periodDateFormat=yyyyMMdd）；`mod_task_user_round_log` 唯一键 (biz,topic,round,user_id,trans_no) 做消息幂等，**累加 transNo=`{batchNo}:bless:{boxId}`**、衰减 transNo=`decay-{yyyyMMdd}-{boxId}`；MAIN 行/`mod_task_user_round_step` 本活动不使用
+- **累加过滤（三条同时满足）**：`boxId ∈ yaml gifts 白名单` + `roomSource=='voiceroom'` + `giftShelfType=='sysactive_treasur_box'`；`add = 比例(boxId, 大区组) × 实际魔盒数`。正式 consumer 链路实际魔盒数按 `batchNo` 查 funbit 库 `treasure_box`（`SUM(gift_count) WHERE batch_no+sender_id+box_gift_id`），≤0 跳过——**直接发 __consumer 消息必须先造 treasure_box 行**，否则不计；测试接口 `test/giftSend` 直接按入参 `giftCount`（不查 treasure_box）
+- **触发判断收归 Active 层**（决策12，框架零改动）：自算 `stepNow=floor(value/target)`，与发放记录比对逐管发放；**发放幂等高水位=`active_source_record`**（unique_key=`bless:{userId}:{boxId}:{step}`，(active_name,unique_key) 唯一索引撞键跳过，**只升不降**，衰减不删 → 回升不重复发）；队列 `gift_award_queue.order_no='{orderNo}:s{step}'`、`award_status='create'`、`award_mod='add'`、`active_name=biz`、`expires_second`=券类倒计时秒、`remark=JSON {"boxId":N,"probUpRate"?}`
+- **奖池配置在 DB**（v3.4 起）：`lita_basic.treasure_box_bless_config(gift_id, locale, bless_awards JSON, state)`，uk(gift_id,locale)；active-v3 @LocalCache 1 分钟只读抽取（加权随机，weight=0 等价停用）；表无行/state=0/JSON 为空 → 配置缺失告警不触发；yaml 只配 `magicboxBless.{roomSource, decayPercent, gifts, targets}`（比例/target 按大区组 default/ko/ph 覆盖，组缺失回退 default）
+- **六种赐福**（队列 award_type）：`BOX_BLESS_GUARANTEE` 保底券（award_id=必出礼物、award_count=数量）/ `BOX_BLESS_FREE` 免费券 / `BOX_BLESS_DISCOUNT` 优惠券（award_id=折扣值 1-9）/ `BOX_BLESS_DOUBLE` 开一送一 / `BOX_BLESS_PROB_UP` 概率提升（award_id=提升礼物，remark.probUpRate=目标概率 0~1）/ `GIFT` 背包礼物赐福（现有类型直达背包，award_mod='add'、expires_second=awardNum×86400）
+- **发放**（lita-basic `GiftAwardAutoTimer` @Timer 2s → `UnionAwardService` BOX_BLESS_* 分支，本地事务）：①按 (boxId, 用户大区) 校验 config（不在 bless_awards → award_status=fail+飞书告警）②INSERT `_record`(type=GET, trans_no=队列 order_no) 幂等闸门 ③INSERT `_user`（gift_id=boxId、award_config 效果参数快照、**status=ACTIVE 直接起算倒计时**：create_time=发放时刻、expire_time=now+expires_second）④回填 record.bless_user_id；GIFT 走现有分支进 `user_gift_package` 背包（**不写 _user**）
+- **全生效模型**（决策13，产品确认）：**无 WAITING、无 EXPIRED、无激活动作**；多张券同时 ACTIVE、同时倒计时；使用时按 **id 升序（最早获得）** 取未过期券核销；过期不写状态/流水，统一按 `expire_time > now` 过滤推导；boxBless 响应 `active.couponCount`=该魔盒有效券数
+- **生效核销**（lita-basic `openBoxAwardCommon`，查 `status='ACTIVE' AND expire_time>now ORDER BY id ASC LIMIT 1`）：仅**购买送礼（boxFree=false）**核销，背包库存送礼跳过生效不核销（决策11）；FREE→boxFree=true 0 扣费 / DISCOUNT→item 带 discount（依赖 funbit 改造）/ DOUBLE→拆两条（原数量扣费+追加同数量 free）/ GUARANTEE→整箱跳过概率全出 awardRef×count（free=true，与 bizhong 互不影响）/ **PROB_UP→内存中只把指定礼物概率调到 probUpRate、其余按原比例缩放**（决策5，不改 treasure_box_prob、不新增 box_type）；送礼成功→乐观核销（`UPDATE ... WHERE status='ACTIVE'`）+ `_record` USE 流水（trans_no=送礼批次号）；失败不核销；核销口径=一次赠送动作核销 1 张（无论 count 与收礼人数）
+- **衰减**（决策12 自定义原子 SQL，不走模块 update、不动 MAIN 行）：`@ActiveCron 0 5 23/0/1 * * ?`（北京 23:05=ko 次日 00:05、00:05=ph/ar、01:05=in/vi；__cron 按 time 匹配）；口径=**昨天（刚结束的一天）全天无正流水才衰减**（衰减负流水 value<0 不影响判定）；`decayAmount=floor(target×decayPercent/100)`（示例 20%）；先插 log（trans_no=`decay-{yyyyMMdd}-{boxId}` 按日幂等）再 `UPDATE value=GREATEST(0, value-decay)` 扣到 0 不置负；按 biz+topic+name 限定范围，只扫 value>0
+- **查询接口**（决策9，独立于 /app/room）：`POST /active/v3/magicbox-bless/boxBless {boxId}` → `{boxGiftId, boxImage, boxName, value(=累计值%target，Active 层自算), target, addValue, active{type(去前缀短名 GUARANTEE/FREE/...), discount, expireTime, couponCount, awardId, awardImage, awardName, awardPrice, probUpRate, blessReTime}|null, action}`；boxId 非活动魔盒/未传/活动未开启 → data=null。另有 `POST /magicbox-bless/list`（H5 六魔盒+奖池）；DefaultController `/{biz}/boxBless|h5List|testGiftSend|p/init` 同功能
+- **测试接口**：`POST /active/v3/magicbox-bless/test/giftSend {orderNo, senderId, boxId, giftId?, giftCount, roomId?, locale?, roomSource?, sendTime?}` → `{orderNo, senderId, boxId, value, stepNow}`；内部 `context.getSession().setTimestamp(sendTime)` 覆盖时间后复用正式 `processGiftSend`，actualBoxCount 直接=giftCount（免造 treasure_box），同步返回可直接断言
 
-## 公共层计划（脚本落地前先建）
+## 公共层（已落地）
 
 | 项 | 说明 |
 |---|---|
-| `BoxBlessService`（src/services/） | 封装：`/app/room` boxBless 块查询、`__consumer/funbit.gift_send` 消息构造（GiftSendMessage：giftId/senderId/receiverId/roomId/totalCoin/orderNo/sendTime/locale）、`__cron` 衰减触发、`openBoxAward`（lita-basic，鉴权方式待确认，参照 SpinDrawService AccessToken 伪造先例） |
-| MySQL 直连（lita_active + lita_basic 双库） | 造数/清理：`mod_task_user_round(_log/_step)`（本 biz 测试用户行）、`treasure_box_bless_user(_record)`、`gift_award_queue`（测试用户 BOX_BLESS_* 行）、`user_gift_package`（GIFT 赐福发放产物） |
-| 配置基线 | Nacos `{biz}.yaml`（gifts/pools/decayPercent/TaskModule 实例）+ `treasure_box_bless_config` + `treasure_box_prob` bless 行 + `mod_common_round` 轮次初始化（`/p/init` 或首访触发，幂等）——001 负责校验存在性 |
-| 测试用户 | 固定 userId 池（送礼人 A、收礼人 B、衰减对照 C 等），每用例执行前清理其数据，用例可重复执行 |
+| `BoxBlessService`（src/services/） | `config/initActivity/p/init`、`boxBless/list/testGiftSend`、`sendGiftConsumer`（__consumer 真实链路消息构造：box_id/gift_shelf_type/room_source 可参数化）、`runCron({biz,time})`；MySQL 查询（lita_active + lita_basic 双库）：mod_task_user_round(_log)、active_source_record、gift_award_queue、treasure_box_bless_config/_user/_user_record、mod_common_round |
+| 清理 `cleanUsers` | 本 biz + 测试用户行：lita_active 的 mod_task_user_round(_log/_step)、active_source_record（`bless:{uid}:%`）；lita_basic 的 treasure_box_bless_user(_record)、gift_award_queue（active_name+user_id）。`mod_common_round` 公共轮次不清理 |
+| 测试用户 | 复用 pk 用户池 USER_A=13126（送礼人）/USER_B=13125（收礼人）/USER_C=13127（大区覆盖对照），每用例执行前清理，可重复执行 |
 
-清理范围仅限本 biz 与测试用户行；`mod_common_round` 为公共轮次不清理。注意 `treasure_box_bless_config`（active-v3 侧 1 分钟缓存）与 `treasure_box_prob`（60s 缓存）调参后有延迟。
+注意 `treasure_box_bless_config`（active-v3 侧 @LocalCache 1 分钟）调参后有延迟；真实 consumer 正例链路需先在 funbit 库 `treasure_box` 造批次行（batch_no/sender_id/box_gift_id/gift_count），冒烟 002 仅用 consumer 覆盖负例过滤。
 
 ## 模拟时间约定（重要）
 
-活动预期 2026-10-28 发布，冒烟执行时活动未开始/窗口待定——**所有接口调用与 consumer 消息必须显式携带 `debugTimestamp`**（l-debug-timestamp 头），禁止依赖真实时间。格式：`yyyy-MM-ddTHH:mm:ss`（北京）或带 `±HH:mm` 偏移；不支持毫秒/空格分隔（解析失败静默回退真实时间——didibus 已验证的框架行为，active-v3 同框架）。活动有效期门槛是否响应 debug 时间随 001 实测确认。
+活动期（doc yaml）：**2026-11-01 00:00 ~ 2026-11-30 23:59:59**（R 后缀=各大区本地），`initTime=2026-10-25`。
+**⚠️ 测试环境实测（2026-10-22 curl 探测）**：Nacos 实际上传窗口为 **2026-10-01 ~ 2026-11-30**（/config startTime=in/vi 本地 10-01 00:00），且当前生效轮次只覆盖 10 月（11-02 送礼 value=0 不落库、10-26 正常累加）——时间代号按实测可用窗口取值，Nacos 调整为 11 月窗口后需同步修改 `_lib/times.ts`。
+**所有接口调用与 consumer 消息必须显式携带 `debugTimestamp`**（l-debug-timestamp 头），禁止依赖真实时间。格式：`yyyy-MM-ddTHH:mm:ss`（北京）或带 `±HH:mm` 偏移；不支持毫秒/空格分隔（解析失败静默回退真实时间——didibus 已验证的框架行为）。
 
 | 代号 | 含义 | 取值（大区本地时间计） | 用途 |
 |---|---|---|---|
-| `T_PRE` | 活动开始前 | 上线前 1~2 天 | 配置校验、轮次初始化触发 |
-| `T_D1` | 活动第 1 天 | 上线日 18:00（按实际上线时间定） | 正式业务：累加/发放/生效/查询 |
-| `T_D2` | 第 2 天 | 次日 10:00 | 跨天场景、衰减判定 |
-| `T_D2_0001` | 第 2 天日切后 | 次日 00:01 | 「今日已送」对照造数（006） |
-| `T_D2_SETTLE` | 第 2 天日切点 | 次日 00:05（各大区换算北京：ko=前一日 23:05、ph=00:05、in/vi=01:05） | `__cron` 触发衰减 |
-| `T_OUT` | 活动期外 | 开始前/结束后（框架 ±7d 宽限内） | 拒绝场景：消息不累加 |
+| `T_INIT` | initTime 之后、轮次内 | 2026-10-26 12:00 | 配置校验、/p/init 轮次初始化 |
+| `T_D1` | 活动第 1 天 | 2026-10-27 18:00 | 正式业务：累加/发放/生效/查询 |
+| `T_D2` | 第 2 天 | 2026-10-28 10:00 | 跨天场景、衰减判定 |
+| `T_D2_0001` | 第 2 天日切后 | 2026-10-28 00:01 | 「今日已送」对照造数（006） |
+| `CRON_DECAY_*` | D1→D2 日切点（北京） | ko=2026-10-27T23:05+08:00、ph/ar=2026-10-28T00:05、in/vi=2026-10-28T01:05 | `__cron` 触发衰减（time 精确到 cron 分钟） |
+| `T_OUT` | 活动期外（开始前） | 2026-09-28 12:00 | 拒绝场景：消息不累加 |
 
 ## 用例列表
 
@@ -49,94 +51,93 @@
 
 | 步骤 | 类型 | 校验点 |
 |---|---|---|
-| 调用活动 config（T_PRE） | check | 活动 biz 可访问、enableLocales、起止时间与上线计划一致（biz 名/别名确认，见待确认 #1） |
-| 读 yaml 业务配置 | check | `magicboxBless.gifts`（default+大区覆盖，魔盒 giftId 清单=金币/钻石魔盒）、`pools`（六类条目、权重和>0、expireSeconds）、`decayPercent`；TaskModule 实例（按大区分组）`repeat.values` 的 target |
-| 查 `mod_common_round` | check | bless 任务轮次已初始化：一个轮次=整活动期（periodDuration=活动时长），各大区一行 |
-| 查 lita_basic 三表存在性 | check | `treasure_box_bless_config` / `_user` / `_user_record` 可查询（建表完成，上线清单 #1） |
-| 查 `treasure_box_bless_config` | check | 金币/钻石魔盒各有 ≥1 条 state=1；启用类型 ⊆ yaml pools 类型集合（交集非空） |
-| 查 `treasure_box_prob` | check | `box_type='bless'` 概率行存在（每魔盒，PROB_UP 前置） |
-| funbit discount 依赖 | check | `sendGift` 携带 `discount`（如 5 折）结算价=原价×折扣/10（DISCOUNT 生效前置，验证路径见待确认 #6） |
-| 队列环境干净度 | check | `gift_award_queue` 无本 biz 历史 `award_status=fail` 的 BOX_BLESS_* 积压（可选） |
+| 调用活动 config（T_INIT） | check | 起止时间=实测 Nacos 窗口（2026-10-01~11-30 各大区本地）、enableLocales 含 ko/ph/in/vi/ar |
+| /p/init 初始化（round=1，T_INIT） | act | 幂等（pipelines.init 依次 init 三个 TaskModule 实例） |
+| 查 `mod_common_round` | check | bless-default/bless-ko/bless-ph 各大区均有轮次且覆盖 T_D1（轮次 key 随 Nacos 窗口，当前观测=202610） |
+| 查 lita_basic 三表存在性 | check | `treasure_box_bless_config` / `_user` / `_user_record` 可查询（建表完成，init.sql） |
+| 查 `treasure_box_bless_config` | check | 6 魔盒（6040/6041/6155/6526/6527/8978）× 当前大区 state=1 行齐全；bless_awards 可解析、weight 和>0、类型 ⊆ 六种赐福 |
+| h5List 接口（T_D1） | check | 返回 6 个魔盒（id 升序）且每个 blessAwards 非空（交叉验证 DB 配置与接口解析） |
+| boxBless 边界 | check | 未传/非法 boxId → data=null；新用户合法 boxId → value=0/target=100/addValue=5/active=null |
 
 ### 002-bless-add —— 送礼累加赐福值
 
+> 主路径走 `test/giftSend`（同步返回 value/stepNow，免造 treasure_box）；真实 `__consumer` 链路仅覆盖负例过滤。
+
 | 步骤 | 类型 | 校验点 |
 |---|---|---|
-| 清理测试用户 A 的进度/赐福/队列数据 | act | — |
-| 送非魔盒礼物（giftId ∉ gifts keys，T_D1） | act+check | 进度不变、无队列写入（白名单过滤） |
-| 送 1 个金币魔盒（T_D1） | act | `__consumer/funbit.gift_send` |
-| 累加正确 | check | 该魔盒 value += 比例(giftId)×1（_round 绝对值）；_log 正流水 1 条 value=+add、transNo=`{orderNo}`；未达 target 无队列 |
-| 同 orderNo 重发消息（T_D1） | act+check | value 不再增加、_log 仅 1 条、无重复队列（唯一键幂等） |
-| 一次送 N 个跨多档（T_D1） | act+check | value 累计正确；队列新增 stepDelta 条且 `order_no={orderNo}:1..stepDelta` 连续；每条 award_type ∈ pools∩config、expires_second=配置倒计时 |
-| 期外消息（T_OUT） | act+check | 不累加（有效期校验） |
-| 大区比例（若配置了覆盖） | check | locale=ko 送礼按 ko 比例表累加、走 task-ko 实例轮次 |
-
-> 注：进度按（用户×魔盒）独立（需求 R1/R6），实现以 TaskModule 多 name 或多实例表达，断言粒度以测试环境实际配置为准（待确认 #3）。背包送礼累加语义无法经消息区分（无 boxFree 字段），按设计=照常累加，核销侧口径在 004 验证。
+| 清理测试用户 A/C 数据 | act | — |
+| 负例：consumer 消息 giftShelfType≠sysactive_treasur_box（T_D1） | act+check | 无 _round/_log 行（宝箱流水过滤） |
+| 负例：consumer 消息 roomSource≠voiceroom | act+check | 不累加（来源过滤） |
+| 负例：boxId=999999（非白名单） | act+check | 不累加（白名单过滤） |
+| 正例：testGiftSend A 送 6040×1（T_D1，locale=in） | act+check | 同步返回 value=5、stepNow=0；`mod_task_user_round`（topic=bless-default, name=bless_6040）value=5；_log 正流水 1 条 trans_no=`{orderNo}:bless:6040` |
+| 同 orderNo 重发（幂等） | act+check | value 不变、_log 仍 1 条、无队列/无 source_record |
+| 一次送 40 个跨 2 档（+200 → value=205） | act+check | 返回 stepNow=2；`active_source_record` 出现 `bless:{A}:6040:1`/`:2`；`gift_award_queue` 新增 2 条 order_no=`{orderNo}:s1`/`:s2`、award_type ∈ config 类型、expires_second>0（券类）、remark 含 boxId=6040 |
+| 期外消息（T_OUT） | act+check | 不累加（报错或静默跳过，记录实测行为） |
+| 大区覆盖（locale=ko） | act+check | USER_C 走 task-ko 实例：topic=bless-ko、value += 4（ko 比例）、target=80 |
 
 ### 003-bless-grant —— 赐福发放（队列消费）
 
 | 步骤 | 类型 | 校验点 |
 |---|---|---|
 | 真实链路触发（002 的跨档送礼）后等待消费（@Timer 2s） | act | — |
-| 首个赐福状态 | check | `_user` 首条=ACTIVE：active_time=now、expire_time=now+expires_second（倒计时起点=**发放时刻**）、queue_no=1、locale/box_gift_id/bless_type/参数快照正确 |
-| 第二条排队 | check | `_user` 第二条=WAITING（无 active_time） |
-| GET 流水（R9 下发明细） | check | `_record` type=GET：trans_no=队列 order_no、create_time=下发时间、bless_user_id 已回填 |
-| 队列重放幂等 | act+check | 对同一 order_no 重复触发发放动作：record 唯一键挡住、`_user` 不重复、状态不变 |
-| 全类型覆盖（造数直写队列行 ×5 类型，award_status=create） | act | GUARANTEE/FREE/DISCOUNT/DOUBLE/PROB_UP 各一条（GIFT 已由真实链路概率覆盖，未中则一并造） |
-| 全类型发放正确 | check | 消费后各类型 `_user/_record` 齐全、效果参数快照（GUARANTEE award_id=礼物/count、DISCOUNT discount 值）正确；GIFT 类型直达 `user_gift_package` 背包（active_name=biz）且**不写** `_user` |
-| config 兜底 | check | 队列造一条 config 停用/未配置的类型 → award_status=fail（发放侧二次校验，冒烟可造数验证或降级为代码走查） |
+| 赐福状态（全生效模型） | check | `_user` 每队列行一条：status=**ACTIVE**（无 WAITING）、create_time=发放时刻、expire_time=create_time+expires_second、gift_id=boxId、locale=用户大区、bless_type/award_config 快照正确 |
+| GET 流水（R9 下发明细） | check | `_record` type=GET：trans_no=队列 order_no、bless_user_id 已回填、create_time=下发时间 |
+| 队列重放幂等 | act+check | 同 order_no 重复消费：record 唯一键挡住、`_user` 不重复 |
+| 全类型覆盖（造数直写队列行 ×5 类型，award_status=create） | act | GUARANTEE/FREE/DISCOUNT/DOUBLE/PROB_UP 各一条（GIFT 未中则一并造） |
+| 全类型发放正确 | check | 消费后各类型 `_user/_record` 齐全、award_config 快照正确（GUARANTEE awardRef+count、DISCOUNT discount、PROB_UP awardRef+probUpRate）；GIFT 类型直达 `user_gift_package` 背包（active_name=biz）且**不写** `_user` |
+| config 兜底 | check | 队列造一条 config 停用/未配置的类型 → award_status=fail（发放侧二次校验） |
 
 ### 004-bless-apply —— 赐福生效与核销（核心）
 
-> 前置：使指定类型赐福处于 ACTIVE（优先消费 003 造数队列，或直写 `_user` status=ACTIVE+expire_time 未来）。核销那一次开箱送礼本身也是魔盒送礼，**进度照常累加**属预期副作用。
+> 前置：使指定类型赐福处于 ACTIVE（优先消费 003 造数队列，或直写 `_user` status=ACTIVE+expire_time 未来）。核销那一次开箱送礼本身也是魔盒送礼，**进度照常累加**属预期副作用。openBoxAward 鉴权参照 SpinDrawService AccessToken 伪造先例。
 
 | 步骤 | 类型 | 校验点 |
 |---|---|---|
-| FREE 免费券：openBoxAward（T_D1） | act+check | 扣费 0（boxFree 语义）；核销：status=USED、use_time、use_batch_no、`_record` USE 流水（trans_no=use_batch_no） |
-| DISCOUNT 优惠券：openBoxAward | act+check | 实扣=原价×折扣/10（funbit discount 生效）；正常核销 |
+| FREE 免费券：openBoxAward（T_D1） | act+check | 扣费 0（boxFree 语义）；核销：status=USED + `_record` USE 流水（trans_no=送礼批次号） |
+| DISCOUNT 优惠券：openBoxAward | act+check | 实扣=原价×折扣/10（小数向上取整，funbit discount 生效）；正常核销 |
 | DOUBLE 开一送一：openBoxAward | act+check | 产出数量×2（原数量扣费 + 追加同数量 free 条）；正常核销 |
-| GUARANTEE 保底券：openBoxAward | act+check | 整箱跳过概率：全部格产出=award_ref 礼物×bless_count、free=true（不扣费）；与 bizhong 计数互不影响 |
-| PROB_UP 概率提升：openBoxAward | act+check | boxType 强制=bless 按 `treasure_box_prob` bless 概率表开奖；正常核销 |
-| 核销激活下一条 | check | 原 ACTIVE=USED 后，最早 WAITING 顶上变 ACTIVE 且 active_time/expire_time **重算**（=激活时刻+valid_seconds） |
-| 送礼失败不核销 | act+check | 造金币不足使 openBox 扣费失败（用 DISCOUNT 场景）→ 赐福仍 ACTIVE、无 USE 流水 |
-| 背包送礼不核销（Q5 推荐口径） | act+check | 造背包库存 → 走背包送礼链路（boxFree=true）→ 赐福不生效、状态仍 ACTIVE（**待产品拍板**，拍板相反则改为「生效但 FREE/DISCOUNT 无收益消耗」口径） |
+| GUARANTEE 保底券：openBoxAward | act+check | 整箱跳过概率：全部格产出=awardRef 礼物×count、free=true（不扣费）；与 bizhong 计数互不影响 |
+| PROB_UP 概率提升：openBoxAward | act+check | 内存调权（指定礼物概率=probUpRate、其余按原比例缩放），不改 treasure_box_prob；正常核销 |
+| 最早获得先用 | act+check | 多张 ACTIVE 券时核销 id 最小的一张；其余券保持 ACTIVE 继续倒计时（无激活/重算动作） |
+| 送礼失败不核销 | act+check | 造金币不足使扣费失败 → 赐福仍 ACTIVE、无 USE 流水 |
+| 背包送礼不核销（决策11） | act+check | 走背包库存送礼链路（boxFree=true）→ 赐福不生效、状态仍 ACTIVE 继续倒计时 |
 
-### 005-bless-queue —— 队列顺序与过期
+### 005-bless-multi —— 多券并存与过期（全生效模型）
 
 | 步骤 | 类型 | 校验点 |
 |---|---|---|
-| 一次触发多赐福排队 | check | 002 跨档送礼产生的 ≥2 条赐福：按 queue_no/id 升序，仅第 1 条 ACTIVE、其余 WAITING |
-| 核销后顶替 | act+check | 核销当前（走 004）→ 最早 WAITING→ACTIVE、倒计时重算 |
-| 过期懒流转 | act+check | 直写当前 ACTIVE 的 expire_time=过去 → 调用 openBoxAward（或 app/room 查询）触发：status=EXPIRED + `_record` EXPIRE 流水（trans_no=`exp-{bless_user_id}`）+ 下一条 WAITING 激活（若有） |
-| 过期后重新累加正常触发 | act+check | 赐福全部终结后再次跨档送礼 → 新赐福正常 ACTIVE（无残留状态阻塞） |
+| 一次触发多赐福 | check | 002 跨档送礼产生的 ≥2 条赐福**全部 ACTIVE**（无 WAITING）、同时倒计时（expire_time=各自 create_time+expires_second） |
+| 核销顺序 | act+check | openBoxAward 核销**最早获得**（id 最小）的一张 → USED；其余 ACTIVE 不受影响 |
+| 过期纯推导 | act+check | 直写某券 expire_time=过去 → 无状态流转/无 EXPIRE 流水；boxBless 查询与 openBoxAward 生效均按 expire_time>now 过滤该券（couponCount 减 1、active 取下一最早未过期券） |
+| 过期后重新触发 | act+check | 全部过期后再次跨档送礼 → 新赐福正常 ACTIVE（无残留状态阻塞；source_record 高水位只升不降不影响新管数发放） |
 
 ### 006-decay —— 赐福值衰减（日切 Cron）
 
-> ⚠️ 口径探测：cron 在大区日切后 5 分钟执行，"当天没送"的正流水判定按**刚结束的一天（需求语义）**还是**执行当日（设计原文 `create_time ∈ 今日` 字面）**，设计存在歧义——步骤 2 实测确认后记录口径。
+> 口径已明确（v3.8）：**昨天（刚结束的一天）全天无正流水才衰减**；decayAmount=floor(target×decayPercent/100)，示例 decayPercent=20。
 
 | 步骤 | 类型 | 校验点 |
 |---|---|---|
-| 造数：C 两日均无正流水、value=X>0（流水在更早日期） | act | — |
-| 口径探测：A 于 T_D1 送（D1 有正流水、D2 无）、B 于 T_D2_0001 送（D2 有、D1 无） | act | — |
-| 触发 ko 日切 cron（time=T_D2_SETTLE 换算北京） | act | — |
-| 确定性衰减：C | check | value -= floor(target×10%)；`_log` 负流水 1 条 transNo=`decay-{yyyyMMdd}`、value=-decayAmount |
-| 口径结论：A/B 恰好其一衰减 | check | 口径1（昨日=D1）：A 送了不衰减、B 衰减；口径2（今日=D2）：A 衰减、B 不衰减。实测记录；若与需求口径（A 不该衰减）不符 → 记录问题与需求方确认 |
-| 扣到 0 不置负 | check | value < decayAmount 的用户衰减后=0 |
-| 幂等 | act+check | 重复触发同日 cron：无新增负流水、value 不变（decay-{yyyyMMdd} 幂等） |
-| 高水位不重复发奖 | act+check | C 衰减后重新累加至原已结算 step → 不重复触发赐福（step 回退/唯一键）；跨到新 step → 正常触发 |
-| 大区隔离 | check | ph 日切触发仅影响 ph 轮次用户，ko 用户 value 不变（各 locale 独立轮次行） |
+| 造数：C 昨天无正流水、value=X>0（流水在更早日期） | act | — |
+| 对照：A 于 T_D1 送（昨天有正流水）、value>0 | act | — |
+| 触发 in/vi 日切 cron（__cron time=2026-11-03T01:05:00+08:00） | act | — |
+| 确定性衰减：C | check | value -= floor(target×20%)；`_log` 负流水 1 条 trans_no=`decay-{yyyyMMdd}-{boxId}`、value=-decayAmount |
+| 昨天送过不衰减：A | check | value 不变、无负流水 |
+| 扣到 0 不置负 | check | value < decayAmount 的用户衰减后=0（GREATEST(0,…)） |
+| 幂等 | act+check | 重复触发同日 cron：无新增负流水、value 不变（decay-{yyyyMMdd}-{boxId} 幂等） |
+| 高水位不重复发奖 | act+check | C 衰减后重新累加至历史已达管数 → 不重复触发（source_record 只升不降）；跨到新管数 → 正常触发 |
+| 大区隔离 | check | ko 日切触发仅影响 bless-ko 轮次用户，in 用户 value 不变 |
 | value=0 不衰减 | check | 候选过滤 value>0，0 值用户无负流水 |
 
-> 注：衰减按魔盒独立（送金币没送钻石 → 仅钻石衰减），受口径影响构造较繁，冒烟先不展开，全量用例补。
-
-### 007-app-room —— 进度条与赐福状态查询
+### 007-box-bless-query —— 进度条与赐福状态查询（独立接口）
 
 | 步骤 | 类型 | 校验点 |
 |---|---|---|
-| 无赐福查询（清空 A 的 `_user`） | check | `boxBless.boxes[]` 清单=yaml 比例表 keys；value/target 与 `_round` 一致、addValue=比例表；active=null |
-| 有 ACTIVE 查询 | check | active={type, discount, expireTime, waitingCount} 与 `_user` 一致（waitingCount=WAITING 条数） |
-| 大区实例 | check | locale=ko 用户 target/addValue 按 task-ko 实例配置返回 |
-| 新用户 | check | 全 0 进度、boxes 齐全不报错 |
+| 无赐福查询（清空 A 的 `_user`） | check | `boxBless {boxId}`：value=value%target、target/addValue 与 yaml 一致、active=null |
+| 有 ACTIVE 查询 | check | active={type(短名), discount, expireTime, couponCount, ...} 与 `_user` 最早未过期一张一致；couponCount=有效券总数 |
+| 进度自算口径 | check | 衰减后 value%target 与接口返回一致（不依赖模块 progress 事件） |
+| 大区实例 | check | locale=ko 用户 target=80/addValue=4 按 task-ko 配置返回 |
+| 非活动魔盒/未开启 | check | boxId 非白名单 → data=null |
+| h5List | check | 6 魔盒 + 各大区奖池（背包/保底礼物含图片/名称/价格） |
 
 ## 执行顺序与依赖
 
@@ -147,11 +148,10 @@
 
 ## 待确认事项
 
-1. **biz 名/别名**（设计示意 `magicbox-bless`）与测试环境 `{biz}.yaml`、`main.yaml` 注册、活动起止时间（预期 2026-10-28 上线）
-2. **魔盒礼物 ID 与参数**：金币/钻石魔盒真实 giftId（yaml gifts keys）、各魔盒 target、比例（含大区覆盖）、各赐福类型 `expireSeconds`（待运营配值——005 过期用例用造数绕过真实等待）
-3. **TaskModule 进度划分**：按魔盒多 name 还是多实例表达（设计 yaml 为示意），决定 002/006/007 断言粒度
-4. **Q5 背包送礼是否核销**待产品拍板（冒烟按推荐口径=购买送礼才核销；拍板相反需改 004 末步）
-5. **衰减"当天没送"口径**：日切 cron 执行时刻的"今日"语义（刚结束的一天 vs 执行当日）——006 内置探测步骤，实测后回填结论
-6. **lita-basic 调用方式**：`openBoxAward` 测试环境鉴权（参照 SpinDrawService AccessToken 伪造先例）；funbit `sendGift` discount 的可观测验证路径（结算流水/响应金额）
-7. **测试环境前置**（上线清单 #1/#2/#3/#5/#8）：三表建表、TaskModule `stepDelta` 框架小改+存量活动回归、funbit discount 支持、`treasure_box_prob` bless 概率行、Nacos yaml 上传
-8. **范围外（后续补）**：公屏广播两态文案（active-v3 直投，需房间通道验证手段）、R9 下发明细导出（exports/）、魔盒换新 new 标签（纯配置：update_time+tag_days=9）、checks/ 线上巡检
+1. ~~biz 名/别名~~ **已确认**：`magicbox-bless-v202611`（alias `magicbox-bless`）。**Nacos 实测窗口=2026-10-01~11-30（in/vi 本地换算），与 doc yaml 的 11-01~11-30 不一致**（2026-10-22 探测，应为提前开放测试）；轮次 key 当前观测=202610。正式上线调整窗口后需同步 `_lib/times.ts` 与 001 断言
+2. **魔盒礼物 ID 与参数**：6040/6041/6155/6526/6527/8978，default 比例 5/8/5/8/5/8、ko 4/6/4/6/4/6，target default/ph=100、ko=80（**已经 test/giftSend 实测**：6040×1 → value=5、target=100、addValue=5，与 yaml 样例一致）；各赐福类型 `expireSeconds` 待运营配值（005 过期用例用造数绕过真实等待）
+3. **测试环境前置**（上线清单 #1/#3/#5/#6/#8）：lita_basic 三表建表（init.sql）、funbit discount 支持（004 DISCOUNT 前置）、`treasure_box_bless_config` 初始化、Nacos `{biz}.yaml` 上传 + `main.yaml` 注册、上传后先跑 `/{biz}/p/init` 预建轮次
+4. **lita-basic 调用方式**：`openBoxAward` 测试环境鉴权（参照 SpinDrawService AccessToken 伪造先例）；funbit `sendGift` discount 的可观测验证路径（结算流水/响应金额）
+5. **真实 consumer 正例**：需先在 funbit 库 `treasure_box` 造批次行（batch_no/sender_id/box_gift_id/gift_count），冒烟 002 以 test/giftSend 覆盖正例、consumer 仅覆盖负例过滤，真实链路正例后续补
+6. **测试环境轮次不一致（2026-10-22 实测）**：bless-default 只有 10 月轮次、bless-ko/bless-ph 只有 11 月轮次（ko/ph 在 10 月送礼 value=0 不落库、11 月正常）——疑似三个 TaskModule 实例 roundSetting 配置不一致或历史 init 残留，`/p/init` 幂等不补齐。需拉齐 Nacos 配置后重跑 init，否则 002 的 ko 大区步骤会 fail
+7. **范围外（后续补）**：公屏广播两态文案（active-v3 直投，需房间通道验证手段）、进度刷新消息 BOX_BLESS_REFRESH、背包礼物弹窗 MAGICBOX_BLESS_AWARD、R9 下发明细导出（exports/）、魔盒换新 new 标签（纯配置：update_time+tag_days=9）、checks/ 线上巡检
