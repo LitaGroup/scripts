@@ -9,6 +9,7 @@ import { DidibusService } from '../services/DidibusService.ts';
 import { SpinDrawService } from '../services/SpinDrawService.ts';
 import { GameGradeService } from '../services/GameGradeService.ts';
 import { BoxBlessService } from '../services/BoxBlessService.ts';
+import { PlayerDutyService } from '../services/PlayerDutyService.ts';
 
 /**
  * 测试用例基类（测试环境）。
@@ -25,6 +26,7 @@ export abstract class TestBaseClass extends CheckBaseClass {
   private _spindraw: SpinDrawService | null = null;
   private _gameGrade: GameGradeService | null = null;
   private _boxBless: BoxBlessService | null = null;
+  private _playerDuty: PlayerDutyService | null = null;
 
   protected get api(): APITestResource {
     return (this._api ??= new APITestResource());
@@ -64,6 +66,10 @@ export abstract class TestBaseClass extends CheckBaseClass {
 
   protected get boxBless(): BoxBlessService {
     return (this._boxBless ??= new BoxBlessService({ api: this.api, mysql: this.mysql, redis: this.redis }));
+  }
+
+  protected get playerDuty(): PlayerDutyService {
+    return (this._playerDuty ??= new PlayerDutyService(this.mysql));
   }
 
   async execute(): Promise<void> {
