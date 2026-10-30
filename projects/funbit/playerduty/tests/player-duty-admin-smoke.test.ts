@@ -1,4 +1,3 @@
-import ExcelJS from 'exceljs';
 import { type CheckResult } from '../../../../src/base/CheckBaseClass.ts';
 import { TestBaseClass } from '../../../../src/base/TestBaseClass.ts';
 import type { MysqlRow } from '../../../../src/resources/MySQLTestResource.ts';
@@ -15,9 +14,9 @@ import type { MysqlRow } from '../../../../src/resources/MySQLTestResource.ts';
  *
  * 运行：node player-duty-admin-smoke.test.ts [--player-id=24] [--locale=in]
  *        [--timezone=Asia/Jakarta] [--keep-data]
- * 前置：config.json（测试环境 MySQL 直连）；后台默认账号 admin/123456，
- *      可用 SCRIPT_ADMIN_HOST / SCRIPT_ADMIN_USERNAME / SCRIPT_ADMIN_PASSWORD /
- *      SCRIPT_ADMIN_ACCESS_TOKEN 覆盖。
+ * 前置：scripts 目录执行 npm install（Excel 上传用例依赖 exceljs）；config.json（测试环境 MySQL 直连）；
+ *      后台默认账号 admin/123456，可用 SCRIPT_ADMIN_HOST / SCRIPT_ADMIN_USERNAME /
+ *      SCRIPT_ADMIN_PASSWORD / SCRIPT_ADMIN_ACCESS_TOKEN 覆盖。
  */
 
 const DEFAULT_ADMIN_HOST = 'https://funbit-mgr.test.cinta.team';
@@ -31,6 +30,38 @@ const DB_FUNBIT = 'funbit';
 const HTTP_TIMEOUT_MS = 30_000;
 const MINUTE_MS = 60_000;
 const REMARK_PREFIX = 'player-duty-admin-smoke-';
+
+interface ExcelWorksheetLike {
+  addRow(values: unknown[]): void;
+  getRow(index: number): { values: unknown[] };
+  eachRow(cb: (row: { getCell(index: number): { value: unknown } }, no: number) => void): void;
+}
+
+interface ExcelWorkbookLike {
+  xlsx: {
+    load(buffer: Buffer): Promise<void>;
+    writeBuffer(): Promise<unknown>;
+  };
+  addWorksheet(name: string): ExcelWorksheetLike;
+  worksheets: ExcelWorksheetLike[];
+}
+
+interface ExcelModuleLike {
+  Workbook: new () => ExcelWorkbookLike;
+}
+
+let excelModule: ExcelModuleLike | null | undefined;
+
+async function loadExcel(): Promise<ExcelModuleLike | null> {
+  if (excelModule !== undefined) return excelModule;
+  try {
+    const mod = (await import('exceljs')) as { default?: ExcelModuleLike };
+    excelModule = mod.default ?? (mod as unknown as ExcelModuleLike);
+  } catch {
+    excelModule = null;
+  }
+  return excelModule;
+}
 
 const TZ_BY_LOCALE: Record<string, string> = {
   in: 'Asia/Jakarta',
@@ -641,8 +672,16 @@ class PlayerDutyAdminSmoke extends TestBaseClass {
     this.originalIsActive = null;
   }
 
+  private async requireExcel(): Promise<ExcelModuleLike> {
+    const Excel = await loadExcel();
+    if (!Excel) this.skip('未安装 exceljs，跳过 Excel 上传用例（在 scripts 目录执行 npm install 后可跑全量）');
+    return Excel;
+  }
+
   private async buildExcel(rows: Array<[number, number, number, number]>): Promise<Buffer> {
-    const wb = new ExcelJS.Workbook();
+    const Excel = await loadExcel();
+    if (!Excel) throw new Error('未安装 exceljs');
+    const wb = new Excel.Workbook();
     const ws = wb.addWorksheet('duty');
     ws.addRow([
       'ID',
@@ -712,22 +751,29 @@ class PlayerDutyAdminSmoke extends TestBaseClass {
 
     await this.checkG('模板下载：xlsx 文件名与表头正确', async (): Promise<CheckResult> => {
       const file = this.template!;
-      const wb = new ExcelJS.Workbook();
-      await wb.xlsx.load(file.buffer);
-      const header = wb.worksheets[0]?.getRow(1).values ?? [];
-      const texts = [1, 2, 3, 4].map((i) => headerValue(header, i));
+      const Excel = await loadExcel();
+      const texts: string[] = [];
+      if (Excel) {
+        const wb = new Excel.Workbook();
+        await wb.xlsx.load(file.buffer);
+        const header = wb.worksheets[0]?.getRow(1).values ?? [];
+        texts.push(...[1, 2, 3, 4].map((i) => headerValue(header, i)));
+      }
+      const headerOk = Excel
+        ? texts[0] === 'ID' &&
+          texts[1].includes('On Duty Date') &&
+          texts[2].includes('Start Time') &&
+          texts[3].includes('End Time')
+        : true;
       const pass =
         file.status === 200 &&
         file.disposition.includes('player_duty_template.xlsx') &&
         file.buffer.length > 0 &&
         file.buffer.subarray(0, 2).toString() === 'PK' &&
-        texts[0] === 'ID' &&
-        texts[1].includes('On Duty Date') &&
-        texts[2].includes('Start Time') &&
-        texts[3].includes('End Time');
+        headerOk;
       return {
-        expect: 'player_duty_template.xlsx，4 列表头',
-        real: `http=${file.status} ${file.disposition} ${texts.join(' | ')}`,
+        expect: Excel ? 'player_duty_template.xlsx，4 列表头' : 'player_duty_template.xlsx（未装 exceljs，仅校验文件）',
+        real: `http=${file.status} ${file.disposition} ${Excel ? texts.join(' | ') : 'skip-header'}`,
         pass,
       };
     });
@@ -1443,6 +1489,7 @@ class PlayerDutyAdminSmoke extends TestBaseClass {
     });
 
     await this.actG('上传 Excel：同一日期 3 个固定班次', async () => {
+      await this.requireExcel();
       const dateInt = dateToInt(addDays(this.baseDate, 13));
       const body = await this.uploadExcel([
         [this.playerId, dateInt, 1100, 1300],
@@ -1460,6 +1507,7 @@ class PlayerDutyAdminSmoke extends TestBaseClass {
     });
 
     await this.checkG('Excel 上传成功：导入 3 条并生成快照/ADD 日志', async (): Promise<CheckResult> => {
+      await this.requireExcel();
       const dateInt = dateToInt(addDays(this.baseDate, 13));
       const rows = await this.mysql.query(
         `SELECT * FROM player_duty WHERE locale = ${sqlStr(this.locale)} AND player_id = ${sqlNum(this.playerId)} ` +
@@ -1486,6 +1534,7 @@ class PlayerDutyAdminSmoke extends TestBaseClass {
     });
 
     await this.checkG('重复上传同一文件返回 assigned more than once', async (): Promise<CheckResult> => {
+      await this.requireExcel();
       const dateInt = dateToInt(addDays(this.baseDate, 13));
       const body = await this.uploadExcel([
         [this.playerId, dateInt, 1100, 1300],
@@ -1500,6 +1549,7 @@ class PlayerDutyAdminSmoke extends TestBaseClass {
     });
 
     await this.checkG('Excel 班次不足整表失败且不落库', async (): Promise<CheckResult> => {
+      await this.requireExcel();
       const date = addDays(this.baseDate, 14);
       const dateInt = dateToInt(date);
       const body = await this.uploadExcel([[this.playerId, dateInt, 1100, 1300]]);
@@ -1516,6 +1566,7 @@ class PlayerDutyAdminSmoke extends TestBaseClass {
     });
 
     await this.checkG('Excel 非法班次返回 Invalid date or time format', async (): Promise<CheckResult> => {
+      await this.requireExcel();
       const dateInt = dateToInt(addDays(this.baseDate, 14));
       const body = await this.uploadExcel([[this.playerId, dateInt, 1200, 1400]]);
       return {
@@ -1535,26 +1586,27 @@ class PlayerDutyAdminSmoke extends TestBaseClass {
 
     await this.checkG('导出：文件名/xlsx 内容/筛选行匹配', async (): Promise<CheckResult> => {
       const file = this.exportFile!;
-      const wb = new ExcelJS.Workbook();
-      await wb.xlsx.load(file.buffer);
-      const ws = wb.worksheets[0];
-      const header = ws?.getRow(1).values ?? [];
-      const headers = [1, 2, 3].map((i) => headerValue(header, i));
+      const Excel = await loadExcel();
+      const headers: string[] = [];
       let hasPlayer = false;
-      ws?.eachRow((row, no) => {
-        if (no > 1 && String(row.getCell(1).value ?? '') === String(this.playerId)) hasPlayer = true;
-      });
+      if (Excel) {
+        const wb = new Excel.Workbook();
+        await wb.xlsx.load(file.buffer);
+        const ws = wb.worksheets[0];
+        const header = ws?.getRow(1).values ?? [];
+        headers.push(...[1, 2, 3].map((i) => headerValue(header, i)));
+        ws?.eachRow((row, no) => {
+          if (no > 1 && String(row.getCell(1).value ?? '') === String(this.playerId)) hasPlayer = true;
+        });
+      }
       const pass =
         file.status === 200 &&
         file.disposition.includes('player_duty_export.xlsx') &&
         file.buffer.subarray(0, 2).toString() === 'PK' &&
-        headers[0] === 'ID' &&
-        headers[1] === 'NO' &&
-        headers[2] === 'Nick' &&
-        hasPlayer;
+        (Excel ? headers[0] === 'ID' && headers[1] === 'NO' && headers[2] === 'Nick' && hasPlayer : true);
       return {
-        expect: 'player_duty_export.xlsx，表头 ID/NO/Nick，含测试玩家',
-        real: `http=${file.status} ${file.disposition} headers=${headers.join('/')} hasPlayer=${hasPlayer}`,
+        expect: Excel ? 'player_duty_export.xlsx，表头 ID/NO/Nick，含测试玩家' : 'player_duty_export.xlsx（未装 exceljs，仅校验文件）',
+        real: `http=${file.status} ${file.disposition} headers=${headers.join('/') || 'skip'} hasPlayer=${hasPlayer}`,
         pass,
       };
     });
