@@ -157,6 +157,16 @@ function toNullableStr(v: unknown): string | null {
   return v === null || v === undefined || v === '' ? null : String(v);
 }
 
+function jsonText(v: unknown): string {
+  if (v === null || v === undefined) return '';
+  if (typeof v === 'string') return v;
+  try {
+    return JSON.stringify(v);
+  } catch {
+    return String(v);
+  }
+}
+
 function sqlStr(s: string): string {
   return "'" + s.replace(/'/g, "''") + "'";
 }
@@ -965,16 +975,16 @@ class PlayerDutyAdminSmoke extends TestBaseClass {
         `duty_id = ${sqlNum(duty.id)} AND action = 'MARK_RESULT' AND source = 'ADMIN'`,
       );
       const log = logs[0];
-      const before = toNullableStr(log?.['before_json']);
-      const after = String(log?.['after_json'] ?? '');
+      const before = jsonText(log?.['before_json']);
+      const after = jsonText(log?.['after_json']);
       const pass =
         String(row?.['result']) === 'COMPLETE' &&
         logs.length === 1 &&
-        before !== null &&
+        before.length > 0 &&
         after.includes('COMPLETE');
       return {
         expect: 'result=COMPLETE + MARK_RESULT（before/after）',
-        real: `result=${row?.['result']} logs=${logs.length} after=${log?.['after_json']}`,
+        real: `result=${row?.['result']} logs=${logs.length} after=${after}`,
         pass,
       };
     });
