@@ -13,6 +13,7 @@
  *   node projects/feature/lita-admin-139-batch-delete/tests/withdraw-export.test.ts
  */
 import ExcelJS from 'exceljs';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { AdminBase, cst } from './lib/admin-base.ts';
 
@@ -31,7 +32,7 @@ const EXPECTED_HEADERS = [
 class WithdrawExport extends AdminBase {
   constructor() {
     super('withdraw-export');
-    this.total = 8;
+    this.total = 9;
   }
 
   private async getDateRange(): Promise<{ start: string; end: string }> {
@@ -153,6 +154,32 @@ class WithdrawExport extends AdminBase {
       await this.shot('导出值比对完成');
       if (compared === 0) throw new Error('没有可比对的导出行');
       if (nonEmpty === 0) throw new Error('抽样导出值全为空，无法验证新列取值');
+    });
+
+    await this.act('空值样本导出：成为陪玩师时间单元格留空', async () => {
+      const response = await this.api('/api/withdraw/export?source=1&startDate=2026-03-13&endDate=2026-03-13', { raw: true });
+      const file = join(this.evidenceDir, `withdraw-export-empty-${Date.now()}.xlsx`);
+      writeFileSync(file, response.buffer!);
+      const workbook = new ExcelJS.Workbook();
+      await workbook.xlsx.readFile(file);
+      const sheet = workbook.worksheets[0];
+      const headers = (sheet.getRow(1).values as any[]).slice(1).map((value) => String(value ?? '').trim());
+      const rows = sheet.rowCount - 1;
+      this.log(`空值样本导出响应 HTTP ${response.status}，行数=${rows}`);
+      await this.shot('空值样本导出文件');
+      if (headers[44] !== '成为陪玩师时间') throw new Error('空值样本导出新列位置错误');
+      if (rows < 1) throw new Error('空值样本导出无数据');
+      let checked = 0;
+      for (let i = 2; i <= sheet.rowCount; i++) {
+        const values = (sheet.getRow(i).values as any[]).slice(1);
+        if (String(values[2] ?? '').trim() === '4331214') {
+          const cell = values[44];
+          this.log(`空值样本 userNo=4331214 导出单元格=${JSON.stringify(cell)}`);
+          if (cell !== undefined && cell !== null && String(cell).trim() !== '') throw new Error(`空值单元格未留空: ${JSON.stringify(cell)}`);
+          checked++;
+        }
+      }
+      if (checked === 0) throw new Error('未找到空值样本 userNo=4331214');
     });
 
     await this.act('接口约束复核：datetime 形式 startDate 仍被拒绝（页面使用 yyyy-MM-dd 不受影响）', async () => {

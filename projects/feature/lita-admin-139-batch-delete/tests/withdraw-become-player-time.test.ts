@@ -151,11 +151,23 @@ class WithdrawBecomePlayerTime extends AdminBase {
     await this.act('既有分页可用：翻页后列表与接口一致', async () => {
       const headers = await this.p.locator('.app-container .el-table__header-wrapper').first().locator('th').allInnerTexts();
       const columnIndex = headers.findIndex((text) => text.trim() === '成为陪玩师时间');
-      const before = JSON.stringify(await this.p.evaluate(() => (document.querySelector('.app-container') as any).__vue__.list?.[0]?.id));
+      const beforeId = await this.p.evaluate(() => String((document.querySelector('.app-container') as any).__vue__.list?.[0]?.id ?? ''));
       await this.p.locator('.el-pagination .btn-next').click();
-      await this.waitList(1);
-      await this.p.waitForTimeout(500);
-      const after = JSON.stringify(await this.p.evaluate(() => (document.querySelector('.app-container') as any).__vue__.list?.[0]?.id));
+      const started = Date.now();
+      let afterId = beforeId;
+      while (Date.now() - started < 15000) {
+        const state = await this.p.evaluate(() => {
+          const vm = (document.querySelector('.app-container') as any).__vue__;
+          return { page: vm.currentPage, id: String(vm.list?.[0]?.id ?? '') };
+        });
+        if (state.page === 2 && state.id !== beforeId) {
+          afterId = state.id;
+          break;
+        }
+        await this.p.waitForTimeout(300);
+      }
+      const before = JSON.stringify(beforeId);
+      const after = JSON.stringify(afterId);
       const pageSize = await this.p.evaluate(() => (document.querySelector('.app-container') as any).__vue__.pageSize);
       const data = await this.withdrawApi(`source=1&page=2&rows=${pageSize}`);
       const apiRows: any[] = data.data ?? [];
@@ -164,7 +176,7 @@ class WithdrawBecomePlayerTime extends AdminBase {
       const expected = cst(apiRows[0].becomePlayerTime);
       this.log(`翻页前首条ID=${before}；翻页后首条ID=${after}`);
       await this.shot('提现列表-第2页');
-      if (before === after) throw new Error('点击下一页后首行未变化');
+      if (before === after) throw new Error(`点击下一页后首行未变化（15s 内未完成第2页渲染）`);
       if (displayed !== expected) throw new Error(`第 2 页展示 ${displayed} 与接口 ${expected} 不一致`);
     });
 

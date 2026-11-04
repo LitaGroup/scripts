@@ -27,10 +27,24 @@
 
 ## 缺陷闭环
 
-| 缺陷 | 状态 | 关联脚本 | 回归结果 |
+| 缺陷 | 状态 | 修复 | 关联脚本 | 回归结果 |
+|:---|:---|:---|:---|:---|
+| #223 主播认证超范围分页返回系统错误，导致末页删除后不回退 | 开放 → 修复（12:44:19）→ 关闭（12:48:06） | funbit-api `test-mgr` `a8ae30d3db`（合并 `13e0efec1b`） | `anchor-certification-batch-delete.test.ts` | 2026-11-04 12:44:44 运行 11/11 通过；超范围 page=3/5 返回 status=0、data=[] |
+
+## 最终回归（缺陷全部关闭后）
+
+时间：2026-11-04 12:48 ~ 12:50（CST）
+环境：Admin `https://admin.test.lita.game`；接口 `https://funbit-mgr.test.cinta.team`；只读 DB 查询网关。
+
+| 时间 | 脚本 | 结果 | 证据 |
 |:---|:---|:---|:---|
-| #223 主播认证超范围分页返回系统错误，导致末页删除后不回退 | 开放 → 修复中（TK-0052） | `anchor-certification-batch-delete.test.ts` | 待修复后回归 |
+| 12:48:09 | `broad-config-batch-delete.test.ts` | 9/9 通过 | `evidence/broad-config-batch-delete-20261104-124809/` |
+| 12:48:34 | `anchor-certification-batch-delete.test.ts` | 11/11 通过 | `evidence/anchor-certification-batch-delete-20261104-124834/` |
+| 12:49:03 | `withdraw-become-player-time.test.ts` | 8/8 通过 | `evidence/withdraw-become-player-time-20261104-124902/` |
+| 12:49:46 | `withdraw-export.test.ts` | 9/9 通过 | `evidence/withdraw-export-20261104-124946/` |
+| 12:49:55 | `broad-batch-delete-api.test.ts` | 7/7 通过 | `evidence/broad-batch-delete-api-20261104-124955/` |
+| — | **合计** | **44 通过 / 0 失败 / 0 跳过** | — |
 
-## 最终回归
+最终回归后复核：英语区广播召人测试房间无残留；主播认证测试 uid 无残留；类型 4 认证数量为 0。
 
-待缺陷 #223 修复并关闭后补充。
+提测 #35 于 2026-11-04 12:50:07 置为 **已通过**。

@@ -91,4 +91,4 @@ node projects/feature/lita-admin-139-batch-delete/tests/broad-batch-delete-api.t
 
 - 提现导出要求至少一个筛选条件（既有保护：无筛选返回“不能无限制导出”），脚本通过页面“最近三个月”日期快捷项触发真实导出。
 - `startDate` 传 `yyyy-MM-dd HH:mm:ss` 时后端仍报“不符合要求的类型:Date”；页面日期选择器输出 `yyyy-MM-dd`，实际页面导出正常，本脚本仅记录该接口约束，不判失败。
-- 主播认证末页回退用例当前失败，已提交缺陷 #223（后端超范围分页返回系统错误），修复后需重跑。
+- 主播认证末页回退首轮因缺陷 #223（后端超范围分页返回系统错误）失败；已由 funbit-api `test-mgr` `a8ae30d3db` 修复，最终回归通过，缺陷已关闭。
