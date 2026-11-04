@@ -81,3 +81,25 @@
 | #228 主播认证分页无结果时未回显请求 rows，前端每页条数 10→20 | 开放 | 修复子任务 TK-0059 | 后端 `AnchorCertificationService.pageList` count<=0 分支未设置 page/rows |
 
 最终回归与提测判定在 #228 修复后补充。
+
+---
+
+# 提测 #38（2026-11-04 19:36 创建）
+
+## 结论：未验证（测试环境部署阻塞）
+
+需求方 19:40 指示：本轮新提测为 #38，期望前端 `lita-admin-original @ dev` `7d4a2331`（功能提交 `eb418ed8`，2026-11-04 19:16/19:19 CST）；若测试环境未部署本次提交，输出阻塞报告并将 #38 置未通过。
+
+| 检查项（2026-11-04 19:39~19:40 CST） | 实测 | 判定 |
+|:---|:---|:---|
+| Admin 入口构建 | `static/index-7b10d3c1.js`（与 #36 相同） | 旧构建 |
+| Admin HTML Last-Modified | 2026-11-04 09:00:07 GMT = 17:00:07 CST | 早于提交 19:16/19:19 |
+| Admin HTML SHA256 | `d78e09288747340515d004cd23baaf26eb923b5d449bb09cef0773138dba39d5` | 构建未更新 |
+| 后端实例启动 | `process_start_time_seconds=1.793767215895E9` = 12:40:15 CST | 实例未重启 |
+| 接口探针 | rows=10/7 的空结果仍返回 `data.rows=20`；正常 rows=10；page=99 返回 `data=[]` | 后端旧实例 |
+| 页面行为 | 主播认证空结果后 size 10→20 | 旧交互 |
+
+- 提测 **#38 已置「未通过」**（判定时间 2026-11-04 19:39:57），备注：测试环境未部署本次提交，未验证。
+- 未执行 #38 全量回归：旧构建不能代表 #38 结果；#38 的“批量删除成功刷新当前页/恢复原交互/失败单次提示/旧请求防覆盖”均未判定。
+- 证据：`evidence/release38-deploy-blocked-20261104-193948/`（入口 HTML/headers/hash、actuator、api-probe.json、ui-probe 截图与 run.json）。
+- 详细报告：`/task/20261104/TK-0058/TEST_REPORT.md`（阅读地址 `http://work.cinta.team/api/docs/detail/task/20261104/TK-0058/TEST_REPORT.md`）。
