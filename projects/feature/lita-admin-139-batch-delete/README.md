@@ -8,7 +8,7 @@
 2. 语音房管理-主播认证标识配置：增加批量删除；
 3. 审核-提现-查询：增加【成为陪玩师时间】列（导出同样新增）。
 
-本目录为提测 #35（TK-0048 重新实现轮次）的自动化测试脚本，覆盖真实浏览器 UI、真实后端接口及只读数据库抽样核对。
+本目录为项目139 的自动化测试脚本：提测 #35（TK-0048 重新实现轮次）以及提测 #36（TK-0048 返工轮次：通用分页规则修订）。覆盖真实浏览器 UI、真实后端接口及只读数据库抽样核对。
 
 ## 环境
 
@@ -37,6 +37,7 @@ projects/feature/lita-admin-139-batch-delete/
     lib/admin-base.ts                       登录、代理、截图、接口/DB 留痕基类
     broad-config-batch-delete.test.ts       广播召人批量删除全链路 + 既有功能回归
     anchor-certification-batch-delete.test.ts 主播认证批量删除全链路 + 审计日志 + 既有功能回归
+    pagination-rules.test.ts                提测36 通用分页规则（成功/取消/失败/旧响应/页容量）+ #223 回归
     withdraw-become-player-time.test.ts     提现新列展示/格式/接口/DB 一致性 + 既有筛选分页
     withdraw-export.test.ts                 页面导出 Excel 新列位置与值
     broad-batch-delete-api.test.ts          广播召人批量删除接口契约
@@ -64,6 +65,7 @@ export LITA_USER_TOKEN='***'   # 仅 DB 抽样核对用；无此变量时 DB 断
 
 node projects/feature/lita-admin-139-batch-delete/tests/broad-config-batch-delete.test.ts
 node projects/feature/lita-admin-139-batch-delete/tests/anchor-certification-batch-delete.test.ts
+node projects/feature/lita-admin-139-batch-delete/tests/pagination-rules.test.ts
 node projects/feature/lita-admin-139-batch-delete/tests/withdraw-become-player-time.test.ts
 node projects/feature/lita-admin-139-batch-delete/tests/withdraw-export.test.ts
 node projects/feature/lita-admin-139-batch-delete/tests/broad-batch-delete-api.test.ts
@@ -92,3 +94,5 @@ node projects/feature/lita-admin-139-batch-delete/tests/broad-batch-delete-api.t
 - 提现导出要求至少一个筛选条件（既有保护：无筛选返回“不能无限制导出”），脚本通过页面“最近三个月”日期快捷项触发真实导出。
 - `startDate` 传 `yyyy-MM-dd HH:mm:ss` 时后端仍报“不符合要求的类型:Date”；页面日期选择器输出 `yyyy-MM-dd`，实际页面导出正常，本脚本仅记录该接口约束，不判失败。
 - 主播认证末页回退首轮因缺陷 #223（后端超范围分页返回系统错误）失败；已由 funbit-api `test-mgr` `a8ae30d3db` 修复，最终回归通过，缺陷已关闭。
+- 提测36 返工回归发现缺陷 #228：主播认证分页无结果时后端未回显请求的 rows（返回默认 20），前端每页条数由 10 漂移为 20；`pagination-rules.test.ts` 对应用例在修复前为失败状态，修复后应通过。
+- 主播认证列表在多页数据下使用分页组件默认的 10 条/页；广播召人英语区仅 3 个测试房间，构造末页时通过组件状态把每页条数置为 2/1（数据均为本次测试数据）。

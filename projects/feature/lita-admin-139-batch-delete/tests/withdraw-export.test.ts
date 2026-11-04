@@ -82,24 +82,25 @@ class WithdrawExport extends AdminBase {
     });
 
     await this.act('点击【导出结果】下载 Excel（复核 startDate 日期类型历史问题）', async () => {
-      const [download] = await Promise.all([
+      const [download, response] = await Promise.all([
         this.p.waitForEvent('download', { timeout: 60000 }),
+        this.p.waitForResponse((item) => item.url().includes('/api/withdraw/export'), { timeout: 60000 }),
         this.button('导出结果').click(),
       ]);
       const file = join(this.evidenceDir, `withdraw-export-${Date.now()}.xlsx`);
       await download.saveAs(file);
       (this as any).exportFile = file;
-      const exportCall = this.calls.filter((call) => call.url.includes('/api/withdraw/export')).pop();
-      this.log(`导出请求=${exportCall?.url ?? '(未捕获)'}`);
-      this.log(`导出文件=${file}`);
+      const exportUrl = response.url();
+      const body = Buffer.from(await response.body());
+      this.log(`导出请求=${exportUrl}`);
+      this.log(`导出文件=${file}，响应字节=${body.length}`);
       await this.shot('导出文件已下载');
-      if (!exportCall?.url.includes('/api/withdraw/export')) throw new Error('未捕获页面导出请求');
-      const url = new URL(exportCall.url);
+      const url = new URL(exportUrl);
       const start = url.searchParams.get('startDate');
       const end = url.searchParams.get('endDate');
       if (!start || !/^\d{4}-\d{2}-\d{2}$/.test(start)) throw new Error(`导出 startDate 非 yyyy-MM-dd: ${start}`);
       if (!end || !/^\d{4}-\d{2}-\d{2}$/.test(end)) throw new Error(`导出 endDate 非 yyyy-MM-dd: ${end}`);
-      if (exportCall.responseSize && exportCall.responseSize < 1000) throw new Error(`导出响应过小，疑似失败: ${exportCall.responseBody}`);
+      if (body.length < 1000) throw new Error(`导出响应过小，疑似失败: ${body.toString('utf8').slice(0, 200)}`);
     });
 
     await this.act('解析 Excel：50 列且新列位于 0 基索引 44', async () => {

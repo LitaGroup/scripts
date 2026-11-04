@@ -354,6 +354,122 @@ export abstract class AdminBase extends CheckBaseClass {
     return (await message.innerText()).trim();
   }
 
+  /** 等待列表 loading 结束（Element UI v-loading 遮罩消失） */
+  protected async waitListIdle(timeout = 20000): Promise<void> {
+    await this.page!
+      .waitForFunction(
+        () =>
+          Array.from(document.querySelectorAll('.el-loading-mask')).every((node) => {
+            const mask = node as HTMLElement;
+            const style = getComputedStyle(mask);
+            return style.display === 'none' || style.visibility === 'hidden' || mask.offsetParent === null;
+          }),
+        null,
+        { timeout },
+      )
+      .catch(() => undefined);
+    await this.page!.waitForTimeout(150);
+  }
+
+  /** 等待分页组件当前页高亮为指定页（单页时组件隐藏也视为第 1 页） */
+  protected async waitPageActive(expected: number, timeout = 20000): Promise<void> {
+    await this.page!.waitForTimeout(250);
+    await this.page!.waitForFunction(
+      (page) => {
+        const pagination = document.querySelector('.el-pagination') as HTMLElement | null;
+        if (!pagination) return page === 1;
+        const style = getComputedStyle(pagination);
+        if (style.display === 'none' || style.visibility === 'hidden') return page === 1;
+        return pagination.querySelector('.el-pager li.active')?.textContent?.trim() === String(page);
+      },
+      expected,
+      { timeout },
+    );
+    await this.waitListIdle();
+  }
+
+  /** 打开分页并点击指定页码 */
+  protected async gotoPage(pageNo: number): Promise<void> {
+    const item = this.page!.locator('.el-pagination .el-pager li').filter({ hasText: new RegExp(`^\\s*${pageNo}\\s*$`) }).first();
+    await item.click();
+    await this.waitPageActive(pageNo);
+  }
+
+  /** 修改每页条数（Element UI 分页 sizes 下拉） */
+  protected async changePageSize(size: number): Promise<void> {
+    await this.page!.locator('.el-pagination .el-select').first().click();
+    await this.page!
+      .locator('.el-select-dropdown:visible .el-select-dropdown__item')
+      .filter({ hasText: String(size) })
+      .first()
+      .click();
+    await this.waitPageActive(1);
+  }
+
+  /** 读取分页组件当前页与每页条数 */
+  protected async paginationState(): Promise<{ page: number; size: number; total: number; activeText: string }> {
+    return this.page!.evaluate(() => {
+      const pagination = document.querySelector('.el-pagination');
+      const sizeText = pagination?.querySelector('.el-pagination__sizes .el-input__inner') as HTMLInputElement | null;
+      const totalText = pagination?.querySelector('.el-pagination__total')?.textContent ?? '';
+      const active = pagination?.querySelector('.el-pager li.active')?.textContent?.trim() ?? '';
+      return {
+        page: Number(active || 0),
+        size: Number((sizeText?.value ?? '').replace(/[^\d]/g, '')) || 0,
+        total: Number((totalText.match(/\d+/) ?? ['0'])[0]),
+        activeText: active,
+      };
+    });
+  }
+
+  /** 移除当前页面上的轻提示，保证失败提示计数不受历史消息影响 */
+  protected async clearToasts(): Promise<void> {
+    await this.page!.evaluate(() => {
+      document.querySelectorAll('.el-message').forEach((el) => el.remove());
+    });
+    await this.page!.waitForTimeout(150);
+  }
+
+  /** 等待所有轻提示消失（默认 toast 约 3s 自动关闭） */
+  protected async waitToastsGone(timeout = 10000): Promise<void> {
+    await this.page!.waitForFunction(() => document.querySelectorAll('.el-message').length === 0, null, { timeout }).catch(() => undefined);
+  }
+
+  /**
+   * 拦截并暂缓下一次目标列表请求，用于验证“旧响应不覆盖当前列表”。
+   * 仅暂缓匹配到的第一条请求；release() 后继续走原有路由转发。
+   */
+  protected async holdListRequest(
+    pattern: string,
+    isTarget: (request: { url: string; body: string }) => boolean,
+  ): Promise<{ started: Promise<void>; release: () => void; stop: () => Promise<void> }> {
+    let startedResolve: () => void = () => undefined;
+    const started = new Promise<void>((resolve) => {
+      startedResolve = resolve;
+    });
+    let releaseResolve: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      releaseResolve = resolve;
+    });
+    let armed = true;
+    const handler = async (route: import('playwright').Route): Promise<void> => {
+      const request = route.request();
+      const body = request.postData() ?? '';
+      if (armed && isTarget({ url: request.url(), body })) {
+        armed = false;
+        startedResolve();
+        await gate;
+      }
+      await route.fallback();
+    };
+    await this.page!.route(pattern, handler);
+    return {
+      started,
+      release: () => releaseResolve(),
+      stop: () => this.page!.unroute(pattern, handler),
+    };
+  }
+
   protected async waitConfirmDialog(): Promise<string> {
     const box = this.page!.locator('.el-message-box').filter({ has: this.page!.locator('.el-message-box__message') }).first();
     await box.waitFor({ state: 'visible', timeout: 10000 });

@@ -48,3 +48,36 @@
 最终回归后复核：英语区广播召人测试房间无残留；主播认证测试 uid 无残留；类型 4 认证数量为 0。
 
 提测 #35 于 2026-11-04 12:50:07 置为 **已通过**。
+
+---
+
+# 提测 #36 返工轮次（2026-11-04）
+
+执行机：Linux，Node v24.22.1，Chromium（Playwright 1.64.1），时区 Asia/Shanghai。
+运行方式：仓库根目录，`ADMIN_USERNAME` / `ADMIN_PASSWORD` / `LITA_USER_TOKEN` 运行时注入（密码与 token 不落盘）。
+账号说明：工位未注入 `ai` 口令，使用同环境全权限管理员 `admin`。
+
+## 提测状态流转
+
+| 时间 | 操作 | 结果 |
+|:---|:---|:---|
+| 2026-11-04 17:08 | `POST /api/releases/36/status.md {"status":"进行中"}` | 成功，提测 #36 = 进行中 |
+
+## 缺陷修复前运行
+
+| 时间 | 脚本 | 结果 | 证据 |
+|:---|:---|:---|:---|
+| 17:17 | broad-config-batch-delete | 9/9 通过 | `evidence/broad-config-batch-delete-20261104-171733/` |
+| 17:41 | anchor-certification-batch-delete | 11/11 通过 | `evidence/anchor-certification-batch-delete-20261104-1741*/` |
+| 17:42 | pagination-rules | 19/20 通过；失败=缺陷 #228 | `evidence/pagination-rules-20261104-174227/` |
+| 17:39 | broad-batch-delete-api | 7/7 通过 | `evidence/broad-batch-delete-api-*/` |
+| 17:46 | withdraw-become-player-time | 8/8 通过 | `evidence/withdraw-become-player-time-*/` |
+| 17:46 | withdraw-export | 9/9 通过 | `evidence/withdraw-export-20261104-174600/` |
+
+## 缺陷
+
+| 缺陷 | 状态 | 关联 | 说明 |
+|:---|:---|:---|:---|
+| #228 主播认证分页无结果时未回显请求 rows，前端每页条数 10→20 | 开放 | 修复子任务 TK-0059 | 后端 `AnchorCertificationService.pageList` count<=0 分支未设置 page/rows |
+
+最终回归与提测判定在 #228 修复后补充。
