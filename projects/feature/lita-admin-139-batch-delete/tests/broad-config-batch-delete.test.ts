@@ -6,7 +6,7 @@
  * 2. 勾选多条 → 二次确认展示条数 → 取消不删除；
  * 3. 确认删除 → 后端 data 文案「成功删除N条数据」、列表刷新、勾选清空、按钮恢复禁用；
  * 4. 仅删除当前页勾选行（未勾选行保留）；
- * 5. 末页整页删除后自动回退一页（测试数据全部为本次新增，页容量通过组件状态设为 2 构造末页）；
+ * 5. 末页整页删除后按新分页规则回到第 1 页，并保留筛选（英语区）与每页条数（页容量通过组件状态设为 2 构造末页）；
  * 6. 既有功能回归：单条新增/编辑/删除、Excel 导入。
  *
  * 运行：
@@ -190,24 +190,30 @@ class BroadConfigBatchDelete extends AdminBase {
         this.created = Array.from(new Set([...this.created, IMPORT_ROOM]));
       });
 
-      await this.act('末页整页删除后自动回退一页（测试数据：英语区 3 条，页容量置 2）', async () => {
+      await this.act('末页删空：批量删除成功后回第 1 页，保留筛选与每页条数', async () => {
         // 通过页面导入 3 条测试数据（导入会覆盖同 roomId 的既有测试记录）
         await this.importXlsx(ROOM_IDS);
         await this.p.waitForTimeout(1200);
-        // 过滤英语区，列表仅剩本次新增的 3 条测试数据
-        await this.p.locator('.app-container .el-select').first().click();
-        await this.p.locator('.el-select-dropdown:visible .el-select-dropdown__item').filter({ hasText: '英语区' }).first().click();
-        await this.button('Search').click();
-        await this.p.waitForTimeout(1200);
-        await this.waitRows(3);
-        // 页容量置 2（页面默认 100，组件状态设小以构造末页；数据全部为本次新增测试数据）
+        // 页容量置 2（此时未过滤、分页组件可见；数据全部为本次新增测试数据）
         await this.p.evaluate(async () => {
           const vm = (document.querySelector('.app-container') as any).__vue__;
           vm.pageSize = 2;
-          vm.currentPage = 2;
+          vm.currentPage = 1;
           await vm.fetchData();
         });
-        await this.p.waitForTimeout(1200);
+        // 过滤英语区，列表仅剩本次新增的 3 条测试数据，进入第 2 页
+        await this.p.locator('.app-container .el-select').first().click();
+        await this.p.locator('.el-select-dropdown:visible .el-select-dropdown__item').filter({ hasText: '英语区' }).first().click();
+        await this.button('Search').click();
+        await this.waitPageActive(1);
+        await this.waitRows(2);
+        const enIds = await this.broadIds('en');
+        this.log(`英语区测试数据 roomIds=${enIds.join(',')}`);
+        for (const roomId of ROOM_IDS) {
+          if (!enIds.includes(roomId)) throw new Error(`导入后英语区缺少测试房间 roomId=${roomId}`);
+        }
+        if (enIds.length !== 3) throw new Error(`英语区应仅 3 条测试数据，实际 ${enIds.length}`);
+        await this.gotoPage(2);
         const page2Rows = await this.rowCount();
         this.log(`第2页行数=${page2Rows}`);
         await this.shot('末页-第2页');
@@ -218,16 +224,31 @@ class BroadConfigBatchDelete extends AdminBase {
         await this.waitConfirmDialog();
         await this.confirmBox();
         await this.waitToast('成功删除1条数据');
-        await this.p.waitForTimeout(2000);
+        await this.waitPageActive(1);
         const state = await this.p.evaluate(() => {
           const vm = (document.querySelector('.app-container') as any).__vue__;
-          return { currentPage: vm.currentPage, pageSize: vm.pageSize, rows: vm.list?.length, total: vm.listTotal };
+          return {
+            currentPage: vm.currentPage,
+            pageSize: vm.pageSize,
+            locale: vm.valueLocale,
+            rows: vm.list?.length,
+            total: vm.listTotal,
+            roomIds: (vm.list ?? []).map((row: any) => Number(row.roomId)),
+          };
         });
-        await this.shot('末页删除后自动回退');
-        this.log(`回退后状态=${JSON.stringify(state)}`);
+        await this.shot('末页删除成功后回到第1页');
+        this.log(`删除后状态=${JSON.stringify(state)}`);
         this.created = this.created.filter((id) => id !== lastRoomId);
-        if (state.currentPage !== 1) throw new Error(`末页整页删除后未回退到上一页: ${JSON.stringify(state)}`);
-        if (state.rows !== 2) throw new Error(`回退后首页行数应为 2，实际 ${state.rows}`);
+        if (state.currentPage !== 1) throw new Error(`批量删除成功后未回到第 1 页: ${JSON.stringify(state)}`);
+        if (state.pageSize !== 2) throw new Error(`批量删除成功后每页条数未保留: ${JSON.stringify(state)}`);
+        if (state.locale !== 'en') throw new Error(`批量删除成功后筛选条件未保留: ${JSON.stringify(state)}`);
+        if (state.rows !== 2 || state.total !== 2) throw new Error(`删除后第 1 页数据应为 2 条，实际 ${JSON.stringify(state)}`);
+        if (state.roomIds.includes(lastRoomId)) throw new Error(`末页删除的 roomId=${lastRoomId} 仍出现在第 1 页`);
+        const expected = (await this.api('/api/voiceroom/broad/list?page=1&rows=2&locale=en')).json?.data?.data ?? [];
+        const expectedIds = expected.map((row: any) => Number(row.roomId));
+        if (JSON.stringify(state.roomIds) !== JSON.stringify(expectedIds)) {
+          throw new Error(`页面第 1 页数据与接口不一致: 页面=${state.roomIds.join(',')} 接口=${expectedIds.join(',')}`);
+        }
       });
     } finally {
       const ids = await this.broadIds().catch(() => [] as number[]);

@@ -11,8 +11,9 @@
 
 | 脚本 | 覆盖 | 关键断言 |
 |:---|:---|:---|
-| `broad-config-batch-delete.test.ts` | 广播召人配置批量删除全链路 + 单条新增/编辑/删除 + Excel 导入 | 未勾选禁用、确认条数、取消不删除、成功文案“成功删除2条数据”、刷新与勾选清空、未勾选行保留、末页回退、导入成功 |
-| `anchor-certification-batch-delete.test.ts` | 主播认证标识配置批量删除全链路 + 审计日志 + 单条编辑/删除 + 导出 | 多 uid 新增、确认条数、取消、成功文案、未勾选行保留、`anchor_certification_log` DELETE + operator=admin、重复/不存在 ID 文案、导出表头、末页回退 |
+| `broad-config-batch-delete.test.ts` | 广播召人配置批量删除全链路 + 单条新增/编辑/删除 + Excel 导入 | 未勾选禁用、确认条数、取消不删除、成功文案“成功删除2条数据”、刷新与勾选清空、未勾选行保留、末页删空成功回第 1 页并保留英语区筛选/每页条数、导入成功 |
+| `anchor-certification-batch-delete.test.ts` | 主播认证标识配置批量删除全链路 + 审计日志 + 单条编辑/删除 + 导出 | 多 uid 新增、确认条数、取消、成功文案、未勾选行保留、`anchor_certification_log` DELETE + operator=admin、重复/不存在 ID 文案、导出表头、末页删空成功回第 1 页并保留认证类型筛选/每页条数 |
+| `pagination-rules.test.ts` | 提测36 通用分页规则（广播召人 + 主播认证） | 普通翻页不变、Search/Reset/改条数回第 1 页、取消/失败停留原页且勾选保留、失败仅提示一次、删除后刷新未返回时切页/切筛选旧响应不覆盖、#223 超末页、无结果查询保留每页条数 |
 | `withdraw-become-player-time.test.ts` | 提现列表新列展示、格式、空值、接口/DB 一致性、分页/筛选、批量审核入口 | 新列紧跟“上次提现时间”、`yyyy-MM-dd HH:mm:ss`、空值 `-`、页面=接口=DB、翻页/筛选、批量按钮勾选前后禁用态 |
 | `withdraw-export.test.ts` | 页面【导出结果】真实下载并解析 Excel | 无筛选保护、日期区间 `yyyy-MM-dd` 导出成功、50 列、索引 44=成为陪玩师时间、43/45 相邻列不变、抽样值与接口一致 |
 | `broad-batch-delete-api.test.ts` | 广播召人批量删除接口契约 | 空 body/空数组报错、正常删除文案、重复 ID 去重、不存在 ID 忽略、DB 记录删除 |
@@ -21,15 +22,18 @@
 
 1. `broad-config-batch-delete.test.ts`
 2. `anchor-certification-batch-delete.test.ts`
-3. `withdraw-become-player-time.test.ts`
-4. `withdraw-export.test.ts`
-5. `broad-batch-delete-api.test.ts`
+3. `pagination-rules.test.ts`
+4. `withdraw-become-player-time.test.ts`
+5. `withdraw-export.test.ts`
+6. `broad-batch-delete-api.test.ts`
 
 各脚本可独立运行；测试数据在脚本 `finally` 中清理。
 
 ## 注意事项
 
-- 主播认证“末页回退”用例会新增 11 条“银色主播-普通”测试认证；当前环境该认证类型无存量数据，过滤后仅测试数据，删除后清理。
-- 广播召人末页回退需要页容量 2：脚本通过 Vue 组件状态设置 `pageSize=2` 构造末页（页面默认 100），数据全部为本次新增的英语区测试配置。
+- 主播认证“末页删空”用例会新增 11 条“银色主播-普通”测试认证；当前环境该认证类型无存量数据，过滤后仅测试数据，删除后清理。
+- 广播召人英语区仅 3 个测试房间；末页/旧响应用例通过 Vue 组件状态设置 2 条/页或 1 条/页构造分页（数据全部为本次新增的英语区测试配置）。
+- `pagination-rules.test.ts` 的“无结果查询保留每页条数”用例在缺陷 #228 修复前会失败；该用例同时断言接口回显 `rows` 与页面每页条数不漂移。
+- 失败提示用例通过 Playwright 路由拦截返回 HTTP 500，不触达后端，不修改数据。
 - 提现批量审核仅验证入口/禁用态，不执行审核；避免修改真实提现业务数据。
 - 账号、密码、token、会话数据不得写入脚本、日志、报告或证据。

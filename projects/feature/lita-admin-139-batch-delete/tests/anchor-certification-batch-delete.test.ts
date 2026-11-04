@@ -7,7 +7,7 @@
  * 3. 不存在 ID 跳过文案、重复 ID 不误报（接口层）；
  * 4. anchor_certification_log 产生 DELETE 记录且含操作人；
  * 5. 既有功能回归：单条新增/编辑/删除、导出；
- * 6. 末页整页删除后自动回退一页（新增 11 条银色主播-普通测试认证，过滤后分页 10/页）。
+ * 6. 末页删空后按新分页规则回到第 1 页，保留认证类型筛选与每页条数（新增 11 条银色主播-普通测试认证）。
  *
  * 运行：
  *   ADMIN_USERNAME=admin ADMIN_PASSWORD=*** LITA_USER_TOKEN=*** \
@@ -259,25 +259,26 @@ class AnchorCertificationBatchDelete extends AdminBase {
         }
       });
 
-      await this.act('末页整页删除后自动回退一页（新增 11 条，过滤后每页 10 条）', async () => {
-        await this.addViaUi(ROLLBACK_TEST_UIDS, '银色主播-普通', 'AI回归-末页回退');
+      await this.act('末页删空：批量删除成功后回第 1 页，保留认证类型筛选与每页条数（新增 11 条）', async () => {
+        await this.addViaUi(ROLLBACK_TEST_UIDS, '银色主播-普通', 'AI回归-末页删除回第1页');
         const created = await this.certPage({ certificationType: CERT_TYPE_SILVER_NORMAL });
         if (created.length !== ROLLBACK_TEST_UIDS.length) throw new Error(`末页场景测试数据应为 ${ROLLBACK_TEST_UIDS.length} 条，实际 ${created.length}`);
         this.createdIds.push(...created.map((row: any) => Number(row.id)));
 
-        await this.button('Reset').click();
-        await this.p.waitForTimeout(800);
-        // 过滤“银色主播-普通”，当前环境该类型仅有本次测试数据
+        // 重新加载确保分页状态为默认 10 条/页，再过滤“银色主播-普通”（该类型仅有本次测试数据）
+        await this.p.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
+        await this.p.waitForSelector('.app-container', { timeout: 45000 });
+        await this.waitRows(1);
+        await this.waitListIdle();
         await this.p.locator('.app-container .search-box .el-select').nth(1).click();
         await this.p.locator('.el-select-dropdown:visible .el-select-dropdown__item').filter({ hasText: '银色主播-普通' }).first().click();
         await this.button('Search').click();
-        await this.p.waitForTimeout(1200);
+        await this.waitPageActive(1);
         await this.waitRows(10);
-        const totalText = await this.p.locator('.el-pagination').innerText();
+        const totalText = await this.p.locator('.el-pagination').innerText().catch(() => '(分页组件隐藏)');
         this.log(`分页信息=${totalText.replace(/\n/g, ' ')}`);
         await this.shot('主播认证-过滤后第1页');
-        await this.p.locator('.el-pagination .btn-next').click();
-        await this.p.waitForTimeout(1200);
+        await this.gotoPage(2);
         const page2Rows = await this.rowCount();
         this.log(`第2页行数=${page2Rows}`);
         await this.shot('主播认证-末页第2页');
@@ -289,18 +290,29 @@ class AnchorCertificationBatchDelete extends AdminBase {
         await this.waitConfirmDialog();
         await this.confirmBox();
         await this.waitToast('成功删除1条数据');
-        await this.p.waitForTimeout(2000);
+        await this.waitPageActive(1);
         const state = await this.p.evaluate(() => {
           const vm = (document.querySelector('.app-container') as any).__vue__;
-          return { page: vm.pageInfo?.page, total: vm.pageInfo?.total, rows: vm.tableData?.length };
+          return {
+            page: vm.pageInfo?.page,
+            rows: vm.pageInfo?.rows,
+            total: vm.pageInfo?.total,
+            certificationType: vm.searchForm?.certificationType,
+            tableRows: vm.tableData?.length,
+            userIds: (vm.tableData ?? []).map((row: any) => Number(row.userId)),
+          };
         });
-        await this.shot('主播认证-末页删除后自动回退');
-        this.log(`回退后状态=${JSON.stringify(state)}`);
+        await this.shot('主播认证-末页删除成功后回到第1页');
+        this.log(`删除后状态=${JSON.stringify(state)}`);
         const left = await this.certPage({ certificationType: CERT_TYPE_SILVER_NORMAL });
         this.createdIds = this.createdIds.filter((id) => left.some((row: any) => Number(row.id) === id));
-        if (state.page !== 1) throw new Error(`末页整页删除后未回退到上一页: ${JSON.stringify(state)}`);
-        if (state.rows !== 10) throw new Error(`回退后首页行数应为 10，实际 ${state.rows}`);
+        if (state.page !== 1) throw new Error(`批量删除成功后未回到第 1 页: ${JSON.stringify(state)}`);
+        if (state.rows !== 10) throw new Error(`批量删除成功后每页条数未保留为 10: ${JSON.stringify(state)}`);
+        if (String(state.certificationType) !== String(CERT_TYPE_SILVER_NORMAL)) throw new Error(`批量删除成功后认证类型筛选未保留: ${JSON.stringify(state)}`);
+        if (state.tableRows !== 10 || state.total !== 10) throw new Error(`删除后第 1 页应为 10 条/共 10 条: ${JSON.stringify(state)}`);
+        if (left.length !== 10) throw new Error(`接口过滤后应剩 10 条测试认证，实际 ${left.length}`);
         if (!left.every((row: any) => String(row.userId) !== String(lastUid))) throw new Error(`末页删除的 uid=${lastUid} 仍存在`);
+        if (state.userIds.includes(lastUid)) throw new Error(`末页删除的 uid=${lastUid} 仍出现在当前页`);
       });
     } finally {
       const remaining = await this.certPage().catch(() => [] as any[]);
