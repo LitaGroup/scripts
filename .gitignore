@@ -10,3 +10,6 @@ node_modules/
 
 # JetBrains IDE
 .idea/
+
+# Test evidence (screenshots / run logs)
+evidence/
