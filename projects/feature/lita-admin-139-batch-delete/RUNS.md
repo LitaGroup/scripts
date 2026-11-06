@@ -1,4 +1,44 @@
-# 运行记录（提测 #35 / 项目139）
+# 运行记录
+
+## TK-0092（2026-11-06）：47 条 UI 用例 + 8 项非 UI 核验
+
+执行机：Linux，Node v24.22.1，Chromium 156（Playwright 1.64.1），时区 Asia/Shanghai。
+环境：UI `https://admin.test.lita.game`；接口/非 UI 核验同源入口 `https://funbit-mgr.test.cinta.team`；只读 DB 网关 `https://api.test.cinta.team`。
+账号：任务指定测试环境管理员账号，口令仅运行时注入；本记录不包含口令或 token。
+
+### 官方执行（正式结果，按脚本顺序）
+
+| 时间（CST） | 脚本 | 结果 | 证据目录（本地） | 公开日志 |
+| --- | --- | --- | --- | --- |
+| 2026-11-06 16:14~16:15 | `broad-config-47cases.test.ts` | 52/52 通过（24 UI 检查点 + N-A3/N-A5） | `evidence/broad-config-47cases-20261106-161400/` | http://work.cinta.team/files/20261106/de6d1e3d-2ab6-478b-94d9-e0edd8775557.log |
+| 2026-11-06 16:15~16:16 | `anchor-certification-47cases.test.ts` | 44/44 通过（24 UI 检查点 + N-B3/N-B5） | `evidence/anchor-certification-47cases-20261106-161459/` | http://work.cinta.team/files/20261106/a1f979c7-33cc-4f2b-827a-4bca1017d2d2.log |
+| 2026-11-06 16:16~16:20 | `withdraw-become-player-time-47cases.test.ts` | 88/88 通过（59 UI 检查点） | `evidence/withdraw-become-player-time-47cases-20261106-161605/` | http://work.cinta.team/files/20261106/a681a99e-cfa8-4eac-84d0-7a844fe26f4f.log |
+| 2026-11-06 16:20 | `non-ui-verification.test.ts` | 7/10 通过；N-D1/N-D2-FE/N-D2-BE 未通过/未核实 | `evidence/non-ui-verification-20261106-162014/` | http://work.cinta.team/files/20261106/376a1411-ee1b-4ee5-bc5b-9589bfd16f3a.log |
+
+汇总：47 条 UI 用例全部通过（107/107 检查点）；非 UI 通过 5 项（N-A3/N-A5/N-B3/N-B5/N-D3），N-D1 发现导入 405 console 错误（缺陷 #233），N-D2-FE 为部署 hash 偏差，N-D2-BE 未核实。
+
+### 红证抽查
+
+- 目标：P0 用例 #1-②（未勾选时「批量删除」按钮禁用）。
+- 临时将期望改为 `disabled1 === false`，运行后该 check 失败（`status=fail`，done `success=51 fail=1`），随后恢复原值并重新自测通过。
+- 证据：`evidence/_redproof/broad-config-47cases-20261106-161256/`；记录：http://work.cinta.team/files/20261106/6d093a86-88e2-49c0-953c-bd399cf9f1c5.md
+
+### 缺陷
+
+| ID | 端 | 优先级 | 描述 | 状态 | 关闭依据 |
+| --- | --- | --- | --- | --- | --- |
+| #233 | 前端 | 低 | 广播召人配置导入 Excel 选择文件时向页面根路径发起 multipart POST，返回 405，console 报错；导入功能本身成功 | 开放 | 不适用（本轮未修复，未关闭） |
+
+### 代码与平台同步
+
+- 仓库：`LitaGroup/scripts`，目录 `projects/feature/lita-admin-139-batch-delete/`。
+- commit：待推送后填写。
+- 平台 scriptsPath / pull / import：待执行；testId 待登记后填写。
+- 新增脚本：`broad-config-47cases.test.ts`、`anchor-certification-47cases.test.ts`、`withdraw-become-player-time-47cases.test.ts`、`non-ui-verification.test.ts`；基类 `lib/admin-base.ts`。
+
+---
+
+# 历史轮次运行记录（提测 #35 / #36 / #38）
 
 执行机：Linux，Node v24.22.1，Chromium 156（Playwright 1.64.1），时区 Asia/Shanghai。
 运行方式：在 `LitaGroup/scripts` 仓库根目录执行，`ADMIN_USERNAME/ADMIN_PASSWORD/LITA_USER_TOKEN` 均通过运行时环境注入（密码与 token 不记录）。

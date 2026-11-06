@@ -1,5 +1,148 @@
-# 需求覆盖记录（项目139，提测 #35 与 #36）
+# 项目139 测试覆盖记录
 
+## TK-0092（2026-11-06）：47 条 UI 用例 + 8 项非 UI 核验
+
+用例来源：TK-0083 HANDOFF 九列表格；技术方案：TK-0083 TECH_DESIGN。执行轮次：TK-0092（无提测单）。
+
+### 1. 47 条 UI 用例覆盖（107 个检查点）
+
+| 用例# | 检查点 | 脚本 / check 标记 | 结果 |
+| --- | --- | --- | --- |
+| 1 | ① 表格首列为多选列且工具栏「批量删除」按钮可见 | `broad-config-47cases.test.ts` `用例#1-① 表格首列为多选列且工具栏「批量删除」按钮可见` | ✅ |
+| 1 | ② 未勾选任何行时「批量删除」按钮为禁用态 | `broad-config-47cases.test.ts` `用例#1-② 未勾选任何行时「批量删除」按钮为禁用态` | ✅ |
+| 2 | ① 勾选两行后「批量删除」按钮为可用态 | `broad-config-47cases.test.ts` `用例#2-① 勾选两行后「批量删除」按钮为可用态` | ✅ |
+| 2 | ② 二次确认文案为「确认删除选中的 2 条广播召人配置？」 | `broad-config-47cases.test.ts` `用例#2-② 二次确认文案为「确认删除选中的 2 条广播召人配置？」` | ✅ |
+| 3 | ① 取消后两个目标 roomId 仍各显示 1 条，列表总数仍为删除前总数 | `broad-config-47cases.test.ts` `用例#3-① 取消后两个目标 roomId 仍各显示 1 条，列表总数仍为删除前总数` | ✅ |
+| 3 | ② 页面不出现批量删除成功提示 | `broad-config-47cases.test.ts` `用例#3-② 页面不出现批量删除成功提示` | ✅ |
+| 4 | ① 页面轻提示为「成功删除2条数据」 | `broad-config-47cases.test.ts` `用例#4-① 页面轻提示为「成功删除2条数据」` | ✅ |
+| 4 | ② 刷新后的列表不含两个勾选 roomId，仍显示未勾选 roomId | `broad-config-47cases.test.ts` `用例#4-② 刷新后的列表不含两个勾选 roomId，仍显示未勾选 roomId` | ✅ |
+| 4 | ③ 表格勾选数为 0，「批量删除」按钮恢复禁用态 | `broad-config-47cases.test.ts` `用例#4-③ 表格勾选数为 0，「批量删除」按钮恢复禁用态` | ✅ |
+| 5 | ① 查询结果不再显示房间 6666 的配置 | `broad-config-47cases.test.ts` `用例#5-① 查询结果不再显示房间 6666 的配置` | ✅ |
+| 5 | ② 页面不出现错误提示或空白页 | `broad-config-47cases.test.ts` `用例#5-② 页面不出现错误提示或空白页` | ✅ |
+| 6 | ① 列表仅显示 1 条房间 6666 的配置 | `broad-config-47cases.test.ts` `用例#6-① 列表仅显示 1 条房间 6666 的配置` | ✅ |
+| 6 | ② 该行优先级为 33、日广播邀请人数为 11 | `broad-config-47cases.test.ts` `用例#6-② 该行优先级为 33、日广播邀请人数为 11` | ✅ |
+| 7 | ① 目标行优先级显示 77 | `broad-config-47cases.test.ts` `用例#7-① 目标行优先级显示 77` | ✅ |
+| 7 | ② 目标行房间ID仍为 6666、日广播邀请人数仍为 11 | `broad-config-47cases.test.ts` `用例#7-② 目标行房间ID仍为 6666、日广播邀请人数仍为 11` | ✅ |
+| 7 | ③ 目标查询结果总行数为 1 | `broad-config-47cases.test.ts` `用例#7-③ 目标查询结果总行数为 1` | ✅ |
+| 8 | ① 列表仅显示 1 条房间 6666 的配置 | `broad-config-47cases.test.ts` `用例#8-① 列表仅显示 1 条房间 6666 的配置` | ✅ |
+| 8 | ② 该行优先级为 12、日广播邀请人数为 30 | `broad-config-47cases.test.ts` `用例#8-② 该行优先级为 12、日广播邀请人数为 30` | ✅ |
+| 9 | ① 第 2 页为高亮页，每页 20 条，首行 roomId 不同于第 1 页记录值 | `broad-config-47cases.test.ts` `用例#9-① 第 2 页为高亮页，每页 20 条，首行 roomId 不同于第 1 页记录值` | ✅ |
+| 9 | ② 返回后第 1 页为高亮页，分页总数仍为原总数 | `broad-config-47cases.test.ts` `用例#9-② 返回后第 1 页为高亮页，分页总数仍为原总数` | ✅ |
+| 10 | ① 列表总行数为 1，目标房间 6666 行数为 1，非目标行数为 0 | `broad-config-47cases.test.ts` `用例#10-① 列表总行数为 1，目标房间 6666 行数为 1，非目标行数为 0` | ✅ |
+| 10 | ② 目标行优先级为 33、日广播邀请人数为 11 | `broad-config-47cases.test.ts` `用例#10-② 目标行优先级为 33、日广播邀请人数为 11` | ✅ |
+| 11 | ① 列表至少 1 行且每行「大区」均显示英语(en) | `broad-config-47cases.test.ts` `用例#11-① 列表至少 1 行且每行「大区」均显示英语(en)` | ✅ |
+| 11 | ② 房间 6666 的目标配置在结果中可见 | `broad-config-47cases.test.ts` `用例#11-② 房间 6666 的目标配置在结果中可见` | ✅ |
+| 12 | ① 表格首列为多选列且工具栏「批量删除」按钮可见 | `anchor-certification-47cases.test.ts` `用例#12-① 表格首列为多选列且工具栏「批量删除」按钮可见` | ✅ |
+| 12 | ② 未勾选任何行时「批量删除」按钮为禁用态 | `anchor-certification-47cases.test.ts` `用例#12-② 未勾选任何行时「批量删除」按钮为禁用态` | ✅ |
+| 13 | ① 勾选两行后「批量删除」按钮为可用态 | `anchor-certification-47cases.test.ts` `用例#13-① 勾选两行后「批量删除」按钮为可用态` | ✅ |
+| 13 | ② 二次确认文案为「确认删除选中的 2 条主播认证标识？」 | `anchor-certification-47cases.test.ts` `用例#13-② 二次确认文案为「确认删除选中的 2 条主播认证标识？」` | ✅ |
+| 14 | ① 页面轻提示为「成功删除2条数据」 | `anchor-certification-47cases.test.ts` `用例#14-① 页面轻提示为「成功删除2条数据」` | ✅ |
+| 14 | ② 刷新后的列表不含两个勾选认证，仍显示未勾选认证 | `anchor-certification-47cases.test.ts` `用例#14-② 刷新后的列表不含两个勾选认证，仍显示未勾选认证` | ✅ |
+| 14 | ③ 表格勾选数为 0，「批量删除」按钮恢复禁用态 | `anchor-certification-47cases.test.ts` `用例#14-③ 表格勾选数为 0，「批量删除」按钮恢复禁用态` | ✅ |
+| 15 | ① 取消后两个目标认证仍各显示 1 条，列表总数仍为删除前总数 | `anchor-certification-47cases.test.ts` `用例#15-① 取消后两个目标认证仍各显示 1 条，列表总数仍为删除前总数` | ✅ |
+| 15 | ② 页面不出现批量删除成功提示 | `anchor-certification-47cases.test.ts` `用例#15-② 页面不出现批量删除成功提示` | ✅ |
+| 16 | ① S1 轻提示为「成功删除1条数据，1条记录不存在已跳过」 | `anchor-certification-47cases.test.ts` `用例#16-① S1 轻提示为「成功删除1条数据，1条记录不存在已跳过」` | ✅ |
+| 16 | ② S1 列表不再显示认证 A 与认证 B | `anchor-certification-47cases.test.ts` `用例#16-② S1 列表不再显示认证 A 与认证 B` | ✅ |
+| 16 | ③ S1 表格勾选数为 0，「批量删除」按钮恢复禁用态 | `anchor-certification-47cases.test.ts` `用例#16-③ S1 表格勾选数为 0，「批量删除」按钮恢复禁用态` | ✅ |
+| 17 | ① 查询结果不再显示 uid 1789 的本用例认证 | `anchor-certification-47cases.test.ts` `用例#17-① 查询结果不再显示 uid 1789 的本用例认证` | ✅ |
+| 17 | ② 页面不出现错误提示或空白页 | `anchor-certification-47cases.test.ts` `用例#17-② 页面不出现错误提示或空白页` | ✅ |
+| 18 | ① 列表显示三个目标 uid 的认证，每个 uid 恰好 1 条，合计 3 条 | `anchor-certification-47cases.test.ts` `用例#18-① 列表显示三个目标 uid 的认证，每个 uid 恰好 1 条，合计 3 条` | ✅ |
+| 18 | ② 三条认证类型均为金色主播-普通、认证内容均为本次内容 | `anchor-certification-47cases.test.ts` `用例#18-② 三条认证类型均为金色主播-普通、认证内容均为本次内容` | ✅ |
+| 18 | ③ 三条生效时间与过期时间分别等于前置值 | `anchor-certification-47cases.test.ts` `用例#18-③ 三条生效时间与过期时间分别等于前置值` | ✅ |
+| 19 | ① 目标行认证内容显示编辑后内容 | `anchor-certification-47cases.test.ts` `用例#19-① 目标行认证内容显示编辑后内容` | ✅ |
+| 19 | ② 目标行认证类型与有效期保持前置快照值 | `anchor-certification-47cases.test.ts` `用例#19-② 目标行认证类型与有效期保持前置快照值` | ✅ |
+| 19 | ③ 目标查询结果总行数为 1 | `anchor-certification-47cases.test.ts` `用例#19-③ 目标查询结果总行数为 1` | ✅ |
+| 20 | ① 下载 1 个可打开的 xlsx 文件且首个工作表存在 | `anchor-certification-47cases.test.ts` `用例#20-① 下载 1 个可打开的 xlsx 文件且首个工作表存在` | ✅ |
+| 20 | ② 表头依次为 11 列 | `anchor-certification-47cases.test.ts` `用例#20-② 表头依次为 11 列` | ✅ |
+| 20 | ③ 数据行恰好 1 条 | `anchor-certification-47cases.test.ts` `用例#20-③ 数据行恰好 1 条` | ✅ |
+| 20 | ④ 数据行用户ID为 1789，类型、内容、颜色与有效期等于前置造数值 | `anchor-certification-47cases.test.ts` `用例#20-④ 数据行用户ID为 1789，类型、内容、颜色与有效期等于前置造数值` | ✅ |
+| 21 | ① 主表存在「成为陪玩师时间」列 | `withdraw-become-player-time-47cases.test.ts` `用例#21-① 主表存在「成为陪玩师时间」列` | ✅ |
+| 21 | ② 主表原始表头索引 21 为「上次提现时间」、索引 22 为「成为陪玩师时间」 | `withdraw-become-player-time-47cases.test.ts` `用例#21-② 主表原始表头索引 21 为「上次提现时间」、索引 22 为「成为陪玩师时间」` | ✅ |
+| 22 | ① 目标行「成为陪玩师时间」符合 yyyy-MM-dd HH:mm:ss 格式 | `withdraw-become-player-time-47cases.test.ts` `用例#22-① 目标行「成为陪玩师时间」符合 yyyy-MM-dd HH:mm:ss 格式` | ✅ |
+| 22 | ② 目标行显示值等于前置记录值 | `withdraw-become-player-time-47cases.test.ts` `用例#22-② 目标行显示值等于前置记录值` | ✅ |
+| 23 | ① 目标行「成为陪玩师时间」符合 yyyy-MM-dd HH:mm:ss 格式 | `withdraw-become-player-time-47cases.test.ts` `用例#23-① 目标行「成为陪玩师时间」符合 yyyy-MM-dd HH:mm:ss 格式` | ✅ |
+| 23 | ② 目标行显示值等于前置记录值 | `withdraw-become-player-time-47cases.test.ts` `用例#23-② 目标行显示值等于前置记录值` | ✅ |
+| 24 | ① 目标行「成为陪玩师时间」符合 yyyy-MM-dd HH:mm:ss 格式 | `withdraw-become-player-time-47cases.test.ts` `用例#24-① 目标行「成为陪玩师时间」符合 yyyy-MM-dd HH:mm:ss 格式` | ✅ |
+| 24 | ② 目标行显示值等于前置记录值 | `withdraw-become-player-time-47cases.test.ts` `用例#24-② 目标行显示值等于前置记录值` | ✅ |
+| 25 | ① 目标提现记录可见 | `withdraw-become-player-time-47cases.test.ts` `用例#25-① 目标提现记录可见` | ✅ |
+| 25 | ② 目标行「成为陪玩师时间」单元格仅显示 - | `withdraw-become-player-time-47cases.test.ts` `用例#25-② 目标行「成为陪玩师时间」单元格仅显示 -` | ✅ |
+| 26 | ① 首个工作表表头共 50 列 | `withdraw-become-player-time-47cases.test.ts` `用例#26-① 首个工作表表头共 50 列` | ✅ |
+| 26 | ② 0 基索引 43 为「最新提现状态的更新时间」、44 为「成为陪玩师时间」、45 为「商户交易流水号」 | `withdraw-become-player-time-47cases.test.ts` `用例#26-② 0 基索引 43 为「最新提现状态的更新时间」、44 为「成为陪玩师时间」、45 为「商户交易流水号」` | ✅ |
+| 26 | ③ 剔除索引 44 新列后，其余 49 列名称与顺序等于既有基线 | `withdraw-become-player-time-47cases.test.ts` `用例#26-③ 剔除索引 44 新列后，其余 49 列名称与顺序等于既有基线` | ✅ |
+| 26 | ④ 代表行申请时间、大神ID、状态、支付方式与前置样本快照一致 | `withdraw-become-player-time-47cases.test.ts` `用例#26-④ 代表行申请时间、大神ID、状态、支付方式与前置样本快照一致` | ✅ |
+| 27 | ① 按 uid 与申请时间可匹配 1 条导出行 | `withdraw-become-player-time-47cases.test.ts` `用例#27-① 按 uid 与申请时间可匹配 1 条导出行` | ✅ |
+| 27 | ② 匹配行「成为陪玩师时间」精确等于前置记录值 | `withdraw-become-player-time-47cases.test.ts` `用例#27-② 匹配行「成为陪玩师时间」精确等于前置记录值` | ✅ |
+| 27 | ③ 匹配行时间单元格不符合 yyyy-MM-dd HH:mm:ss 的数量为 0 | `withdraw-become-player-time-47cases.test.ts` `用例#27-③ 匹配行时间单元格不符合 yyyy-MM-dd HH:mm:ss 的数量为 0` | ✅ |
+| 28 | ① 按 uid 与申请时间可匹配 1 条导出行 | `withdraw-become-player-time-47cases.test.ts` `用例#28-① 按 uid 与申请时间可匹配 1 条导出行` | ✅ |
+| 28 | ② 首个工作表存在「成为陪玩师时间」列表头 | `withdraw-become-player-time-47cases.test.ts` `用例#28-② 首个工作表存在「成为陪玩师时间」列表头` | ✅ |
+| 28 | ③ 目标空值样本的「成为陪玩师时间」单元格为空白，不显示 - | `withdraw-become-player-time-47cases.test.ts` `用例#28-③ 目标空值样本的「成为陪玩师时间」单元格为空白，不显示 -` | ✅ |
+| 29 | ① 列表至少 1 行且每行「状态」均为待审核 | `withdraw-become-player-time-47cases.test.ts` `用例#29-① 列表至少 1 行且每行「状态」均为待审核` | ✅ |
+| 29 | ② 新列「成为陪玩师时间」表头仍可见 | `withdraw-become-player-time-47cases.test.ts` `用例#29-② 新列「成为陪玩师时间」表头仍可见` | ✅ |
+| 30 | ① 列表至少 1 行且每行「昵称/No」均包含所选陪玩师No | `withdraw-become-player-time-47cases.test.ts` `用例#30-① 列表至少 1 行且每行「昵称/No」均包含所选陪玩师No` | ✅ |
+| 30 | ② 目标样本记录可见 | `withdraw-become-player-time-47cases.test.ts` `用例#30-② 目标样本记录可见` | ✅ |
+| 31 | ① 列表至少 1 行且每行「申请提交时间」均在起止日期范围内 | `withdraw-become-player-time-47cases.test.ts` `用例#31-① 列表至少 1 行且每行「申请提交时间」均在起止日期范围内` | ✅ |
+| 31 | ② 目标样本记录可见 | `withdraw-become-player-time-47cases.test.ts` `用例#31-② 目标样本记录可见` | ✅ |
+| 32 | ① 当前页行键有序集合等于同条件预期，分页总数等于预期 | `withdraw-become-player-time-47cases.test.ts` `用例#32-① 当前页行键有序集合等于同条件预期，分页总数等于预期` | ✅ |
+| 32 | ② 筛选框保持所选值且目标样本可见 | `withdraw-become-player-time-47cases.test.ts` `用例#32-② 筛选框保持所选值且目标样本可见` | ✅ |
+| 33 | ① 当前页行键有序集合等于同条件预期，分页总数等于预期 | `withdraw-become-player-time-47cases.test.ts` `用例#33-① 当前页行键有序集合等于同条件预期，分页总数等于预期` | ✅ |
+| 33 | ② 筛选框保持所选值且目标样本可见 | `withdraw-become-player-time-47cases.test.ts` `用例#33-② 筛选框保持所选值且目标样本可见` | ✅ |
+| 34 | ① 列表至少 1 行且每行支付方式=payloco | `withdraw-become-player-time-47cases.test.ts` `用例#34-① 列表至少 1 行且每行支付方式=payloco` | ✅ |
+| 34 | ② 筛选框保持所选值 | `withdraw-become-player-time-47cases.test.ts` `用例#34-② 筛选框保持所选值` | ✅ |
+| 35 | ① 列表至少 1 行且每行折扣订单数>=1 | `withdraw-become-player-time-47cases.test.ts` `用例#35-① 列表至少 1 行且每行折扣订单数>=1` | ✅ |
+| 35 | ② 筛选框保持所选值 | `withdraw-become-player-time-47cases.test.ts` `用例#35-② 筛选框保持所选值` | ✅ |
+| 36 | ① 列表至少 1 行且每行待处理欠款金额记录非0 | `withdraw-become-player-time-47cases.test.ts` `用例#36-① 列表至少 1 行且每行待处理欠款金额记录非0` | ✅ |
+| 36 | ② 筛选框保持所选值 | `withdraw-become-player-time-47cases.test.ts` `用例#36-② 筛选框保持所选值` | ✅ |
+| 37 | ① 列表至少 1 行且每行银行账户风险包含有风险，收款信息不匹配 | `withdraw-become-player-time-47cases.test.ts` `用例#37-① 列表至少 1 行且每行银行账户风险包含有风险，收款信息不匹配` | ✅ |
+| 37 | ② 筛选框保持所选值 | `withdraw-become-player-time-47cases.test.ts` `用例#37-② 筛选框保持所选值` | ✅ |
+| 38 | ① 列表至少 1 行且每行风险类型包含洗钱审核中 | `withdraw-become-player-time-47cases.test.ts` `用例#38-① 列表至少 1 行且每行风险类型包含洗钱审核中` | ✅ |
+| 38 | ② 筛选框保持所选值 | `withdraw-become-player-time-47cases.test.ts` `用例#38-② 筛选框保持所选值` | ✅ |
+| 39 | ① 列表至少 1 行且每行是否是Cinta陪陪=不是 | `withdraw-become-player-time-47cases.test.ts` `用例#39-① 列表至少 1 行且每行是否是Cinta陪陪=不是` | ✅ |
+| 39 | ② 筛选框保持所选值 | `withdraw-become-player-time-47cases.test.ts` `用例#39-② 筛选框保持所选值` | ✅ |
+| 40 | ① 当前页行键有序集合等于同条件预期，分页总数等于预期 | `withdraw-become-player-time-47cases.test.ts` `用例#40-① 当前页行键有序集合等于同条件预期，分页总数等于预期` | ✅ |
+| 40 | ② 筛选框保持所选值且目标样本可见 | `withdraw-become-player-time-47cases.test.ts` `用例#40-② 筛选框保持所选值且目标样本可见` | ✅ |
+| 41 | ① 当前页行键有序集合等于同条件预期集合，分页总数等于预期 | `withdraw-become-player-time-47cases.test.ts` `用例#41-① 当前页行键有序集合等于同条件预期集合，分页总数等于预期` | ✅ |
+| 41 | ② 目标组合样本可见，四个筛选框保持前置所选值 | `withdraw-become-player-time-47cases.test.ts` `用例#41-② 目标组合样本可见，四个筛选框保持前置所选值` | ✅ |
+| 42 | ① 全部筛选控件恢复为前置记录的默认快照 | `withdraw-become-player-time-47cases.test.ts` `用例#42-① 全部筛选控件恢复为前置记录的默认快照` | ✅ |
+| 42 | ② 列表总数恢复为前置记录的默认总数 | `withdraw-become-player-time-47cases.test.ts` `用例#42-② 列表总数恢复为前置记录的默认总数` | ✅ |
+| 43 | ① 第 2 页为高亮页，首行行键不同于第 1 页，筛选与每页条数保持不变 | `withdraw-become-player-time-47cases.test.ts` `用例#43-① 第 2 页为高亮页，首行行键不同于第 1 页，筛选与每页条数保持不变` | ✅ |
+| 43 | ② 返回后第 1 页为高亮页，总数仍为原总数 | `withdraw-become-player-time-47cases.test.ts` `用例#43-② 返回后第 1 页为高亮页，总数仍为原总数` | ✅ |
+| 44 | ① 每页条数显示 10/page | `withdraw-become-player-time-47cases.test.ts` `用例#44-① 每页条数显示 10/page` | ✅ |
+| 44 | ② 当前页数据不超过 10 行且分页总数仍为原总数 | `withdraw-become-player-time-47cases.test.ts` `用例#44-② 当前页数据不超过 10 行且分页总数仍为原总数` | ✅ |
+| 44 | ③ 新列「成为陪玩师时间」表头仍可见 | `withdraw-become-player-time-47cases.test.ts` `用例#44-③ 新列「成为陪玩师时间」表头仍可见` | ✅ |
+| 45 | ① 未勾选时「通过」按钮禁用，勾选一行后按钮可用 | `withdraw-become-player-time-47cases.test.ts` `用例#45-① 未勾选时「通过」按钮禁用，勾选一行后按钮可用` | ✅ |
+| 45 | ② 目标记录仍显示「待审核」，页面未出现处理结果提示 | `withdraw-become-player-time-47cases.test.ts` `用例#45-② 目标记录仍显示「待审核」，页面未出现处理结果提示` | ✅ |
+| 46 | ① 未勾选时「批量拒绝」按钮禁用，勾选一行后按钮可用 | `withdraw-become-player-time-47cases.test.ts` `用例#46-① 未勾选时「批量拒绝」按钮禁用，勾选一行后按钮可用` | ✅ |
+| 46 | ② 目标记录仍显示「待审核」，页面未出现处理结果提示 | `withdraw-become-player-time-47cases.test.ts` `用例#46-② 目标记录仍显示「待审核」，页面未出现处理结果提示` | ✅ |
+| 47 | ① 未勾选时「提交到渠道」按钮禁用，勾选一行后按钮可用 | `withdraw-become-player-time-47cases.test.ts` `用例#47-① 未勾选时「提交到渠道」按钮禁用，勾选一行后按钮可用` | ✅ |
+| 47 | ② 目标记录仍显示「已通过&待打款」，页面未出现处理结果提示 | `withdraw-become-player-time-47cases.test.ts` `用例#47-② 目标记录仍显示「已通过&待打款」，页面未出现处理结果提示` | ✅ |
+
+### 2. 非 UI 核验附录（8 项）
+
+| 编号 | 核验点 | 脚本 / check 标记 | 结果 |
+| --- | --- | --- | --- |
+| N-A3-API | 广播批量删除响应 status=0/data=成功删除2条数据 | `broad-config-47cases.test.ts` `N-A3-API 广播批量删除响应 status=0 且 data=成功删除2条数据` | ✅ |
+| N-A5-EMPTY | 广播批量删除空参数保护（三次） | `broad-config-47cases.test.ts` `N-A5-EMPTY 三次空请求均返回「请选择要删除的数据」且无业务删除` | ✅ |
+| N-B3-LOG | 主播认证删除审计日志（DELETE/操作人/uid） | `anchor-certification-47cases.test.ts` `N-B3-LOG 每个被删认证 ID 均有 DELETE 审计日志且操作人/内容匹配` | ✅ |
+| N-B5-EMPTY | 主播认证批量删除空参数保护（三次） | `anchor-certification-47cases.test.ts` `N-B5-EMPTY 三次空请求均返回「请选择要删除的数据」且无业务删除` | ✅ |
+| N-D1-OBSERVE | 相对基线无新增 console error，无 HTTP 500 | `non-ui-verification.test.ts` `N-D1-OBSERVE 相对基线无新增 console error，全部业务接口无 HTTP 500` | ❌ |
+| N-D2-FE | 前端部署 hash 与声明一致 | `non-ui-verification.test.ts` `N-D2-FE 部署前端 hash 与任务声明 index-cddef5cd.js 一致` | ❌ |
+| N-D2-BE | 后端部署 commit 可核对 | `non-ui-verification.test.ts` `N-D2-BE 可证明后端部署 commit 与声明 funbit-api b5ad323d / lita-public f53a2c75 一致` | ❌ |
+| N-D3-ENV | m-api 403 / funbit-mgr 同源入口可用 | `non-ui-verification.test.ts` `N-D3-ENV m-api 直连 403 与 funbit-mgr 同源入口可用均被记录，403 不记为业务结果` | ✅ |
+
+### 3. 双向核对与统计
+
+- 正向：47 条用例的 107 个检查点在代码中均有唯一 check 对应；逐条结果见上表。
+- 反向：代码中所有 `用例#N-①` 形式 check 均能映射回 TK-0083 用例检查点；无额外验证点、无缺失检查点。
+- 非 UI：8 项附录均有独立 check；N-A3/N-A5 在广播脚本，N-B3/N-B5 在主播脚本，N-D1/D2/D3 在非 UI 脚本。
+- UI 四态统计：通过 47 / 未通过 0 / 阻塞 0 / 未执行 0；执行率 100%；通过率 100%。
+- 非 UI 结论：通过 5（N-A3/N-A5/N-B3/N-B5/N-D3）；未通过 2（N-D1 缺陷 #233；N-D2-FE 候选部署偏差）；未核实/阻塞 1（N-D2-BE）。
+- 证据：`official-check-results.json`、四个官方运行日志、`network-summary.md` 及本地 `evidence/` 截图；公开地址见任务 EVIDENCE.md。
+
+> 说明：N-D1 的 405 console error 已提交缺陷 #233（前端/低/开放），不影响 47 条 UI 用例检查点；N-D2-FE 为部署 hash 与任务声明不一致的候选偏差，按已知口径记录，不创建功能缺陷；N-D2-BE 无构建/部署 commit 证据，按未核实披露。
+
+---
+
+# 历史轮次覆盖记录（提测 #35 / #36 / #38）
 需求来源：`http://work.cinta.team/api/documents/132.md`、技术方案 `task/2026-11-04/TK-0048/TECH_DESIGN.md`、接口文档 `doc 3376`。
 
 图例：✅ 已执行通过；❌ 已执行失败（已提缺陷）；⏭ 未执行（附原因）。

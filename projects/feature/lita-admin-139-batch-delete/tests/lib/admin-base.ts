@@ -4,19 +4,20 @@
  * 环境与认证：
  * - UI：https://admin.test.lita.game（SCRIPT_UI_BASE 可覆盖）
  * - 后端同源测试入口：https://funbit-mgr.test.cinta.team（SCRIPT_API_BASE 可覆盖）
- *   执行机直连 https://m-api.test.lita.game 被 CDN/WAF 403 拦截，浏览器层仅把该主机的
- *   请求转发到同源测试入口，不修改页面代码与业务参数。
+ *   执行机直连 https://m-api.test.lita.game 返回 HTTP 403 Access Denied（CDN/WAF）；
+ *   浏览器层仅把该主机的请求原样转发到同源测试入口，不修改页面代码与业务参数。
  * - 管理员账号密码只在运行时通过 ADMIN_USERNAME / ADMIN_PASSWORD 注入，不写入脚本、日志或证据；
  *   API 使用的 AccessToken 来自本次浏览器真实登录（login 响应 / Cookie）。
  *
  * 留痕（test/script 规范 v1.2.0）：
  * - 每个 act 的关键页面操作后截图；
  * - 页面接口请求/响应、脚本直连接口、只读 SQL 查询写入 evidence/run.json；
+ * - console error / pageerror / requestfailed 同样写入 run.json，供 D1 非 UI 核验；
  * - token、密码等敏感字段统一脱敏，不落盘。
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
-import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
+import { chromium, type Browser, type BrowserContext, type Page, type Response } from 'playwright';
 import { CheckBaseClass } from '../../../../../src/base/CheckBaseClass.ts';
 
 export const UI_BASE = (process.env.SCRIPT_UI_BASE ?? 'https://admin.test.lita.game').replace(/\/+$/, '');
@@ -28,7 +29,6 @@ export const ADMIN_USERNAME = process.env.ADMIN_USERNAME ?? 'admin';
 
 export const EN_ROOM_IDS = [6666, 12001, 10000];
 export const MAIN_TEST_UIDS = [19440456, 19526094];
-export const ROLLBACK_TEST_UIDS = [1751, 1752, 1791, 1792, 1793, 1794, 1795, 1796, 1797, 19440456, 19526094];
 export const CERT_TYPE_SILVER_NORMAL = 4;
 
 export interface ApiCall {
@@ -42,6 +42,15 @@ export interface ApiCall {
   contentType?: string;
   responseBody?: string;
   responseSize?: number;
+}
+
+export interface ConsoleEntry {
+  type: string;
+  text: string;
+  url: string;
+  line?: number;
+  column?: number;
+  time?: string;
 }
 
 export interface DbRow {
@@ -68,6 +77,21 @@ export function cst(ts: number | string | null | undefined): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
+/** 日期或毫秒时间戳统一格式化为 yyyy-MM-dd HH:mm:ss（Asia/Shanghai） */
+export function cstValue(value: unknown): string {
+  if (value === null || value === undefined || value === '') return '-';
+  if (value instanceof Date) return cst(value.getTime());
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(trimmed)) return trimmed;
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(trimmed)) {
+      const d = new Date(trimmed);
+      if (!Number.isNaN(d.getTime())) return cst(d.getTime());
+    }
+  }
+  return cst(value as any);
+}
+
 export function maskSensitive(text: string): string {
   return text
     .replace(/("?(?:accessToken|token|pwd|password)"?\s*[:=]\s*")[^"]+(")/gi, '$1***$2')
@@ -79,6 +103,10 @@ function clamp(text: string, limit = 4000): string {
   return text.length <= limit ? text : `${text.slice(0, limit)}…(truncated, total ${text.length})`;
 }
 
+export function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 export abstract class AdminBase extends CheckBaseClass {
   protected readonly slug: string;
   protected readonly evidenceDir: string;
@@ -86,12 +114,19 @@ export abstract class AdminBase extends CheckBaseClass {
   protected context: BrowserContext | null = null;
   protected page: Page | null = null;
   protected token = '';
+  /** 本次真实登录的操作人账号（来自 login 响应 userName，用于审计日志/造数 opUser 断言） */
+  protected operator = '';
   protected calls: ApiCall[] = [];
   protected shots: string[] = [];
   protected notes: string[] = [];
+  protected consoleEntries: ConsoleEntry[] = [];
+  protected pageErrors: string[] = [];
+  protected requestFailures: { url: string; method: string; failure: string }[] = [];
+  protected badResponses: { time: string; method: string; url: string; status: number }[] = [];
   protected dbAvailable = false;
   private seq = 0;
   private shotNo = 0;
+  private exportNo = 0;
 
   constructor(slug: string) {
     super();
@@ -110,6 +145,7 @@ export abstract class AdminBase extends CheckBaseClass {
     });
     await this.installRoutes();
     this.page = await this.context.newPage();
+    this.installPageObservers(this.page);
     this.page.on('response', (response) => {
       void this.capturePageResponse(response);
     });
@@ -124,7 +160,7 @@ export abstract class AdminBase extends CheckBaseClass {
 
   protected abstract run(): Promise<void>;
 
-  /** 浏览器层把被 WAF 拦截的 m-api 主机转发到同源测试入口 */
+  /** 浏览器层把被 WAF 拦截的 m-api 主机原样转发到同源测试入口 */
   private async installRoutes(): Promise<void> {
     const ctx = this.context!;
     await ctx.route(`${MAP_BASE}/**`, async (route) => {
@@ -153,6 +189,43 @@ export abstract class AdminBase extends CheckBaseClass {
     });
   }
 
+  private installPageObservers(page: Page): void {
+    page.on('console', (message) => {
+      const type = message.type();
+      if (type !== 'error' && type !== 'warning') return;
+      const location = message.location();
+      this.consoleEntries.push({
+        type,
+        text: message.text(),
+        url: location.url ?? '',
+        line: location.lineNumber,
+        column: location.columnNumber,
+        time: new Date().toISOString(),
+      });
+    });
+    page.on('pageerror', (error) => {
+      this.pageErrors.push(error.message);
+    });
+    page.on('response', (response) => {
+      if (response.status() >= 400) {
+        this.badResponses.push({
+          time: new Date().toISOString(),
+          method: response.request().method(),
+          url: response.url(),
+          status: response.status(),
+        });
+      }
+    });
+    page.on('requestfailed', (request) => {
+      const failure = request.failure();
+      this.requestFailures.push({
+        url: request.url(),
+        method: request.method(),
+        failure: failure?.errorText ?? 'unknown',
+      });
+    });
+  }
+
   /** 真实登录，token 取本次登录响应或 Cookie */
   protected async login(): Promise<void> {
     const page = this.page!;
@@ -161,11 +234,12 @@ export abstract class AdminBase extends CheckBaseClass {
       throw new Error('缺少运行时环境变量 ADMIN_USERNAME / ADMIN_PASSWORD（不得写入脚本或证据）');
     }
     let loginToken = '';
-    const onResponse = async (response: import('playwright').Response) => {
+    const onResponse = async (response: Response) => {
       if (response.url().includes('/admin/login') && response.request().method() === 'POST') {
         try {
-          const json = (await response.json()) as { data?: { accessToken?: string } };
+          const json = (await response.json()) as { data?: { accessToken?: string; userName?: string } };
           if (json?.data?.accessToken) loginToken = json.data.accessToken;
+          if (json?.data?.userName) this.operator = json.data.userName;
         } catch {
           // ignore
         }
@@ -184,16 +258,21 @@ export abstract class AdminBase extends CheckBaseClass {
     const cookie = (await this.context!.cookies()).find((c) => c.name === TOKEN_COOKIE);
     this.token = cookie?.value || loginToken;
     if (!this.token) throw new Error('登录成功但未取得 AccessToken（Cookie/login 响应均为空）');
-    await page.waitForTimeout(800);
+    await this.page!.waitForSelector('.app-container', { timeout: 30000 }).catch(() => undefined);
     await this.shot('00-login-success');
     this.log(`登录成功，账号=${process.env.ADMIN_USERNAME}，AccessToken 已获取（长度 ${this.token.length}，不输出值）`);
   }
 
   protected async open(route: string, readySelector: string): Promise<void> {
     const page = this.page!;
-    await page.goto(`${UI_BASE}/#${route}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    const target = `${UI_BASE}/#${route}`;
+    if (page.url().includes(`#${route}`)) {
+      await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
+    } else {
+      await page.goto(target, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    }
     await page.waitForSelector(readySelector, { timeout: 45000 });
-    await page.waitForTimeout(600);
+    await this.waitListIdle();
   }
 
   protected async shot(tag: string): Promise<string> {
@@ -205,7 +284,7 @@ export abstract class AdminBase extends CheckBaseClass {
   }
 
   /** 页面接口留痕（token/密码脱敏） */
-  private async capturePageResponse(response: import('playwright').Response): Promise<void> {
+  private async capturePageResponse(response: Response): Promise<void> {
     const request = response.request();
     if (!request.url().includes('/api/') && !request.url().includes('/admin/') && !request.url().includes('/voiceroom/')) return;
     if (request.method() === 'OPTIONS') return;
@@ -331,13 +410,68 @@ export abstract class AdminBase extends CheckBaseClass {
     while (Date.now() - started < timeout) {
       count = await this.rowCount(scope);
       if (count >= min) return count;
-      await this.page!.waitForTimeout(300);
+      await this.page!.waitForTimeout(250);
     }
     throw new Error(`等待列表行数 >= ${min} 超时，当前 ${count}`);
   }
 
+  /** 主表表头完整文本（含 Element UI 隐藏列，索引与需求文档一致） */
+  protected async headerTexts(): Promise<string[]> {
+    return this.page!
+      .locator('.app-container .el-table')
+      .first()
+      .locator('.el-table__header-wrapper')
+      .first()
+      .locator('th')
+      .allInnerTexts()
+      .then((texts) => texts.map((text) => text.trim()));
+  }
+
+  /** 主表 body 单元格文本（行索引从 0 开始） */
+  protected async mainRowCells(rowIndex: number): Promise<string[]> {
+    return this.page!.evaluate(({ rowIndex }) => {
+      const table = document.querySelector('.app-container .el-table') as HTMLElement;
+      const row = table.querySelectorAll('.el-table__body-wrapper tbody tr.el-table__row')[rowIndex] as HTMLElement | undefined;
+      return row ? Array.from(row.children).map((td) => (td as HTMLElement).innerText.trim()) : [];
+    }, { rowIndex });
+  }
+
+  /** 主表 body 指定列全部文本 */
+  protected async mainColumnTexts(columnIndex: number, limit = 0): Promise<string[]> {
+    return this.page!.evaluate(({ columnIndex, limit }) => {
+      const table = document.querySelector('.app-container .el-table') as HTMLElement;
+      const rows = Array.from(table.querySelectorAll('.el-table__body-wrapper tbody tr.el-table__row'));
+      const size = limit > 0 ? Math.min(limit, rows.length) : rows.length;
+      return rows.slice(0, size).map((tr) => ((tr.children[columnIndex] as HTMLElement)?.innerText ?? '').trim());
+    }, { columnIndex, limit });
+  }
+
+  /** 固定左列 body 行（多选、用户ID、昵称/No、支付方式等） */
+  protected fixedLeftRows(): ReturnType<Page['locator']> {
+    return this.page!
+      .locator('.app-container .el-table')
+      .first()
+      .locator('.el-table__fixed .el-table__fixed-body-wrapper tbody tr.el-table__row');
+  }
+
+  protected async fixedLeftRowCells(rowIndex: number): Promise<string[]> {
+    return this.page!.evaluate(({ rowIndex }) => {
+      const table = document.querySelector('.app-container .el-table') as HTMLElement;
+      const row = table.querySelectorAll('.el-table__fixed .el-table__fixed-body-wrapper tbody tr.el-table__row')[rowIndex] as HTMLElement | undefined;
+      return row ? Array.from(row.children).map((td) => (td as HTMLElement).innerText.trim()) : [];
+    }, { rowIndex });
+  }
+
+  /** 固定右列 body 行（操作列） */
+  protected fixedRightRows(): ReturnType<Page['locator']> {
+    return this.page!
+      .locator('.app-container .el-table')
+      .first()
+      .locator('.el-table__fixed-right .el-table__fixed-body-wrapper tbody tr.el-table__row');
+  }
+
   protected button(text: string, root = ''): ReturnType<Page['locator']> {
-    return this.page!.locator(`${root} button`).filter({ hasText: new RegExp(`^\\s*${text}\\s*$`) }).first();
+    return this.page!.locator(`${root} button`).filter({ hasText: new RegExp(`^\\s*${escapeRegExp(text)}\\s*$`) }).first();
   }
 
   protected async buttonDisabled(text: string): Promise<boolean> {
@@ -346,6 +480,21 @@ export abstract class AdminBase extends CheckBaseClass {
 
   protected async toastTexts(): Promise<string[]> {
     return this.page!.locator('.el-message').allInnerTexts();
+  }
+
+  /** 统计可见轻提示中包含指定文案的条数（用于「仅出现 1 条提示」类检查点） */
+  protected async toastCount(text: string): Promise<number> {
+    return this.page!.locator('.el-message').filter({ hasText: text }).count();
+  }
+
+  /** 统计可见错误轻提示条数 */
+  protected async errorToastCount(): Promise<number> {
+    return this.page!.locator('.el-message--error').count();
+  }
+
+  /** 统计表格当前勾选行数（.el-checkbox.is-checked） */
+  protected async checkedRowCount(scope = '.app-container'): Promise<number> {
+    return this.rows(scope).locator('.el-checkbox.is-checked').count();
   }
 
   protected async waitToast(expected: string, timeout = 10000): Promise<string> {
@@ -368,12 +517,10 @@ export abstract class AdminBase extends CheckBaseClass {
         { timeout },
       )
       .catch(() => undefined);
-    await this.page!.waitForTimeout(150);
   }
 
   /** 等待分页组件当前页高亮为指定页（单页时组件隐藏也视为第 1 页） */
   protected async waitPageActive(expected: number, timeout = 20000): Promise<void> {
-    await this.page!.waitForTimeout(250);
     await this.page!.waitForFunction(
       (page) => {
         const pagination = document.querySelector('.el-pagination') as HTMLElement | null;
@@ -397,10 +544,11 @@ export abstract class AdminBase extends CheckBaseClass {
 
   /** 修改每页条数（Element UI 分页 sizes 下拉） */
   protected async changePageSize(size: number): Promise<void> {
-    await this.page!.locator('.el-pagination .el-select').first().click();
+    const select = this.page!.locator('.el-pagination .el-select').first();
+    await select.click();
     await this.page!
       .locator('.el-select-dropdown:visible .el-select-dropdown__item')
-      .filter({ hasText: String(size) })
+      .filter({ hasText: new RegExp(`^\\s*${size}\\s*/?\\s*page\\s*$`, 'i') })
       .first()
       .click();
     await this.waitPageActive(1);
@@ -427,47 +575,11 @@ export abstract class AdminBase extends CheckBaseClass {
     await this.page!.evaluate(() => {
       document.querySelectorAll('.el-message').forEach((el) => el.remove());
     });
-    await this.page!.waitForTimeout(150);
   }
 
   /** 等待所有轻提示消失（默认 toast 约 3s 自动关闭） */
   protected async waitToastsGone(timeout = 10000): Promise<void> {
     await this.page!.waitForFunction(() => document.querySelectorAll('.el-message').length === 0, null, { timeout }).catch(() => undefined);
-  }
-
-  /**
-   * 拦截并暂缓下一次目标列表请求，用于验证“旧响应不覆盖当前列表”。
-   * 仅暂缓匹配到的第一条请求；release() 后继续走原有路由转发。
-   */
-  protected async holdListRequest(
-    pattern: string,
-    isTarget: (request: { url: string; body: string }) => boolean,
-  ): Promise<{ started: Promise<void>; release: () => void; stop: () => Promise<void> }> {
-    let startedResolve: () => void = () => undefined;
-    const started = new Promise<void>((resolve) => {
-      startedResolve = resolve;
-    });
-    let releaseResolve: () => void = () => undefined;
-    const gate = new Promise<void>((resolve) => {
-      releaseResolve = resolve;
-    });
-    let armed = true;
-    const handler = async (route: import('playwright').Route): Promise<void> => {
-      const request = route.request();
-      const body = request.postData() ?? '';
-      if (armed && isTarget({ url: request.url(), body })) {
-        armed = false;
-        startedResolve();
-        await gate;
-      }
-      await route.fallback();
-    };
-    await this.page!.route(pattern, handler);
-    return {
-      started,
-      release: () => releaseResolve(),
-      stop: () => this.page!.unroute(pattern, handler),
-    };
   }
 
   protected async waitConfirmDialog(): Promise<string> {
@@ -488,9 +600,24 @@ export abstract class AdminBase extends CheckBaseClass {
     await this.page!.locator('.el-message-box').first().waitFor({ state: 'hidden', timeout: 10000 }).catch(() => undefined);
   }
 
+  /** 页面若出现 Element UI 二次确认则点确定；用于单条删除等行为由页面决定的场景（不影响任何断言） */
+  protected async confirmIfPresent(): Promise<boolean> {
+    const box = this.page!.locator('.el-message-box').first();
+    const visible = await box.isVisible().catch(() => false);
+    if (visible) {
+      await box.getByRole('button', { name: '确定' }).click();
+      await box.waitFor({ state: 'hidden', timeout: 10000 }).catch(() => undefined);
+    }
+    return visible;
+  }
+
   protected async selectRow(index: number, scope = '.app-container'): Promise<void> {
     await this.rows(scope).nth(index).locator('.el-checkbox').first().click();
-    await this.page!.waitForTimeout(200);
+  }
+
+  /** 勾选固定左列第 index 行 */
+  protected async selectFixedLeftRow(index: number): Promise<void> {
+    await this.fixedLeftRows().nth(index).locator('.el-checkbox').first().click();
   }
 
   protected async clearAllSelection(scope = '.app-container'): Promise<void> {
@@ -498,8 +625,50 @@ export abstract class AdminBase extends CheckBaseClass {
     const count = await checkboxes.count();
     for (let i = 0; i < count; i++) {
       await checkboxes.first().click().catch(() => undefined);
-      await this.page!.waitForTimeout(100);
     }
+  }
+
+  /** 按 placeholder 定位搜索区下拉并选择选项 */
+  protected async selectByPlaceholder(placeholder: string, optionText: string, exact = true): Promise<void> {
+    const select = this.page!
+      .locator('.app-container .el-select')
+      .filter({ has: this.page!.locator(`input[placeholder="${placeholder}"]`) })
+      .first();
+    await select.click();
+    const item = this.page!
+      .locator('.el-select-dropdown:visible .el-select-dropdown__item')
+      .filter({ hasText: exact ? new RegExp(`^\\s*${escapeRegExp(optionText)}\\s*$`) : new RegExp(escapeRegExp(optionText)) })
+      .first();
+    await item.waitFor({ state: 'visible', timeout: 10000 });
+    await item.click();
+    await this.page!.keyboard.press('Escape').catch(() => undefined);
+    await this.page!.waitForTimeout(150);
+  }
+
+  /** 按 placeholder 填写搜索区输入框 */
+  protected async fillByPlaceholder(placeholder: string, value: string): Promise<void> {
+    await this.page!.locator(`.app-container input[placeholder="${placeholder}"]`).first().fill(value);
+  }
+
+  /** 读取搜索区下拉当前显示值 */
+  protected async selectDisplayValue(placeholder: string): Promise<string> {
+    const input = this.page!.locator('.app-container .el-select').filter({ has: this.page!.locator(`input[placeholder="${placeholder}"]`) }).first().locator('input').first();
+    return (await input.inputValue()).trim();
+  }
+
+  /** 点击导出按钮并读取页面导出请求的真实响应体（xlsx），保存为文件 */
+  protected async downloadViaButton(buttonText: string): Promise<string> {
+    const [response] = await Promise.all([
+      this.page!.waitForResponse((item) => /\/api\/[^?]*\/export(\?|$)/.test(item.url()) && item.request().method() === 'GET', { timeout: 60000 }),
+      this.button(buttonText).click(),
+    ]);
+    const file = join(this.evidenceDir, `${this.slug}-export-${Date.now()}-${++this.exportNo}.xlsx`);
+    const buffer = Buffer.from(await response.body());
+    writeFileSync(file, buffer);
+    this.log(`导出响应已保存: ${file}（HTTP ${response.status()}，${buffer.length} bytes）`);
+    if (response.status() !== 200) throw new Error(`导出请求 HTTP ${response.status()}`);
+    if (buffer.length < 100) throw new Error(`导出响应过小，疑似失败: ${buffer.toString('utf8').slice(0, 200)}`);
+    return file;
   }
 
   protected async selectOption(formItemText: string, optionText: string, root = '.el-dialog:visible'): Promise<void> {
@@ -521,7 +690,7 @@ export abstract class AdminBase extends CheckBaseClass {
     await input.click();
     await input.fill(value);
     await input.press('Enter');
-    await this.page!.waitForTimeout(300);
+    await this.page!.waitForTimeout(250);
   }
 
   protected writeRunEvidence(): void {
@@ -535,6 +704,10 @@ export abstract class AdminBase extends CheckBaseClass {
       shots: this.shots,
       notes: this.notes,
       calls: this.calls,
+      consoleEntries: this.consoleEntries,
+      pageErrors: this.pageErrors,
+      requestFailures: this.requestFailures,
+      badResponses: this.badResponses,
     };
     try {
       writeFileSync(join(this.evidenceDir, 'run.json'), JSON.stringify(payload, null, 2), 'utf8');

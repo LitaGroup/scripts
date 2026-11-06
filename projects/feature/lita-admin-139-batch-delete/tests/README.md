@@ -1,5 +1,16 @@
 # 测试用例说明（项目139）
 
+## TK-0092 主交付脚本
+
+| 脚本 | 覆盖 | 说明 |
+|:---|:---|:---|
+| `broad-config-47cases.test.ts` | 广播召人 #1～#11 + N-A3-API/N-A5-EMPTY | 47 条标准用例中的广播模块；数据池 6666/12001/10000，逐用例预检/造数/清理 |
+| `anchor-certification-47cases.test.ts` | 主播认证 #12～#20 + N-B3-LOG/N-B5-EMPTY | 双会话、审计日志、多 uid 新增、编辑、导出；uid 池 19440456/19526094/1789 |
+| `withdraw-become-player-time-47cases.test.ts` | 提现 #21～#47 | 只读提现数据 + 页面导出 xlsx 解析；不实际审核/打款 |
+| `non-ui-verification.test.ts` | N-D1/D2-FE/D2-BE/D3 | 汇总前三个脚本 run.json，console/HTTP 观测与版本/环境核验 |
+
+以上脚本均为 `node xxx.test.ts` 直跑，check 标题带 `用例#N-①` 标记；COVERAGE.md 双向核对。凭证仅运行时注入。
+
 ## 公共能力（lib/admin-base.ts）
 
 - 真实登录：`ADMIN_USERNAME` / `ADMIN_PASSWORD` 运行时注入，AccessToken 来自本次登录响应或 Cookie；

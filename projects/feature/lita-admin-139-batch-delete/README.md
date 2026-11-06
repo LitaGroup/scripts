@@ -8,7 +8,31 @@
 2. 语音房管理-主播认证标识配置：增加批量删除；
 3. 审核-提现-查询：增加【成为陪玩师时间】列（导出同样新增）。
 
-本目录为项目139 的自动化测试脚本：提测 #35（TK-0048 重新实现轮次）以及提测 #36（TK-0048 返工轮次：通用分页规则修订）。覆盖真实浏览器 UI、真实后端接口及只读数据库抽样核对。
+本目录为项目139 的自动化测试脚本。当前主交付为 **TK-0092（2026-11-06）47 条 UI 用例 + 8 项非 UI 核验**；历史提测 #35/#36/#38 脚本保留在目录中仅供追溯，不属于 TK-0092 覆盖范围。
+
+## TK-0092 交付脚本（47 条 UI 用例 + 8 项非 UI 核验）
+
+| 脚本 | 覆盖 | 检查点数 |
+|:---|:---|:---|
+| `tests/broad-config-47cases.test.ts` | 用例 #1～#11：入口/禁用态、批量删除（确认/取消/成功）、单条删除、新增、编辑、Excel 导入、分页、ROOM ID 搜索、英语区筛选；N-A3-API、N-A5-EMPTY | 26 |
+| `tests/anchor-certification-47cases.test.ts` | 用例 #12～#20：入口/禁用态、批量删除（确认/取消/成功）、双会话不存在 ID 跳过、单条删除、多 uid 新增、编辑、导出；N-B3-LOG、N-B5-EMPTY | 26 |
+| `tests/withdraw-become-player-time-47cases.test.ts` | 用例 #21～#47：新列位置、非空/空值样本、最近三个月与样本范围导出、14 类筛选、组合/重置、分页、批量入口（不实际审核/打款） | 59 |
+| `tests/non-ui-verification.test.ts` | N-D1 console/HTTP 观测、N-D2-FE 前端 hash、N-D2-BE 后端健康/commit、N-D3 环境限制 | 4 |
+
+运行（仓库根目录，凭证仅运行时注入）：
+
+```bash
+ADMIN_USERNAME=admin ADMIN_PASSWORD='***' LITA_USER_TOKEN='***' \
+  node projects/feature/lita-admin-139-batch-delete/tests/broad-config-47cases.test.ts
+ADMIN_USERNAME=admin ADMIN_PASSWORD='***' LITA_USER_TOKEN='***' \
+  node projects/feature/lita-admin-139-batch-delete/tests/anchor-certification-47cases.test.ts
+ADMIN_USERNAME=admin ADMIN_PASSWORD='***' LITA_USER_TOKEN='***' \
+  node projects/feature/lita-admin-139-batch-delete/tests/withdraw-become-player-time-47cases.test.ts
+ADMIN_USERNAME=admin ADMIN_PASSWORD='***' LITA_USER_TOKEN='***' \
+  node projects/feature/lita-admin-139-batch-delete/tests/non-ui-verification.test.ts
+```
+
+执行顺序：广播 → 主播 → 提现 → 非 UI（非 UI 的 D1 会汇总前三个脚本的 run.json）。完整结果与证据见 `COVERAGE.md`、`RUNS.md` 及任务文档。
 
 ## 环境
 
@@ -30,17 +54,21 @@
 ```
 projects/feature/lita-admin-139-batch-delete/
   README.md                                 项目说明
-  COVERAGE.md                               需求 → 测试点 → 脚本追溯
-  RUNS.md                                   运行记录与回归结论
+  COVERAGE.md                               用例/检查点 → 脚本 check 追溯（含 TK-0092 与历史轮次）
+  RUNS.md                                   运行记录与回归结论（含 TK-0092 与历史轮次）
   tests/
     README.md                               用例说明
-    lib/admin-base.ts                       登录、代理、截图、接口/DB 留痕基类
-    broad-config-batch-delete.test.ts       广播召人批量删除全链路 + 既有功能回归
-    anchor-certification-batch-delete.test.ts 主播认证批量删除全链路 + 审计日志 + 既有功能回归
-    pagination-rules.test.ts                提测36 通用分页规则（成功/取消/失败/旧响应/页容量）+ #223 回归
-    withdraw-become-player-time.test.ts     提现新列展示/格式/接口/DB 一致性 + 既有筛选分页
-    withdraw-export.test.ts                 页面导出 Excel 新列位置与值
-    broad-batch-delete-api.test.ts          广播召人批量删除接口契约
+    lib/admin-base.ts                       登录、同源转发、截图、接口/DB/console 留痕基类
+    broad-config-47cases.test.ts            TK-0092 广播召人 #1～#11 + N-A3/N-A5
+    anchor-certification-47cases.test.ts    TK-0092 主播认证 #12～#20 + N-B3/N-B5
+    withdraw-become-player-time-47cases.test.ts TK-0092 提现 #21～#47
+    non-ui-verification.test.ts             TK-0092 N-D1/D2/D3
+    broad-config-batch-delete.test.ts       历史：提测 #35/#36 广播召人全链路
+    anchor-certification-batch-delete.test.ts 历史：提测 #35/#36 主播认证全链路
+    pagination-rules.test.ts                历史：提测 #36 通用分页规则
+    withdraw-become-player-time.test.ts     历史：提现新列展示/接口/DB 一致性
+    withdraw-export.test.ts                 历史：提现导出 Excel
+    broad-batch-delete-api.test.ts          历史：广播批量删除接口契约
 ```
 
 ## 依赖
@@ -63,6 +91,13 @@ export ADMIN_USERNAME=admin
 export ADMIN_PASSWORD='***'
 export LITA_USER_TOKEN='***'   # 仅 DB 抽样核对用；无此变量时 DB 断言会失败
 
+# TK-0092 主交付
+node projects/feature/lita-admin-139-batch-delete/tests/broad-config-47cases.test.ts
+node projects/feature/lita-admin-139-batch-delete/tests/anchor-certification-47cases.test.ts
+node projects/feature/lita-admin-139-batch-delete/tests/withdraw-become-player-time-47cases.test.ts
+node projects/feature/lita-admin-139-batch-delete/tests/non-ui-verification.test.ts
+
+# 历史轮次（#35/#36/#38，仅供追溯）
 node projects/feature/lita-admin-139-batch-delete/tests/broad-config-batch-delete.test.ts
 node projects/feature/lita-admin-139-batch-delete/tests/anchor-certification-batch-delete.test.ts
 node projects/feature/lita-admin-139-batch-delete/tests/pagination-rules.test.ts
