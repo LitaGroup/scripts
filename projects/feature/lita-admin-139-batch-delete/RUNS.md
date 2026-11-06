@@ -32,9 +32,27 @@
 ### 代码与平台同步
 
 - 仓库：`LitaGroup/scripts`，目录 `projects/feature/lita-admin-139-batch-delete/`。
-- commit：待推送后填写。
-- 平台 scriptsPath / pull / import：待执行；testId 待登记后填写。
+- 代码 commit：`daa43ba5768fbf5b7cdbd547c9a64184b11d1f66`（`test: 新增项目139 47条UI用例与非UI核验脚本（TK-0092）`）。
+- 平台 scriptsPath：`projects/feature/lita-admin-139-batch-delete`（2026-11-06 16:24 设置成功）。
+- 平台 scripts/pull：success，平台侧 main = `daa43ba5768fbf5b7cdbd547c9a64184b11d1f66`。
+- 平台 scripts/import：新增用例 10 个；本任务四个脚本 testId 如下：
+  - `broad-config-47cases` → **testId 89**
+  - `anchor-certification-47cases` → **testId 86**
+  - `withdraw-become-player-time-47cases` → **testId 93**
+  - `non-ui-verification` → **testId 91**
+- 同目录历史脚本也被登记：`anchor-certification-batch-delete`(87)、`broad-batch-delete-api`(88)、`broad-config-batch-delete`(90)、`pagination-rules`(92)、`withdraw-become-player-time`(94)、`withdraw-export`(95)；它们属于历史轮次，不纳入 TK-0092 COVERAGE。
 - 新增脚本：`broad-config-47cases.test.ts`、`anchor-certification-47cases.test.ts`、`withdraw-become-player-time-47cases.test.ts`、`non-ui-verification.test.ts`；基类 `lib/admin-base.ts`。
+- 运行命令（仓库根目录，凭证运行时注入）：
+  ```bash
+  ADMIN_USERNAME=admin ADMIN_PASSWORD='***' LITA_USER_TOKEN='***' \
+    node projects/feature/lita-admin-139-batch-delete/tests/broad-config-47cases.test.ts
+  ADMIN_USERNAME=admin ADMIN_PASSWORD='***' LITA_USER_TOKEN='***' \
+    node projects/feature/lita-admin-139-batch-delete/tests/anchor-certification-47cases.test.ts
+  ADMIN_USERNAME=admin ADMIN_PASSWORD='***' LITA_USER_TOKEN='***' \
+    node projects/feature/lita-admin-139-batch-delete/tests/withdraw-become-player-time-47cases.test.ts
+  ADMIN_USERNAME=admin ADMIN_PASSWORD='***' LITA_USER_TOKEN='***' \
+    node projects/feature/lita-admin-139-batch-delete/tests/non-ui-verification.test.ts
+  ```
 
 ---
 
