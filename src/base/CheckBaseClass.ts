@@ -68,6 +68,26 @@ export abstract class CheckBaseClass {
     this.emit('act', { no: this.no, title, status, message, time: this.elapsed() });
   }
 
+  /**
+   * 与 act 相同的步骤输出/计时，但返回 fn 的结果，便于后续步骤复用查询结果。
+   * 步骤失败（或 skip）时抛出异常，避免用 undefined 继续拼装结果。
+   */
+  protected async step<T>(title: string, fn: () => T | Promise<T>): Promise<T> {
+    const failBefore = this.failCount;
+    const skipBefore = this.skipCount;
+    let result: T | undefined;
+    await this.act(title, async () => {
+      result = await fn();
+    });
+    if (this.skipCount > skipBefore) {
+      throw new SkipSignal(title);
+    }
+    if (this.failCount > failBefore) {
+      throw new Error(`步骤失败: ${title}`);
+    }
+    return result as T;
+  }
+
   protected async check(title: string, fn: () => CheckResult | Promise<CheckResult>): Promise<void> {
     this.ensureStarted();
     this.no++;
