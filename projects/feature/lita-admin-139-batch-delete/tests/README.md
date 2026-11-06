@@ -8,6 +8,7 @@
 | `anchor-certification-47cases.test.ts` | 主播认证 #12～#20 + N-B3-LOG/N-B5-EMPTY | 双会话、审计日志、多 uid 新增、编辑、导出；uid 池 19440456/19526094/1789 |
 | `withdraw-become-player-time-47cases.test.ts` | 提现 #21～#47 | 只读提现数据 + 页面导出 xlsx 解析；不实际审核/打款 |
 | `non-ui-verification.test.ts` | N-D1/D2-FE/D2-BE/D3 | 汇总前三个脚本 run.json，console/HTTP 观测与版本/环境核验 |
+| `broad-import-233-regression.test.ts` | TK-0096 缺陷 #233 回归 + 轻量冒烟 | 导入选择文件无根路径 POST/405、Confirm 仅 1 次 uploadBroad、导入生成配置；页面加载/查询/批量入口/单条删除；console/HTTP 基线 |
 
 以上脚本均为 `node xxx.test.ts` 直跑，check 标题带 `用例#N-①` 标记；COVERAGE.md 双向核对。凭证仅运行时注入。
 

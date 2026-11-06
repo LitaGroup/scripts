@@ -8,7 +8,7 @@
 2. 语音房管理-主播认证标识配置：增加批量删除；
 3. 审核-提现-查询：增加【成为陪玩师时间】列（导出同样新增）。
 
-本目录为项目139 的自动化测试脚本。当前主交付为 **TK-0092（2026-11-06）47 条 UI 用例 + 8 项非 UI 核验**；历史提测 #35/#36/#38 脚本保留在目录中仅供追溯，不属于 TK-0092 覆盖范围。
+本目录为项目139 的自动化测试脚本。当前主交付为 **TK-0092（2026-11-06）47 条 UI 用例 + 8 项非 UI 核验**；另含 **TK-0096 缺陷 #233 修复回归**脚本。历史提测 #35/#36/#38 脚本保留在目录中仅供追溯，不属于上述覆盖范围。
 
 ## TK-0092 交付脚本（47 条 UI 用例 + 8 项非 UI 核验）
 
@@ -18,6 +18,7 @@
 | `tests/anchor-certification-47cases.test.ts` | 用例 #12～#20：入口/禁用态、批量删除（确认/取消/成功）、双会话不存在 ID 跳过、单条删除、多 uid 新增、编辑、导出；N-B3-LOG、N-B5-EMPTY | 26 |
 | `tests/withdraw-become-player-time-47cases.test.ts` | 用例 #21～#47：新列位置、非空/空值样本、最近三个月与样本范围导出、14 类筛选、组合/重置、分页、批量入口（不实际审核/打款） | 59 |
 | `tests/non-ui-verification.test.ts` | N-D1 console/HTTP 观测、N-D2-FE 前端 hash、N-D2-BE 后端健康/commit、N-D3 环境限制 | 4 |
+| `tests/broad-import-233-regression.test.ts` | **TK-0096 缺陷 #233 回归**：导入选择文件无根路径 POST/405、Confirm 仅 1 次 uploadBroad、导入生成配置；页面轻量冒烟（加载/查询/批量入口/单条删除）；console/HTTP 基线 | 14 |
 
 运行（仓库根目录，凭证仅运行时注入）：
 
@@ -30,6 +31,8 @@ ADMIN_USERNAME=admin ADMIN_PASSWORD='***' LITA_USER_TOKEN='***' \
   node projects/feature/lita-admin-139-batch-delete/tests/withdraw-become-player-time-47cases.test.ts
 ADMIN_USERNAME=admin ADMIN_PASSWORD='***' LITA_USER_TOKEN='***' \
   node projects/feature/lita-admin-139-batch-delete/tests/non-ui-verification.test.ts
+ADMIN_USERNAME=admin ADMIN_PASSWORD='***' \
+  node projects/feature/lita-admin-139-batch-delete/tests/broad-import-233-regression.test.ts
 ```
 
 执行顺序：广播 → 主播 → 提现 → 非 UI（非 UI 的 D1 会汇总前三个脚本的 run.json）。完整结果与证据见 `COVERAGE.md`、`RUNS.md` 及任务文档。
@@ -63,6 +66,7 @@ projects/feature/lita-admin-139-batch-delete/
     anchor-certification-47cases.test.ts    TK-0092 主播认证 #12～#20 + N-B3/N-B5
     withdraw-become-player-time-47cases.test.ts TK-0092 提现 #21～#47
     non-ui-verification.test.ts             TK-0092 N-D1/D2/D3
+    broad-import-233-regression.test.ts     TK-0096 缺陷 #233 修复回归（导入 405 + 轻量冒烟）
     broad-config-batch-delete.test.ts       历史：提测 #35/#36 广播召人全链路
     anchor-certification-batch-delete.test.ts 历史：提测 #35/#36 主播认证全链路
     pagination-rules.test.ts                历史：提测 #36 通用分页规则

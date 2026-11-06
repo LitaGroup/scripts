@@ -1,5 +1,56 @@
 # 运行记录
 
+## TK-0096（2026-11-06）：缺陷 #233 修复回归
+
+执行机：Linux，Node v24.22.1，Chromium 156（Playwright 1.64.1），时区 Asia/Shanghai。
+环境：UI `https://admin.test.lita.game`；接口同源入口 `https://funbit-mgr.test.cinta.team`；账号口令仅运行时注入。
+
+### 部署基线
+
+| 项 | 实测 | 结论 |
+| --- | --- | --- |
+| 前端入口 JS | `index-305af3b6.js`（2026-11-06 17:40 采集） | 与任务目标构建一致 |
+| 入口 HTML Last-Modified | `Fri, 06 Nov 2026 08:37:07 GMT` = 2026-11-06 16:37:07 CST | 晚于修复构建时间，部署为修复后版本 |
+
+### 官方执行（正式结果）
+
+| 时间（CST） | 脚本 | 结果 | 证据目录（本地） | 公开日志 |
+| --- | --- | --- | --- | --- |
+| 2026-11-06 17:40:16~17:40:54 | `broad-import-233-regression.test.ts` | 23/23 通过（14 check + 9 act） | `evidence/broad-import-233-regression-20261106-174015/` | http://work.cinta.team/files/20261106/89fd5bae-028d-419b-ba20-12feafd19a52.log |
+
+核心结果：
+
+- 选择文件后：向页面根路径 POST = 0，console error = 0，HTTP 405 = 0；
+- 点击 Confirm 后：`/api/voiceroom/broad/uploadBroad` POST = 1，HTTP 200、`status=0`、`data=成功导入1条数据，失败0条数据`；
+- 导入成功提示 `上传成功!`，列表刷新后房间 6666 配置 1 条（优先级 12、日广播邀请人数 30）；
+- 全流程新增 console error = 0（仅 `/admin/init` 404 已知基线，共 4 条）；新增 HTTP 4xx/5xx = 0；
+- 冒烟：页面加载/表头、列表查询、多选列与批量删除禁用态、单条删除均通过；
+- 数据清理：房间 6666 导入记录已删除，finally 复核残留 0。
+
+网络/console 留痕：http://work.cinta.team/files/20261106/0be2cfdc-09d6-457e-a94f-ef1707ea30f2.md
+
+### 红证抽查
+
+- 目标：P0 级回归检查 `#233-① 选择文件后无任何向页面根路径的 POST`。
+- 操作：临时将通过条件 `rootPost === null` 改为 `rootPost !== null`，该 check 失败（`22/23`），随后恢复原值。
+- 证据：http://work.cinta.team/files/20261106/f771b6d6-0944-410a-8ad8-57b48ae6c376.log
+- 结论：负向断言非永真，红证通过；红证运行不纳入正式结果。
+
+### 缺陷
+
+| ID | 端 | 优先级 | 描述 | 状态 | 关闭依据 |
+| --- | --- | --- | --- | --- | --- |
+| #233 | 前端 | 低 | 导入 Excel 选择文件时向页面根路径 POST，HTTP 405 console error | 修复 → 关闭 | 本轮回归通过：无根路径 POST、无 405/新增 console error，Confirm 仅 1 次 uploadBroad 且导入成功 |
+
+### 截图证据
+
+- 选择文件后（无 405、无根路径请求）：http://work.cinta.team/files/20261106/8fe430c3-f5b0-4fd1-820e-f381e19345e0.png
+- 导入成功列表：http://work.cinta.team/files/20261106/0fa93b5e-3605-4af9-b4e6-4135fdebd61b.png
+- 导入目标行：http://work.cinta.team/files/20261106/d100f462-fbb8-4a8f-a681-c580c56f57e3.png
+- 单条删除后：http://work.cinta.team/files/20261106/13d6eba3-4b29-4847-8b41-e92b42da02c8.png
+
+---
+
 ## TK-0092（2026-11-06）：47 条 UI 用例 + 8 项非 UI 核验
 
 执行机：Linux，Node v24.22.1，Chromium 156（Playwright 1.64.1），时区 Asia/Shanghai。
