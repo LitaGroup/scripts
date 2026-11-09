@@ -6,6 +6,8 @@
  * - 执行机直连 https://m-api.test.lita.game 的 /admin/* 与 /api/admin/* 被边缘 WAF 403；
  *   浏览器层仅将这两类路径原样转发到同源测试入口 https://funbit-mgr.test.cinta.team
  *   （R1 例外：不改 URL 业务参数、不改请求/响应体）；/data-main/* 直连 m-api。
+ *   2026-11-09 回归时测试网关按目标入口 Host 路由（保留 m-api Host 会被网关返回占位响应），
+ *   故转发时移除 Host 头，由目标入口自行填充；业务参数与响应体仍保持原样。
  * - 管理员账号密码只在运行时通过 ADMIN_USERNAME / ADMIN_PASSWORD 注入，不写入脚本、日志或证据。
  *
  * 留痕（test/script 规范 v1.2.0）：
@@ -145,8 +147,8 @@ export abstract class SpinDrawAdminBase extends CheckBaseClass {
       const target = request.url().replace(MAPI_BASE, ADMIN_HOST);
       const headers: Record<string, string> = { ...request.headers() };
       for (const key of ['origin', 'referer', 'content-length', 'connection']) delete headers[key];
-      // 同源测试网关按 Host 路由：保留被测主机名，仅改连接目标，不改业务参数
-      headers.host = new URL(MAPI_BASE).host;
+      // 同源测试网关按目标入口 Host 路由；保留 m-api Host 会命中网关占位响应，故移除后由目标入口填充
+      delete headers.host;
       await route.continue({ url: target, headers });
     });
   }

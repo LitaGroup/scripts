@@ -291,7 +291,10 @@ class SpinDrawSummaryTest extends SpinDrawAdminBase {
       return this.textCheck('P&L=-44,042；Aladdin input：466,800；output：437,612；Magic Lamp=20,456', real);
     });
     await this.uiCheck('用例#46-② Multiplier 与 Dismantle 金额均带千分位', 'case46-2-moneys', async () => {
-      const real = `Multiplier input：${segRaw(detail.multiplier, 'input')}；output：${segRaw(detail.multiplier, 'output')}；Dismantle=${resultRow[3] ?? '(无)'}`;
+      // 用例 #46-② 检查点为「Dismantle 金额显示 317,189」；页面单元格同时带占比（67.95%），
+      // 占比由 #46-③ 单独校验，此处仅取金额部分，避免把占比文本误当金额比较。
+      const dismantleAmount = (resultRow[3] ?? '').match(/^(-?[\d,]+)/)?.[1] ?? '(无)';
+      const real = `Multiplier input：${segRaw(detail.multiplier, 'input')}；output：${segRaw(detail.multiplier, 'output')}；Dismantle=${dismantleAmount}`;
       return this.textCheck('Multiplier input：218,574；output：183,264；Dismantle=317,189', real);
     });
     await this.uiCheck('用例#46-③ 所有比例两位小数带 %', 'case46-3-ratios', async () => {

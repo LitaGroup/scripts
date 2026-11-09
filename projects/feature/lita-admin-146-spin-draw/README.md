@@ -49,7 +49,7 @@ lita-admin-146-spin-draw/
 
 ## 环境与网络
 
-- 执行机直连 `https://m-api.test.lita.game` 的 `/admin/*`、`/api/admin/*` 被边缘 WAF 403；脚本在浏览器层仅把这两类路径原样转发到同源测试入口 `https://funbit-mgr.test.cinta.team`，并保留 `Host: m-api.test.lita.game`（网关按 Host 路由），不改 URL 业务参数、不改请求/响应体（R1 例外）。
+- 执行机直连 `https://m-api.test.lita.game` 的 `/admin/*`、`/api/admin/*` 被边缘 WAF 403；脚本在浏览器层仅把这两类路径原样转发到同源测试入口 `https://funbit-mgr.test.cinta.team`（转发时移除 Host 头，由目标入口填充；2026-11-09 回归时该网关按目标入口 Host 路由），不改 URL 业务参数、不改请求/响应体（R1 例外）。
 - `/data-main/*` 查询接口直连 `m-api.test.lita.game`。
 - 报表查询等待绑定查询响应 + `.el-loading-mask` 消失 + 结果表/空态渲染，不使用固定长 sleep。
 - 凭证不写入代码、日志、证据；`evidence/run.json` 中 token 已脱敏。
@@ -73,9 +73,15 @@ ADMIN_USERNAME=... ADMIN_PASSWORD=... node projects/feature/lita-admin-146-spin-
 - 执行前通过 ODPS 只读查询核对样本日期集合与原始汇总（P&L、lottery_cost、double、lamp、diamond、房间数），仅用于前置就绪与预期计算，不作为 UI 验证点。
 - 清理：无写入，无需清理；执行结束关闭浏览器上下文。
 
-## 本轮结果（2026-11-09，提测 #44）
+## 本轮结果（2026-11-09，提测 #44 缺陷修复回归 / TK-0128）
 
-- 47 条用例：通过 23 / 未通过 24 / 阻塞 0 / 未执行 0；执行率 100%，通过率 48.9%。
-- 检查点：173 个，通过 111 / 未通过 62。
-- 未通过归因：6 个产品缺陷（#235 表头、#240 P&L 千分位、#236 Details/房间金额千分位、#237 空数据金额显示、#238 比例末尾 0、#239 非法用户ID未阻断），无环境/脚本/数据/用例归因失败。
+- 部署核查：前端 `static/index-747ac2bd.js`、HTML Last-Modified 2026-11-09 19:04:36 CST（dev `14feaeac` 构建）；后端两个报表配置 updateTime 18:42:57 / 18:43:00 CST，SQL 含 `money_format` 修复。
+- 47 条用例：通过 47 / 未通过 0 / 阻塞 0 / 未执行 0；执行率 100%，通过率 100%。
+- 检查点：173 个，通过 173 / 未通过 0；原 24 条未通过用例及其关联用例全部通过。
+- 回归中仅修正脚本类问题：同源转发 Host 头适配（网关按目标入口 Host 路由）与 #46-② 金额文本取值（不改变断言期望）；无产品缺陷新增。
 - 详细结果见 `COVERAGE.md`、`RUNS.md` 与任务文档 `TEST_REPORT.md`、`EVIDENCE.md`。
+
+## 历史结果（2026-11-09，提测 #44 首次执行 / TK-0115）
+
+- 47 条用例：通过 23 / 未通过 24 / 阻塞 0 / 未执行 0；检查点 173 个，通过 111 / 未通过 62。
+- 未通过归因：6 个产品缺陷（#235 表头、#240 P&L 千分位、#236 Details/房间金额千分位、#237 空数据金额显示、#238 比例末尾 0、#239 非法用户ID未阻断）。

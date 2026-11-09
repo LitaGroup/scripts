@@ -34,7 +34,7 @@ ADMIN_USERNAME=... ADMIN_PASSWORD=... node projects/feature/lita-admin-146-spin-
 
 ## 已知环境处理
 
-- `/admin/*`、`/api/admin/*` 从 `m-api.test.lita.game` 原样转发到 `funbit-mgr.test.cinta.team` 并保留 Host（WAF 403 的 R1 例外）；`/data-main/*` 直连。
+- `/admin/*`、`/api/admin/*` 从 `m-api.test.lita.game` 原样转发到 `funbit-mgr.test.cinta.team`（WAF 403 的 R1 例外；转发时移除 Host 头，由目标入口填充，2026-11-09 回归时网关按目标入口 Host 路由）；`/data-main/*` 直连。
 - 登录密码、token 不写入脚本/日志/证据。
 
 ## 结果口径

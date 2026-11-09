@@ -2,58 +2,58 @@
 
 执行环境：`https://admin.test.lita.game/`（测试环境）；后端同源入口 `https://funbit-mgr.test.cinta.team`；账号 qa-ai（密码仅运行时注入，未落盘）。
 
-## 1. 部署核查（正式执行前）
+## 1. 本轮部署核查（TK-0128 缺陷修复回归，正式执行前）
 
 | 项 | 实测值 | 说明 |
 | --- | --- | --- |
-| 前端入口 JS | `static/index-92003405.js` | 2026-11-09 18:22 采集 |
-| 入口 HTML Last-Modified | `Mon, 09 Nov 2026 07:12:57 GMT`（北京时间 2026-11-09 15:12:57） | 早于提测时间 15:15，构建时间与提测窗口一致 |
-| 后端探针 | `POST /api/admin/privilege`（Host: m-api.test.lita.game）→ HTTP 200 | 同源测试入口可用 |
+| 前端入口 JS | `static/index-747ac2bd.js` | 2026-11-09 19:11 CST 采集；与修复任务声明的 dev `14feaeac` 构建一致 |
+| 入口 HTML Last-Modified | `Mon, 09 Nov 2026 11:04:36 GMT`（北京时间 2026-11-09 19:04:36） | 不早于修复部署时间，匹配任务要求 |
+| 前端修复证据（构建内） | `tableHeaderOverrides`（pl_amt→P&L、rtp→RTP、details→Details、dismantle→Dismantle、top_spending_room→Top Spending Room）、`tableColumnFormatters`（pl_amt→thousands）、`queryFieldOverrides.user_id.positiveInteger=true` 且 `validationMessage="请输入正确的用户ID"` | 覆盖 #235 / #240 / #239 的修复点 |
+| 后端配置 `game-spin-draw-summary` | `status=VALID`、`mode=SQL`、`database=selectdb`、`updateTime=1794220980796`（2026-11-09 18:43:00 CST）、SQL SHA-256 `755b0a99…66d368`、`money_format` 7 处 | 覆盖 #236 / #237 的修复点，配置实时生效 |
+| 后端配置 `game-spin-draw-daily` | `status=VALID`、`mode=SQL`、`database=selectdb`、`updateTime=1794220977714`（2026-11-09 18:42:57 CST）、SQL SHA-256 `2c673456…f46e53b`、`money_format` 7 处 | 覆盖 #236 / #238 的修复点，配置实时生效 |
 | 页面路由 | `#/data-stats-manager/user-consumption/game-spin-draw-summary` / `.../game-spin-draw-daily` | 两页均可访问，菜单/面包屑/标题正常 |
+| 后端探针 | `GET /admin/init`（同源入口）→ HTTP 200；登录 → `status=0` | 同源测试入口可用 |
 
-结论：测试环境部署可用，未发现版本阻塞。
+结论：前端与后端修复均已部署到目标测试环境，未发现版本阻塞。
 
-## 2. 正式执行（2026-11-09，提测 44 = 进行中）
+## 2. 本轮正式执行（TK-0128，2026-11-09，提测 44）
 
-| 序 | 脚本 | 开始（北京时间） | 检查点 | 通过 | 未通过 | 结论 | 运行日志 | 证据目录（仓库根 evidence/） |
+| 序 | 脚本 | 开始（北京时间） | 检查点 | 通过 | 未通过 | 结论 | 运行日志 | 证据目录（本地留存） |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | `spin-draw-entry.test.ts` | 18:19:32 | 18 | 18 | 0 | 成功 | `/home/ecs-user/logs/tk115/formal/entry.log` | `spin-draw-entry-20261109-181932` |
-| 2 | `spin-draw-validation.test.ts` | 18:19:42 | 48 | 24 | 24 | 失败（用例 #11～#18） | `/home/ecs-user/logs/tk115/formal/validation.log` | `spin-draw-validation-20261109-181941` |
-| 3 | `spin-draw-summary.test.ts` | 18:20:25 | 40 | 15 | 25 | 失败（#19/#21/#23/#24/#29/#31/#33/#35/#46） | `/home/ecs-user/logs/tk115/formal/summary.log` | `spin-draw-summary-20261109-182025` |
-| 4 | `spin-draw-daily.test.ts` | 18:20:47 | 44 | 31 | 13 | 失败（#20/#25/#27/#28/#30/#32/#47） | `/home/ecs-user/logs/tk115/formal/daily.log` | `spin-draw-daily-20261109-182047` |
-| 5 | `spin-draw-reset-loading-pagination.test.ts` | 18:21:09 | 23 | 23 | 0 | 成功 | `/home/ecs-user/logs/tk115/formal/reset-loading-pagination.log` | `spin-draw-reset-loading-pagination-20261109-182109` |
+| 1 | `spin-draw-entry.test.ts` | 19:15:47 | 18 | 18 | 0 | 成功 | `/home/ecs-user/work/tk0128/logs/spin-draw-entry.log` | `/home/ecs-user/work/tk0128/evidence/spin-draw-entry/` |
+| 2 | `spin-draw-validation.test.ts` | 19:16:00 | 48 | 48 | 0 | 成功（#11～#18 全部通过） | `/home/ecs-user/work/tk0128/logs/spin-draw-validation.log` | `/home/ecs-user/work/tk0128/evidence/spin-draw-validation/` |
+| 3 | `spin-draw-daily.test.ts` | 19:17:40 | 44 | 44 | 0 | 成功（#20/#25/#27/#28/#30/#32/#47 全部通过） | `/home/ecs-user/work/tk0128/logs/spin-draw-daily.log` | `/home/ecs-user/work/tk0128/evidence/spin-draw-daily/` |
+| 4 | `spin-draw-reset-loading-pagination.test.ts` | 19:18:06 | 23 | 23 | 0 | 成功 | `/home/ecs-user/work/tk0128/logs/spin-draw-reset-loading-pagination.log` | `/home/ecs-user/work/tk0128/evidence/spin-draw-reset-loading-pagination/` |
+| 5 | `spin-draw-summary.test.ts` | 19:18:44 | 40 | 40 | 0 | 成功（#19/#21/#23/#24/#29/#31/#33/#35/#46 全部通过） | `/home/ecs-user/work/tk0128/logs/spin-draw-summary-r2.log` | `/home/ecs-user/work/tk0128/evidence/spin-draw-summary-r2/` |
 
-汇总：检查点 173 个，通过 111 / 未通过 62；用例 47 条，通过 23 / 未通过 24 / 阻塞 0 / 未执行 0。
-无基础设施中断，无 FLAKY，无重跑。
+汇总：检查点 173 个，通过 173 / 未通过 0；用例 47 条，通过 47 / 未通过 0 / 阻塞 0 / 未执行 0。
+无基础设施中断，无 FLAKY，无重试到通过。
 
-## 3. 自测记录（正式执行前）
+## 3. 本轮脚本类修正（非产品缺陷）
 
-| 时间 | 脚本 | 结果 | 说明 |
-| --- | --- | --- | --- |
-| 18:06 | entry | 22/22（18 check + 4 act） | 菜单导航等待修正后通过 |
-| 18:08 | validation | 40/64 | 8 条非法 UID 用例按预期失败 |
-| 18:10 | summary | 28/53 | 展示格式类失败 |
-| 18:12 | daily | 44/57 | claim 后修正空表等待与 Dismantle 解析 |
-| 18:16 | reset-loading-pagination | 30/30 | 分页用例改为独立会话后通过 |
+| 问题 | 发现 | 处理 | 影响面 | 证据 |
+| --- | --- | --- | --- | --- |
+| 同源转发保留 `Host: m-api.test.lita.game` 时，测试网关返回占位响应（`HTTP 200 "oh ~~"`），登录接口不可达 | 19:13 首次运行 entry 脚本时登录等待超时；直连探测确认网关行为变化 | `tests/lib/admin-base.ts` 转发时移除 Host 头，由目标入口 `funbit-mgr` 填充；业务 URL/参数/响应体不变（R1 例外仍成立）；README 同步更新 | 仅网络层，不影响任何断言与期望 | 失败探测：`/home/ecs-user/work/tk0128/logs/spin-draw-entry.log`（首次）；修正后 entry 22/22 |
+| #46-② 将 Dismantle 单元格整体（含占比 `（67.95%）`）与金额 `317,189` 比较，导致误报失败 | 19:18 summary 首次正式运行 1 个 check 失败 | 仅取单元格金额部分比较（`^(-?[\d,]+)`），占比仍由 #46-③ 校验；未改期望金额、未放宽断言、未改用例 | 仅 #46-② check 实现 | 修正前日志：`/home/ecs-user/work/tk0128/logs/spin-draw-summary.pre-fix.log`；失败截图：`evidence/spin-draw-summary-pre-fix/`；修正后 53/53（40 check + 13 act） |
 
-自测阶段仅修正脚本类问题（菜单展开等待、空表表头等待、独立会话隔离、文本解析、waitForFunction 参数）；未修改断言期望值，未 mock 任何业务接口。
+> 说明：上述两项均为脚本/环境适配问题，未据此创建产品缺陷；原始失败证据按要求保留，未用成功证据覆盖。
 
-## 4. 红证抽查（P0）
+## 4. 本轮红证抽查（P0）
 
-- 对象：用例 #26-②「RTP 显示 90.57%」。
-- 操作：临时将期望值改为 `90.58%`，运行 `spin-draw-daily.test.ts`；对应 check 输出 `expect=90.58% / real=90.57% / status=fail`，失败数由 13 → 14。
-- 恢复：将期望值恢复为 `90.57%` 后重新运行，失败数恢复 13；恢复后的代码为交付版本。
-- 记录文件：`/home/ecs-user/logs/red-proof.log`（自测环境本地留存）。
+- 对象：P0 用例 #46-②「Multiplier 与 Dismantle 金额均带千分位」（本轮修正后的 check）。
+- 操作：临时将期望值 `Dismantle=317,189` 改为 `Dismantle=317,190`，运行 `spin-draw-summary.test.ts`；对应 check 输出 `expect=...317,190 / real=...317,189 / status=fail`，失败数 1。
+- 恢复：从备份恢复测试文件，`sha256sum -c` 校验通过（`d3e4128c...b25e23`），恢复后的代码即正式执行版本。
+- 记录：`/home/ecs-user/work/tk0128/logs/redproof.log`。
+- 结论：断言非永真，红证抽查通过。
 
-## 5. 失败归因摘要
+## 5. 历史轮次（TK-0115 首次执行，2026-11-09 18:19～18:22）
 
-| 缺陷 | 现象 | 对应用例 | 归因 |
-| --- | --- | --- | --- |
-| #235 | 表头显示内部字段名而非需求英文标题 | #19、#20 | 前端展示/报表配置 |
-| #240 | P&L 金额未带千分位 | #19、#21、#25、#33、#46 | 前端数值格式 |
-| #236 | Details/Dismantle/Top Spending Room 文本金额未带千分位 | #23、#24、#27、#28、#29、#30、#31、#32、#33、#46、#47 | 后端返回文本格式 |
-| #237 | 无数据时金额类字段返回 null 并显示 `-` | #35 | 后端查询结果 |
-| #238 | Multiplier 比例 `80.9%` 未保留两位小数 | #47 | 后端返回文本格式 |
-| #239 | 非法用户ID未阻断、无「请输入正确的用户ID」 | #11～#18 | 前端校验 |
+| 序 | 脚本 | 检查点 | 通过 | 未通过 | 结论 |
+| --- | --- | --- | --- | --- | --- |
+| 1 | `spin-draw-entry.test.ts` | 18 | 18 | 0 | 成功 |
+| 2 | `spin-draw-validation.test.ts` | 48 | 24 | 24 | 失败（#11～#18） |
+| 3 | `spin-draw-summary.test.ts` | 40 | 15 | 25 | 失败（#19/#21/#23/#24/#29/#31/#33/#35/#46） |
+| 4 | `spin-draw-daily.test.ts` | 44 | 31 | 13 | 失败（#20/#25/#27/#28/#30/#32/#47） |
+| 5 | `spin-draw-reset-loading-pagination.test.ts` | 23 | 23 | 0 | 成功 |
 
-环境/脚本/数据/用例归因失败：0。
+历史汇总：检查点 173 个，通过 111 / 未通过 62；用例 47 条，通过 23 / 未通过 24；6 个缺陷 #235～#240 开放。详见 TK-0115 TEST_REPORT / EVIDENCE / COVERAGE。
