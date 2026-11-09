@@ -19,13 +19,15 @@
 | 2026-11-09 19:46:39 | `--selftest=1` | 31/31 步通过（13 check + 18 act）；未点击 #2 的 Confirm，未新增记录；默认列表 Total 22 保持不变 | `evidence/family-pag-3707-20261109-194639/` |
 
 - 覆盖 #1、#2 的 ①～③（主图 PAG、缩略图 D1 PNG、D2 PAG 预览）与 #10～#12 三个必填校验；保存链路（#2④⑤⑥、#3～#9）因「test 环境仅允许一条专用记录且不可删除」约束，留待正式执行一次性完成。
+- 专用记录创建后（20:03）再次执行 `--selftest=1`：#2 按前置守卫输出 6 个「未执行（BD-NEW 不成立）」检查点，其余 #1/#10～#12 全部通过；证明「不新增第二条记录」的保护生效（`evidence/family-pag-3707-20261109-200338/`）。
 - 当轮修复的脚本问题：① Element UI `.el-dialog__wrapper` 为 fixed 定位，`offsetParent` 恒为 null 导致弹窗可见性误判，改为 `display/visibility/opacity` 判定；② 固定右列表头选择器由 `.el-table__header-wrapper` 改为 `.el-table__fixed-right th`，正确读到「操作」列；③ 上传后等待预览资源地址切换，避免读到替换前旧预览。
 
 ## 2. 红证抽查
 
 | 时间（CST） | 目标 | 操作 | 结果 | 证据 |
 | --- | --- | --- | --- | --- |
-| 2026-11-09 19:45 | P0 检查点 `用例#1-① 页面路由` | 临时把期望路由改为 `#/effect-manager/family-background-REDPROOF` 并同步改比较条件，运行自测 | 30/31，目标 check 失败（`real=#/effect-manager/family-background`），证明断言非永真；随后删除临时脚本、恢复原值 | 运行日志（本文件第 6 节）；临时脚本未提交 |
+| 2026-11-09 20:04 | P0 检查点 `用例#1-① 页面路由` | 临时副本把期望路由改为 `#/effect-manager/family-background-REDPROOF` 并同步改比较条件，仅运行 #1 | 5 步 4 成功 / 1 失败：目标 check `用例#1-①` 失败（`real=#/effect-manager/family-background`），其余通过；证明断言非永真。临时脚本未提交，跑后删除 | 原始日志随证据包上传（EVIDENCE.md 索引） |
+| 2026-11-09 19:45 | 同上（首次） | 同上 | 30/31，目标 check 失败 | 同左（首轮记录） |
 
 ## 3. 正式执行
 
