@@ -3,6 +3,7 @@
  * 用例来源：/task/20261109/TK-0135/HANDOFF（28 条九列用例）；技术方案：/task/20261109/TK-0135/TECH_DESIGN
  * 覆盖：#1~#16、#18、#21~#24、#26~#28；#6（BD-04 无数据）、#19/#20/#25（无 UNSEND 数据）按阻塞取证不生成检查点
  * TK-0140 回归：#7 使用 T=21 直接断言切换每页条数后 currentPage=1 且无 page=2&rows=20 覆盖请求；#26-②/#28-③ 按实际行为 Reset 后补 Search
+ * TK-0144 补测复核：测试环境 DML 通道不可用（工位资源权限 none；admin-ai 查询只读 S1009）；#6/#19/#20/#25 维持阻塞，需求方 2026-11-10 选择 C 维持现状按阻塞交付
  * 数据隔离：仅使用测试环境真实用户 ID；通过页面添加/删除图片白名单与会话限制白名单测试行；禁止 SQL 写库
  * 运行：ADMIN_USERNAME=… ADMIN_PASSWORD=*** node projects/feature/lita-admin-3710-image-white-unsend/tests/image-white-unsend.test.ts
  * 回归选择：CASES=2,5,7,14,26,27,28（仅回归/自测；平台全量运行不要传）
@@ -449,12 +450,12 @@ class ImageWhiteUnsendTest extends AdminBase {
   // ---------- #6 阻塞取证 ----------
 
   private async case6Blocked(): Promise<void> {
-    await this.act('用例#6 阻塞取证：初始白名单无历史资料缺失行', async () => {
+    await this.act('用例#6 阻塞取证：白名单无资料缺失行且 DML 通道不可用', async () => {
       await this.gotoWhite();
       const total = await this.whiteTotal();
       const rows = await this.whiteRows();
       await this.shot('case6-blocked-white-list');
-      this.blockedNotes.push(`用例#6 阻塞：BD-04 需要已存在的 M1/M2 白名单行；实测初始 Total=${total.total}、rows=${rows.length}，无历史行；页面无法添加不存在用户，禁止 SQL 造数。`);
+      this.blockedNotes.push(`用例#6 阻塞：BD-04 需已存在的 M1（999999999 无用户资料）/M2（1573 locale 为空）白名单行；实测 Total=${total.total}、rows=${rows.length}（现有 5517/liyang 为需求方数据，未改动）；页面 addList 跳过不存在用户，测试环境 DML 通道不可用（admin-ai 查询只读 S1009、工位资源权限 none）；需求方 2026-11-10 选择 C 维持现状按阻塞交付。`);
       this.notes.push(this.blockedNotes[this.blockedNotes.length - 1]);
       this.log(this.blockedNotes[this.blockedNotes.length - 1]);
     });
@@ -977,13 +978,13 @@ class ImageWhiteUnsendTest extends AdminBase {
   // ---------- #19/#20/#25 阻塞取证 ----------
 
   private async case19to25Blocked(): Promise<void> {
-    await this.act('用例#19/#20/#25 阻塞取证：UNSEND 数据为空且筛选无结果', async () => {
+    await this.act('用例#19/#20/#25 阻塞取证：候选会话无 UNSEND 且 DML 通道不可用', async () => {
       await this.gotoConvo();
-      await this.convoSearch({ playerId: '14', start: '2026-10-26', end: '2026-11-09', type: 'Unsend' });
+      await this.convoSearch({ playerId: '7016', start: '2026-10-28', end: '2026-11-10', type: 'Unsend' });
       const rows = await this.convoRows();
       const noData = await this.noDataText();
       await this.shot('case19-25-unsend-empty');
-      const note = `用例#19/#20/#25 阻塞：player_message.biz='UNSEND' 只读计数=0、im_message.status=6 计数=0；页面 player 14 + Unsend + 默认日期查询 ${rows.length} 行（${noData}），无真实撤回数据。`;
+      const note = `用例#19/#20/#25 阻塞：外部只读预检 player_message.biz='UNSEND' 近14天=0；候选会话 player 7016/13419 有 14 条 CHAT，但测试环境 DML 通道不可用（admin-ai 查询只读 S1009、工位资源权限 none）；页面 player 7016 + Unsend + 2026-10-28~2026-11-10 查询 ${rows.length} 行（${noData}）；未以空结果通过；需求方 2026-11-10 选择 C 维持现状按阻塞交付。`;
       this.blockedNotes.push(note);
       this.notes.push(note);
       this.log(note);

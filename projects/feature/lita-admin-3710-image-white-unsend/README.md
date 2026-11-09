@@ -77,3 +77,13 @@ NOPERM_USERNAME=… NOPERM_PASSWORD=*** \
 - #26-②、#28-③：按实际行为，`Reset Filters` 仅清空 USER ID 输入、不刷新列表；Reset 后补一次 `Search`（USER ID 为空）再核对默认列表 Total 与历史 ID 集合（Q-01 说明保留，未改原用例）。
 - 结果：`formal-regression` 59 步全部通过（22 check 全部通过）；图片白名单清理 0、会话限制白名单 17/测试行 0。
 - 详细记录：`/task/20261109/TK-0140/TEST_REPORT.md`、`EVIDENCE.md`、`COVERAGE.md`、`HANDOFF.md`。
+
+## TK-0144 阻塞补测复核（2026-11-10）
+
+- 范围：TK-0135 九列用例 #6、#19、#20、#25；回归 #18（Unsend 下拉）与 #21（既有消息类型）。
+- 数据构造通道：工位 #1059 资源权限「无权限」；`https://api.test.cinta.team/admin-ai/v1/query/execute` 为只读查询通道，执行 INSERT 返回 `SQL错误 [S1009]: Statement.executeQuery() cannot issue statements that do not produce result sets`；页面 `addList` 跳过不存在用户，聊天记录页无 `player_message.biz` 写入口。
+- 数据变更：**未执行任何 INSERT/UPDATE/DELETE；未造数、未清理**。`user_image_white` 保持 1 行（5517/liyang，需求方数据，未改动）；`player_message.biz='UNSEND'` 仍为 0；候选会话 7016/13419 仍为 15 行。
+- 页面阻塞取证：`CASES=6,19` 运行 7 步全部成功；#6 白名单 Total=1、rows=1；#19/#20/#25 按 player 7016 + Unsend + 2026-10-28~2026-11-10 查询 0 行（No Data）。
+- 回归：`CASES=18,21` 运行 22 步 / 12 check 全部通过（#18 3/3、#21 9/9）。
+- 结论：#6/#19/#20/#25 **阻塞（数据构造通道不可用，需求方 2026-11-10 选择 C 维持现状按阻塞交付）**；无新增产品缺陷；提测 46 维持 TK-0140 的「已通过」，4 条阻塞未闭环。
+- 详细记录：`/task/20261110/TK-0144/TEST_REPORT.md`、`EVIDENCE.md`、`COVERAGE.md`、`HANDOFF.md`。

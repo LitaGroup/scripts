@@ -122,3 +122,14 @@
 | 会话限制白名单 `user_im_white` | 17 行 | **17 行**；测试用户 16302/16305 均不存在 | 只读 SQL：total=17、test_rows=0 |
 | 会话限制白名单历史集合 | 17 ID | **17 ID 不变** | #26-③/#27/#28 检查 |
 | 测试账号/角色 | 使用既有 qa-ai（507 权限） | 未新建/未删除账号；无残留 | 登录日志（不输出凭证） |
+
+## 4. TK-0144 阻塞补测复核（2026-11-10）
+
+| 时间（CST） | 范围 | 命令 | 结果 | 证据目录 |
+| --- | --- | --- | --- | --- |
+| 00:54:19~00:54:31 | #6/#19/#20/#25 阻塞取证 | `ADMIN_USERNAME=… ADMIN_PASSWORD=*** CASES=6,19 node …image-white-unsend.test.ts` | 7 步全部成功；#6 白名单 Total=1、rows=1（5517/liyang，未改动）；#19/#20/#25 按 player 7016 + Unsend + 2026-10-28~2026-11-10 查询 0 行（No Data）；无 DML | `evidence/lita-admin-3710-image-white-unsend-20261110-005419/` |
+| 00:54:33~00:54:48 | 回归 #18/#21 | `ADMIN_USERNAME=… ADMIN_PASSWORD=*** CASES=18,21 node …image-white-unsend.test.ts` | 22 步 / 12 check 全部通过（#18 3/3、#21 9/9） | `evidence/lita-admin-3710-image-white-unsend-20261110-005433/` |
+
+- 环境基线：Admin 入口 `static/index-02cabc45.js`；HTML Last-Modified 2026-11-09 23:55:35 CST；聊天记录 chunk `static/player-conver-a574985b.js`；后端 `/funbit/health` = `i am ok`。
+- 数据通道：工位资源权限「无权限」；`admin-ai/v1/query/execute` 只读（INSERT 返回 S1009）；未执行任何写操作，未造数/未清理。
+- 结论：#6/#19/#20/#25 阻塞（数据构造通道不可用，需求方选择 C）；#18/#21 回归通过；无新增缺陷；提测 46 维持「已通过」。
