@@ -80,7 +80,8 @@ class FamilyPagTest extends AdminBase {
     super('family-pag-3707');
     // #1..#12 各用例检查点数（含参数化数据行展开）
     const perCase = [4, 6, 2, 2, 2, 9, 3, 3, 18, 2, 2, 2];
-    const from = Number(arg('from', '1'));
+    // --from=N 本地断点续跑；FAMILY_PAG_FROM 供回归入口（family-pag-regression.test.ts）使用
+    const from = Number(arg('from', process.env.FAMILY_PAG_FROM ?? '1'));
     this.total = this.selftest ? 13 : perCase.slice(Math.max(0, from - 1)).reduce((a, b) => a + b, 0);
   }
 
@@ -95,7 +96,7 @@ class FamilyPagTest extends AdminBase {
       await this.case12();
       return;
     }
-    const from = Number(arg('from', '1'));
+    const from = Number(arg('from', process.env.FAMILY_PAG_FROM ?? '1'));
     if (from <= 1) await this.case1();
     if (from <= 2) await this.case2(false);
     if (from <= 3) await this.case3();

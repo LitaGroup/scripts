@@ -15,6 +15,7 @@
 | 文件 | 说明 |
 | --- | --- |
 | `tests/family-pag-upload-display.test.ts` | 用例 #1～#12 主脚本（CheckBaseClass act/check 协议） |
+| `tests/family-pag-regression.test.ts` | 平台回归入口（跳过 #2，执行 #3～#12） |
 | `tests/lib/admin-base.ts` | 项目私有基类：真实登录、WAF 同源转发、页面操作、截图与请求留痕、截图帧比对 |
 | `assets/BOT_TEST_PAG_3707.pag` | 任务提供的 PAG 样例（原样下载，未改扩展名/内容） |
 | `assets/BOT_TEST_PAG_3707.{png,jpg,gif,webp,mp4,mov}` | 本地用 FFmpeg 生成的真实可解码文件（非改后缀） |
@@ -38,6 +39,10 @@ ADMIN_USERNAME=qa-ai ADMIN_PASSWORD='***' \
 # 断点续跑（专用记录已存在时，从 #N 继续，#2 不再重复新增）
 ADMIN_USERNAME=qa-ai ADMIN_PASSWORD='***' \
   node projects/feature/lita-admin-3707-family-pag/tests/family-pag-upload-display.test.ts --from=7
+
+# 平台缺陷回归入口（跳过 #2，执行 #3～#12；专用记录已存在时使用）
+ADMIN_USERNAME=qa-ai ADMIN_PASSWORD='***' \
+  node projects/feature/lita-admin-3707-family-pag/tests/family-pag-regression.test.ts
 ```
 
 可选环境变量：`SCRIPT_UI_BASE`（默认 `https://admin.test.lita.game`）、`SCRIPT_API_BASE`（默认 `https://funbit-mgr.test.cinta.team`）。
