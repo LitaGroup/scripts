@@ -41,19 +41,23 @@
 
 | 时间（CST） | 目标 | 操作 | 结果 | 证据 |
 | --- | --- | --- | --- | --- |
-| 23:12 | P0 `用例#1-① 路由` | 临时副本把期望路由改为 `#/user-manager/user-image-white-REDPROOF`，仅运行 #1 | 9 步 8 成功 / 1 失败：目标 check `用例#1-①` 失败（real=`#/user-manager/user-image-white`），其余通过；临时脚本已删除，未提交 | `evidence-tk136/redproof/run.json` |
+| 23:12 / 23:34 | P0 `用例#1-① 路由` | 临时副本把期望路由改为 `#/user-manager/user-image-white-REDPROOF`，仅运行 #1；随后用原脚本重跑 #1 | 失败：`[check] 用例#1-① status:"fail"`（expect=REDPROOF, real=原路由）；恢复后：`[check] 用例#1-① status:"success"`；9 步 8 成功/1 失败 → 9/9 通过；临时脚本已删除，未提交 | `redproof-v2-fail.log`、`redproof-v2-restored.log`、`redproof-comparison.log`（公开地址见 EVIDENCE E-32） |
+
+### 2.1 返工补充（红证）
+
+- 可复现红证日志：`redproof-v2-fail.log`（`[check] 用例#1-① ... status:"fail"`，expect=`...-REDPROOF`）、`redproof-v2-restored.log`（`[check] 用例#1-① ... status:"success"`）、`redproof-comparison.log`（两段对照）；临时脚本已删除，未提交。公开地址见 EVIDENCE E-32。
 
 ## 3. 正式执行
 
 | 轮次 | 时间（CST） | 命令 | 覆盖 | 结果 | 证据目录 |
 | --- | --- | --- | --- | --- | --- |
-| 正式-主脚本 | 23:13:18~23:23:00 | 全量（#1~#28） | 167 步 / 87 check | 164 成功 / 3 失败：`#7-④`（单页隐藏脚本断言）、`#26-②`、`#28-③`（用例问题 Q-01） | `evidence-tk136/formal-20261109-2313/` |
+| 正式-主脚本 | 23:13:18~23:23:00 | 全量（#1~#28） | 167 步 / 87 check | 164 成功 / 3 失败：`#7-④`（单页隐藏可观测性缺口）、`#26-②`、`#28-③`（用例问题 Q-01） | `evidence-tk136/formal-20261109-2313/` |
 | 正式-权限脚本 | 23:23:35~23:23:37 | #17 + NU-01 | 9 步 / 6 check | 全部通过 | `evidence-tk136/formal-permission-2313/` |
 | 正式-#7 重跑 | 23:24:08~23:24:29 | `--from=7 --to=7` | 13 步 / 4 check | 全部通过（`current=(hidden), total=11, rows=11, pagesVisible=false`） | `evidence-tk136/formal-case7-rerun/` |
 
 ### 定稿口径
 
-- #7-④ 采用重跑结果；首次正式失败的 `run.json`/截图保留在 `formal-20261109-2313/`，未用成功证据覆盖。
+- #7-④ 采用重跑结果；首次正式失败原因是 **单页分页控件 `hide-on-single-page` 隐藏、currentPage 不可观测**，属用例/技术方案可观测性缺口，**非 FLAKY、非产品缺陷**；按 TECH_DESIGN §6 ④ 的 count 口径以 Total=11/rows=11/11 个 ID 等价判定，数据口径未放宽。首次失败 `run.json`/截图保留在 `formal-20261109-2313/`，未用成功证据覆盖。
 - #26-②、#28-③ 保持失败结论，归因为用例问题 Q-01（Reset Filters 不刷新），用例级按阻塞记录；不伪造通过。
 - #6、#19、#20、#25 无 check，仅阻塞取证；#19/#20/#25 的 Unsend 空结果截图 `formal-20261109-2313/17-case19-25-unsend-empty.png`。
 
@@ -61,7 +65,7 @@
 
 | 用例 | 首次失败现象 | 正式执行现象 | 证据 |
 | --- | --- | --- | --- |
-| #7-④ | 自测 `selftest-7b`：切 20/page 后页面 No Data；API 同时发出 `page=2&rows=20`（空）与 `page=1&rows=20`（11 行），最后渲染为 page=2 空结果 | 正式执行 final 请求 `page=1&rows=20`，11 行、Total=11；单页分页隐藏 | 自测失败截图/run.json + 正式 calls 126/127；首次失败证据保留 |
+| #7（自测页面竞态） | 自测 `selftest-7b`：切 20/page 后页面 No Data；API 同时发出 `page=2&rows=20`（空）与 `page=1&rows=20`（11 行），最后渲染为 page=2 空结果 | 正式执行 final 请求 `page=1&rows=20`，11 行、Total=11；单页分页隐藏 | 自测失败截图/run.json + 正式 calls 126/127；首次失败证据保留。**注：#7-④ 正式首次失败为可观测性缺口，不按 FLAKY 计。** |
 
 ## 4. 数据清理
 

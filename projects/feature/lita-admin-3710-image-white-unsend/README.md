@@ -63,7 +63,8 @@ NOPERM_USERNAME=… NOPERM_PASSWORD=*** \
 
 - 用例四态：通过 22 / 未通过 0 / 阻塞 6（#6、#19、#20、#25、#26、#28）/ 未执行 0。
 - 执行率 78.57%；通过率 100%（22/22）。
-- 产品缺陷 0；FLAKY 风险 1（#7 自测切条数后一次 No Data；正式执行 final page=1、11 行；首次失败证据保留）。
+- 产品缺陷 0；FLAKY 风险 1（自测页面竞态：#7 切条数后一次 No Data，正式 final page=1、11 行；首次证据保留）；#7-④ 正式首次失败为单页隐藏可观测性缺口，按 TECH_DESIGN §6 ④ count 口径重跑通过，数据口径未放宽，非 FLAKY/非产品缺陷。
+- 红证：P0 #1-① 临时改错期望 → check fail → 恢复 → check success；公开日志见 EVIDENCE E-32。
 - 用例问题：Q-01（#26-②/#28-③ Reset Filters 仅清空输入、不刷新列表，与 `origin/dev` 的 `src/views/im/im-white.vue` 既有行为一致）；Q-02（#6 BD-04 无历史资料缺失行）。
 - 未验证：NU-02（无 3709/IM 客户端条件）。
 - 证据与报告：`/task/20261109/TK-0136/TEST_REPORT.md`、`EVIDENCE.md`、`COVERAGE.md`、`HANDOFF.md`。

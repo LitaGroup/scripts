@@ -1,7 +1,7 @@
 # COVERAGE — 项目 3710 用户发图片白名单 + 聊天记录 Unsend（TK-0136）
 
 > 用例来源：`/task/20261109/TK-0135/HANDOFF`；技术方案：`/task/20261109/TK-0135/TECH_DESIGN`。
-> 结果口径：正式执行 `formal-20261109-2313`（87 check）+ 权限脚本 `formal-permission-2313`（#17 3 check + NU-01 3 check）；#7-④ 使用 `formal-case7-rerun` 重跑结果（首次正式失败原因为单页分页控件隐藏，属脚本断言问题，原失败日志保留）。
+> 结果口径：正式执行 `formal-20261109-2313`（87 check）+ 权限脚本 `formal-permission-2313`（#17 3 check + NU-01 3 check）；#7-④ 使用 `formal-case7-rerun` 重跑结果——首次正式失败为单页分页控件隐藏、currentPage 不可观测（用例/技术方案可观测性缺口，非 FLAKY、非产品缺陷）；按 TECH_DESIGN §6 ④ count 口径以 Total/rows/ID 等价判定，数据口径未放宽，原失败日志保留。
 > 双向核对：正向 28 条用例共 107 个检查点（含数据行展开与阻塞项）均有归属；反向 90 个 UI check 均映射回用例检查点。用例 #6/#19/#20/#25 因前置数据缺失无 check（阻塞取证）；#26/#28 的 ②/③ 保留失败 check，用例级按「阻塞（用例问题 Q-01）」记录。
 
 ## 1. 用例 → 检查点 → check 双向矩阵
@@ -32,7 +32,7 @@
 | 7 | 用例#7-① 初始分页 Total=T/第1页/每页D条 | `image-white-unsend.test.ts` / `用例#7-① 初始分页 Total=T/第1页/每页D条` | ✅ |
 | 7 | 用例#7-② 第一页行数为 D 且 ID 集合一致 | `image-white-unsend.test.ts` / `用例#7-② 第一页行数为 D 且 ID 集合一致` | ✅ |
 | 7 | 用例#7-③ 下一页为第 2 页且行数与第一页不重复 | `image-white-unsend.test.ts` / `用例#7-③ 下一页为第 2 页且行数与第一页不重复` | ✅ |
-| 7 | 用例#7-④ 切换 S=20/page 后回第 1 页、Total=T、行数 min(S,T) | `image-white-unsend.test.ts` / `用例#7-④ 切换 S=20/page 后回第 1 页、Total=T、行数 min(S,T)` | ✅（重跑；首次正式为脚本单页隐藏断言问题） |
+| 7 | 用例#7-④ 切换 S=20/page 后回第 1 页、Total=T、行数 min(S,T) | `image-white-unsend.test.ts` / `用例#7-④ 切换 S=20/page 后回第 1 页、Total=T、行数 min(S,T)` | ✅（重跑；首次正式为单页分页隐藏的可观测性缺口，按 TECH_DESIGN §6 ④ count 口径以 Total/rows/ID 等价判定，数据口径未放宽；非 FLAKY） |
 | 8 | 用例#8-①[D1] 新增 3/重复 0/不存在 0 | `image-white-unsend.test.ts` / `用例#8-①[D1] 新增 3/重复 0/不存在 0` | ✅ |
 | 8 | 用例#8-①[D2] 新增 3/重复 0/不存在 0 | `image-white-unsend.test.ts` / `用例#8-①[D2] 新增 3/重复 0/不存在 0` | ✅ |
 | 8 | 用例#8-①[D3] 新增 3/重复 0/不存在 0 | `image-white-unsend.test.ts` / `用例#8-①[D3] 新增 3/重复 0/不存在 0` | ✅ |
@@ -130,5 +130,6 @@
 - UI 检查点：90 个（87 主脚本 + 3 权限脚本），通过 88 / 失败 2（#26-②、#28-③，均为用例问题 Q-01，用例级阻塞）；#7-④ 以重跑通过计。
 - 用例四态：通过 22 / 未通过 0 / 阻塞 6（#6、#19、#20、#25、#26、#28）/ 未执行 0。
 - 执行率 = (22+0)/28 = 78.57%；通过率 = 22/(22+0) = 100%。
-- FLAKY：用例 #7（自测首次切 20/page 后出现 No Data；正式执行 final page=1、11 行；首次失败证据保留）。
+- FLAKY 风险：自测阶段页面竞态（#7 切 20/page 后一次 No Data；正式 final page=1、11 行；首次失败证据保留）；#7-④ 正式首次失败为单页隐藏可观测性缺口，按 TECH_DESIGN §6 ④ count 口径重跑通过，数据口径未放宽，不按 FLAKY/产品缺陷计。
+- 红证：P0 #1-① 临时改错期望 → check fail → 恢复 → check success；公开日志见 EVIDENCE E-32。
 - 产品缺陷：0。用例问题：Q-01（#26-②/#28-③ Reset Filters 不刷新，既有页面行为）；Q-02（#6 BD-04 无数据）。
