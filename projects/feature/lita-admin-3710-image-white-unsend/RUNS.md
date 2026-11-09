@@ -82,3 +82,43 @@
 
 - 3709/IM 未交付真实 UNSEND 数据（`player_message.biz='UNSEND'`=0，`im_message.status=6`=0），#19/#20/#25 阻塞。
 - NU-02 无 3709/IM 客户端条件，未验证；待 3709 联调。
+
+## 6. TK-0140 缺陷 #252 回归（2026-11-10）
+
+### 6.1 部署基线
+
+| 项 | 实测 | 结论 |
+| --- | --- | --- |
+| 前端入口 JS | `static/index-02cabc45.js` | 修复后构建 |
+| 入口 HTML Last-Modified | `Mon, 09 Nov 2026 15:55:35 GMT` = 2026-11-09 23:55:35 CST | 晚于修复推送 23:52 CST |
+| 图片白名单 chunk | `static/index-30a2dc02.js` | 含 `handleSizeChange(i){this.pageSize=i,this.currentPage=1,this.fetchData()}` 与 `fetchSeq` 过期响应防护 |
+| 后端健康 | `/funbit/health` 可用（登录与接口正常） | 可用 |
+
+### 6.2 自测与红证
+
+| 时间（CST） | 范围 | 结果 | 证据 |
+| --- | --- | --- | --- |
+| 00:00 | `CASES=7`（首次） | 13 步 12 成功 / 1 失败：T=21 时 10/page 的第 2 页应为 10 行而非 11，修正 #7-③ 行数口径后重跑 | `evidence/lita-admin-3710-image-white-unsend-20261110-000059/` |
+| 00:01 | `CASES=7`（修复口径后） | 13 步全部通过；#7-④ `current=1,pageSize=20/page,total=21,rows=20,pages=[1,2],badSizeCalls=[]` | `evidence/lita-admin-3710-image-white-unsend-20261110-000153/` |
+| 00:02 | `CASES=26,27,28` | 28 步全部通过；#26-②/#28-③ 按实际行为（Reset 后补 Search）通过 | `evidence/lita-admin-3710-image-white-unsend-20261110-000227/` |
+| 00:04 | `CASES=2,5,14` | 28 步全部通过 | `evidence/lita-admin-3710-image-white-unsend-20261110-000401/` |
+| 00:05 | 红证：临时副本将 #7-④ 的 `p4.current === '1'` 改为 `'9'` | `[check] 用例#7-④ status:"fail"`；删除临时副本后恢复脚本 `status:"success"` | `redproof-7-fail.log`、`redproof-7-restored.log` |
+
+### 6.3 正式回归
+
+| 轮次 | 时间（CST） | 命令 | 覆盖 | 结果 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| TK-0140 回归 | 00:05:xx~00:08:xx | `CASES=2,5,7,14,26,27,28` | 59 步 / 22 check | **全部通过**（0 失败 / 0 skip） | `formal-regression/`、`formal-regression.log` |
+
+- #7 请求序列（run.json）：`page=1&rows=10` → `page=2&rows=10` → `page=1&rows=20`，无 `page=2&rows=20`。
+- #26/#28 默认列表：Reset 后补 Search（USER ID 为空），Total=17、历史 17 ID 不变。
+- 提测 46 在正式回归前置「进行中」，回归完成后按真实结果重新判定。
+
+### 6.4 数据清理（TK-0140）
+
+| 项 | 执行前 | 执行后 | 证据 |
+| --- | --- | --- | --- |
+| 图片白名单 `user_image_white` | 0 行 | **0 行** | 只读 SQL；各轮 `whiteCleanupByOperator` 日志 |
+| 会话限制白名单 `user_im_white` | 17 行 | **17 行**；测试用户 16302/16305 均不存在 | 只读 SQL：total=17、test_rows=0 |
+| 会话限制白名单历史集合 | 17 ID | **17 ID 不变** | #26-③/#27/#28 检查 |
+| 测试账号/角色 | 使用既有 qa-ai（507 权限） | 未新建/未删除账号；无残留 | 登录日志（不输出凭证） |

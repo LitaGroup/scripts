@@ -59,7 +59,7 @@ NOPERM_USERNAME=… NOPERM_PASSWORD=*** \
 - 浏览器上下文设置 `serviceWorkers: 'block'`，避免 SPA 的 Service Worker 绕过 WAF 转发导致 CORS 失败。
 - 验证点全部读取页面内容（DOM/可见文本/表格单元格/提示 toast），不读取接口响应、不执行 SQL；页面请求留痕与只读 SQL 仅用于证据索引/前置就绪/清理核对。
 
-## 结果摘要（2026-11-09）
+## 结果摘要（TK-0136，2026-11-09）
 
 - 用例四态：通过 22 / 未通过 0 / 阻塞 6（#6、#19、#20、#25、#26、#28）/ 未执行 0。
 - 执行率 78.57%；通过率 100%（22/22）。
@@ -68,3 +68,12 @@ NOPERM_USERNAME=… NOPERM_PASSWORD=*** \
 - 用例问题：Q-01（#26-②/#28-③ Reset Filters 仅清空输入、不刷新列表，与 `origin/dev` 的 `src/views/im/im-white.vue` 既有行为一致）；Q-02（#6 BD-04 无历史资料缺失行）。
 - 未验证：NU-02（无 3709/IM 客户端条件）。
 - 证据与报告：`/task/20261109/TK-0136/TEST_REPORT.md`、`EVIDENCE.md`、`COVERAGE.md`、`HANDOFF.md`。
+
+## TK-0140 缺陷 #252 回归（2026-11-10）
+
+- 环境构建：入口 `static/index-02cabc45.js`；HTML Last-Modified 2026-11-09 23:55:35 CST；图片白名单 chunk `static/index-30a2dc02.js` 含修复（`handleSizeChange` 先置 `currentPage=1`、`fetchSeq` 防过期响应）。
+- 回归范围：`CASES=2,5,7,14,26,27,28`（`--from/--to` 仍可用；`CASES` 仅用于回归选择，正式平台全量执行不传）。
+- #7：使用 21 个真实用户（Total=21）执行第 2 页切 20/page，分页保持可见，断言 `current=1`、`pageSize=20/page`、Total=21、rows=20，并核对请求序列仅 `page=1&rows=20`（无 `page=2&rows=20` 覆盖请求）。
+- #26-②、#28-③：按实际行为，`Reset Filters` 仅清空 USER ID 输入、不刷新列表；Reset 后补一次 `Search`（USER ID 为空）再核对默认列表 Total 与历史 ID 集合（Q-01 说明保留，未改原用例）。
+- 结果：`formal-regression` 59 步全部通过（22 check 全部通过）；图片白名单清理 0、会话限制白名单 17/测试行 0。
+- 详细记录：`/task/20261109/TK-0140/TEST_REPORT.md`、`EVIDENCE.md`、`COVERAGE.md`、`HANDOFF.md`。

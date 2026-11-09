@@ -1,11 +1,13 @@
 /**
- * 项目 3710 / TK-0136：Admin 用户发图片白名单 + 陪玩师聊天记录 Unsend + 会话限制白名单回归
+ * 项目 3710 / TK-0136 首次执行 + TK-0140 缺陷 #252 回归：Admin 用户发图片白名单 + 陪玩师聊天记录 Unsend + 会话限制白名单回归
  * 用例来源：/task/20261109/TK-0135/HANDOFF（28 条九列用例）；技术方案：/task/20261109/TK-0135/TECH_DESIGN
  * 覆盖：#1~#16、#18、#21~#24、#26~#28；#6（BD-04 无数据）、#19/#20/#25（无 UNSEND 数据）按阻塞取证不生成检查点
+ * TK-0140 回归：#7 使用 T=21 直接断言切换每页条数后 currentPage=1 且无 page=2&rows=20 覆盖请求；#26-②/#28-③ 按实际行为 Reset 后补 Search
  * 数据隔离：仅使用测试环境真实用户 ID；通过页面添加/删除图片白名单与会话限制白名单测试行；禁止 SQL 写库
  * 运行：ADMIN_USERNAME=… ADMIN_PASSWORD=*** node projects/feature/lita-admin-3710-image-white-unsend/tests/image-white-unsend.test.ts
+ * 回归选择：CASES=2,5,7,14,26,27,28（仅回归/自测；平台全量运行不要传）
  */
-import { AdminBase, WHITE_HASH, SESSION_HASH, arg, setEquals, type Candidate, type WhiteRow, type SessionRow, type PaginationInfo, type ToastResult } from './lib/admin-base.ts';
+import { AdminBase, WHITE_HASH, SESSION_HASH, arg, type Candidate, type WhiteRow, type SessionRow, type PaginationInfo, type ToastResult } from './lib/admin-base.ts';
 
 const CASE_TOTAL = 87;
 
@@ -109,9 +111,13 @@ class ImageWhiteUnsendTest extends AdminBase {
       ];
       const from = Number(arg('from', '1'));
       const to = Number(arg('to', '28'));
-      this.log(`用例执行范围: ${from}~${to}（默认 1~28，--from/--to 仅自测用）`);
+      const only = (process.env.CASES ?? '')
+        .split(',')
+        .map((s) => Number(s.trim()))
+        .filter((n) => Number.isFinite(n) && n > 0);
+      this.log(`用例执行范围: ${only.length > 0 ? only.join(',') : `${from}~${to}`}（CASES/--from/--to 仅自测与回归选择用）`);
       for (const item of cases) {
-        if (item.no >= from && item.no <= to) await item.run();
+        if (only.length > 0 ? only.includes(item.no) : item.no >= from && item.no <= to) await item.run();
       }
     } finally {
       await this.act('收尾：清理图片白名单本轮测试行', async () => {
@@ -457,8 +463,10 @@ class ImageWhiteUnsendTest extends AdminBase {
   // ---------- #7 分页 ----------
 
   private async case7(): Promise<void> {
-    const list = this.candidates.slice(10, 21);
-    await this.act('用例#7 前置：添加 11 个真实用户使 T>D', async () => {
+    // 本缺陷回归使用 T=21：既满足 T>D(10)，又保证切到 20/page 后仍有 2 页，
+    // 使分页控件保持可见，可直接断言切换后 currentPage 回到 1（不依赖单页隐藏的等价推断）。
+    const list = this.candidates.slice(41, 62);
+    await this.act('用例#7 前置：添加 21 个真实用户使 T=21（T>20，切 20/page 后分页仍可见）', async () => {
       await this.gotoWhite();
       await this.whiteAdd(list.map((c) => String(c.id)).join('\n'));
     });
@@ -471,6 +479,7 @@ class ImageWhiteUnsendTest extends AdminBase {
     });
     const rows2 = await this.whiteRows();
     const p2 = await this.whiteTotal();
+    const callStart = this.calls.length;
     await this.act('用例#7 步骤：每页条数选择 20/page', async () => {
       await this.waitListResponse('/api/userImageWhite/list', async () => {
         await this.selectPageSize('20/page');
@@ -478,6 +487,11 @@ class ImageWhiteUnsendTest extends AdminBase {
     });
     const p4 = await this.whiteTotal();
     const rows4 = await this.whiteRows();
+    const sizeCalls = this.calls
+      .slice(callStart)
+      .filter((c) => c.url.includes('/api/userImageWhite/list'))
+      .map((c) => c.url);
+    const badSizeCalls = sizeCalls.filter((u) => /[?&]page=2(&|$)/.test(u) && /[?&]rows=20(&|$)/.test(u));
     await this.shot('case7-pagination');
 
     await this.check('用例#7-① 初始分页 Total=T/第1页/每页D条', async () => ({
@@ -489,7 +503,7 @@ class ImageWhiteUnsendTest extends AdminBase {
       const ids1 = this.ids(rows1);
       const expectedIds = list.map((c) => String(c.id));
       return {
-        expect: `10 行且属于 BD-05 的 11 个 ID`,
+        expect: `10 行且属于 BD-05 的 ${list.length} 个 ID`,
         real: `${rows1.length} 行 / [${ids1}]`,
         pass: rows1.length === 10 && new Set(ids1).size === 10 && ids1.every((id) => expectedIds.includes(id)),
       };
@@ -499,25 +513,36 @@ class ImageWhiteUnsendTest extends AdminBase {
       const ids2 = this.ids(rows2);
       const overlap = ids1.filter((id) => ids2.includes(id));
       const expectedIds = list.map((c) => String(c.id));
-      const remaining = expectedIds.filter((id) => !ids1.includes(id));
+      const expectedPage2Rows = Math.min(10, list.length - 10);
       return {
-        expect: `current=2,rows=${list.length - 10},overlap=0`,
+        expect: `current=2,rows=${expectedPage2Rows},overlap=0,ids2⊂BD-05`,
         real: `current=${p2.current},rows=${rows2.length},overlap=[${overlap}],ids2=[${ids2}]`,
-        pass: p2.current === '2' && rows2.length === list.length - 10 && overlap.length === 0 && setEquals(ids2, remaining),
+        pass:
+          p2.current === '2' &&
+          rows2.length === expectedPage2Rows &&
+          overlap.length === 0 &&
+          ids2.every((id) => expectedIds.includes(id)) &&
+          new Set(ids2).size === rows2.length,
       };
     });
     await this.check('用例#7-④ 切换 S=20/page 后回第 1 页、Total=T、行数 min(S,T)', async () => {
-      // total=11、20/page 只有 1 页，el-pagination 按 hide-on-single-page 隐藏；
-      // 此时“当前页”不可见，但仅有一个分页即第 1 页，以 Total/行数/ID 集合等价判定。
+      // T=21，切到 20/page 后仍有 2 页，分页控件保持可见：
+      // 直接断言 currentPage=1（不是单页隐藏时的等价推断），并核对请求序列不含 page=2&rows=20 的过期覆盖请求。
       const paginationVisible = await this.p.locator('.el-pagination').first().isVisible().catch(() => false);
-      const currentOk = p4.current === '1' || (!paginationVisible && p4.total === list.length);
       return {
-        expect: `current=1（单页隐藏时以 Total/T 等价）,total=${list.length},rows=${Math.min(20, list.length)}`,
-        real: `current=${p4.current || '(hidden)'},total=${p4.total},rows=${rows4.length},pagesVisible=${paginationVisible}`,
-        pass: currentOk && p4.total === list.length && rows4.length === Math.min(20, list.length) && new Set(this.ids(rows4)).size === list.length,
+        expect: `current=1,pageSize=20/page,total=${list.length},rows=${Math.min(20, list.length)},pages=[1,2],page2rows20=0`,
+        real: `current=${p4.current},pageSize=${p4.pageSize},total=${p4.total},rows=${rows4.length},pages=[${p4.pages.join(',')}],pagesVisible=${paginationVisible},sizeCalls=${sizeCalls.length},badSizeCalls=[${badSizeCalls.join('|')}]`,
+        pass:
+          paginationVisible &&
+          p4.current === '1' &&
+          p4.pageSize === '20/page' &&
+          p4.total === list.length &&
+          rows4.length === Math.min(20, list.length) &&
+          p4.pages.includes('2') &&
+          badSizeCalls.length === 0,
       };
     });
-    await this.act('用例#7 清理：删除本次 11 个白名单行', async () => {
+    await this.act('用例#7 清理：删除本次 21 个白名单行', async () => {
       await this.cleanupWhite();
     });
   }
@@ -1096,6 +1121,9 @@ class ImageWhiteUnsendTest extends AdminBase {
     await this.act('用例#26 步骤：点击 Reset Filters', async () => {
       await this.sessionReset();
     });
+    await this.act('用例#26 步骤（按实际行为）：Reset 仅清空 USER ID，补一次 Search（USER ID 为空）后核对默认列表', async () => {
+      await this.sessionSearch('');
+    });
     const resetRows = await this.sessionRows();
     const resetTotal = await this.sessionTotal();
     const resetNoData = await this.noDataText();
@@ -1111,7 +1139,7 @@ class ImageWhiteUnsendTest extends AdminBase {
       expect: `total=${historyBefore.total},默认列表*,不含 ${isolate.id}`,
       real: `resetRows=${resetRows.length},resetTotal=${resetTotal.total},empty='${resetNoData}',含I=${resetRows.some((r) => r.userId === String(isolate.id))}`,
       pass: resetTotal.total === historyBefore.total && resetRows.length > 0 && !resetRows.some((r) => r.userId === String(isolate.id)),
-      message: 'Reset Filters 仅清空 USER ID 输入，不触发列表刷新（与 origin/dev 源文件 im-white.vue 一致），按用例字面步骤无法观察默认列表；已作为用例问题反馈',
+      message: '按实际行为判定：Reset Filters 仅清空 USER ID 输入、不触发列表刷新，Reset 后补一次 Search（USER ID 为空）再核对默认列表；功能数据正确',
     }));
     await this.check('用例#26-③ 历史行集合保持不变且页面无错误提示', async () => {
       const same = historyBefore.total === historyAfter.total && historyAfter.ids.length === historyBefore.ids.length && historyAfter.ids.every((id) => historyBefore.ids.includes(id));
@@ -1200,6 +1228,9 @@ class ImageWhiteUnsendTest extends AdminBase {
     await this.act('用例#28 步骤：点击 Reset Filters', async () => {
       await this.sessionReset();
     });
+    await this.act('用例#28 步骤（按实际行为）：Reset 仅清空 USER ID，补一次 Search（USER ID 为空）后核对默认列表', async () => {
+      await this.sessionSearch('');
+    });
     const rowsAfterReset = await this.sessionRows();
     const totalAfterReset = await this.sessionTotal();
     const noDataAfterReset = await this.noDataText();
@@ -1222,7 +1253,7 @@ class ImageWhiteUnsendTest extends AdminBase {
         expect: `resetTotal=${historyBefore.total},默认列表;历史集合不变`,
         real: `resetRows=${rowsAfterReset.length},resetTotal=${totalAfterReset.total},empty='${noDataAfterReset}';reloadTotal=${historyAfter.total},ids=${historyAfter.ids.length},历史不变=${same}`,
         pass: totalAfterReset.total === historyBefore.total && rowsAfterReset.length > 0 && same,
-        message: 'Reset Filters 仅清空 USER ID 输入，不触发列表刷新（与 origin/dev 源文件 im-white.vue 一致），按用例字面步骤无法恢复默认列表；重新加载后历史集合与 Total 正常，已作为用例问题反馈',
+        message: '按实际行为判定：Reset Filters 仅清空 USER ID 输入、不触发列表刷新，Reset 后补一次 Search（USER ID 为空）再核对默认列表；S 已删除，历史集合不变',
       };
     });
     await this.act('用例#28 清理：确认 S 已不存在', async () => {
