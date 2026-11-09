@@ -233,6 +233,10 @@
 | 2026-11-09 15:26 | `tk0105-withdraw-batch-approve.test.ts --approve=1` | 7 步 / 4 check | 通过 4，失败 0 | `evidence/tk0105-withdraw-batch-approve-20261109-152654/` |
 | 2026-11-09 15:27 | 红证抽查（#18-① 期望临时改为 `#/review/withdrawal-REDPROOF`） | check 按预期失败，已恢复 | 红证有效 | `evidence/tk0105-withdraw-time-20261109-152742/` + `run-redproof.log` |
 
-- 平台登记：脚本已推 `LitaGroup/scripts` main 并完成 `settings/scripts/pull` + `scripts/import`；testId 见任务 HANDOFF 的代码交付信息。
+- 平台登记：脚本已推 `LitaGroup/scripts` main（`c4b6cd7`）并完成 `settings/scripts/pull` + `scripts/import`；新增用例 testId：
+  - `tk0105-anchor-certification` → testId 97（`POST /api/tests/97/run.md`）
+  - `tk0105-broad-config` → testId 98（`POST /api/tests/98/run.md`）
+  - `tk0105-withdraw-batch-approve` → testId 99（`POST /api/tests/99/run.md`，默认安全演练不提交审批）
+  - `tk0105-withdraw-time` → testId 100（`POST /api/tests/100/run.md`）
 - 数据清理：广播 5 个测试房间无残留；主播认证 7 个测试用户无残留，列表 Total 恢复 19；提现仅处理授权 2 条现有记录（申请 ID 956、948，状态已流转「已通过&待打款」），未改库回滚。
 - 详细报告：`/task/20261109/TK-0105/TEST_REPORT.md`；证据索引：`/task/20261109/TK-0105/EVIDENCE.md`。
