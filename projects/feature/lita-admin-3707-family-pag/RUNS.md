@@ -80,3 +80,45 @@
 - 红证：`[done] {"status":"fail","total":31,"success":30,"fail":1,...}`（目标 check `用例#1-①` 失败）。
 - 正式-1：`[done] {"status":"fail","total":116,"success":109,"fail":7,...}`。
 - 正式-3：`[done] {"status":"fail","total":64,"success":60,"fail":4,...}`。
+
+## 7. TK-0133 缺陷回归轮（2026-11-09）
+
+### 部署基线
+
+| 项 | 实测 | 结论 |
+| --- | --- | --- |
+| 前端入口 JS | `static/index-f3fad263.js`（2026-11-09 20:45 CST 采集） | 与任务提供修复构建一致 |
+| 入口 HTML Last-Modified | `Mon, 09 Nov 2026 12:33:30 GMT` = 2026-11-09 20:33:30 CST | 早于本轮执行时间，执行期间无再次部署 |
+| 家族群聊背景 chunk | `static/index-975df218.js` | 含 `isVideoUrl`、`.mp4/.mov/.quicktime/.webm`、video 预览；列表「背景缩略图」取 picMin、「背景图」取 pic |
+| 缺陷修复提交 | 需求分支 `bot-132-family-pag-defects@245de0ca`；dev `b158b65a` | 任务输入提供的修复版本 |
+
+### 平台运行
+
+| 时间（CST） | 运行 | 结果 |
+| --- | --- | --- |
+| 2026-11-09 20:46:53 | `POST /api/tests/107/run.md`（运行 #342） | 85ms 返回 `ERR_MODULE_NOT_FOUND`（Node v24.18.0，无 stdout）；既有平台运行器环境问题，改用工位本地 Node v24.22.1 直跑同脚本 |
+
+### 本地回归执行
+
+| 时间（CST） | 命令 | 覆盖 | 结果 | 证据目录（本地） |
+| --- | --- | --- | --- | --- |
+| 2026-11-09 20:47:25～20:49:35 | `family-pag-regression.test.ts` | #3～#12 | **99 步：99 成功 / 0 失败**；check 45/45 通过 | `evidence-tk133/regression-20261109-204725/` |
+
+### 红证抽查（视频断言）
+
+| 时间（CST） | 目标 | 操作 | 结果 |
+| --- | --- | --- | --- |
+| 2026-11-09 20:50 | #9 F5/F6 视频断言 | 临时副本把 `videoWidth>0` 改为 `videoWidth>100000`，`--from=9` | 49 步：45 成功 / 4 失败（F5/F6 的 ①③），其余通过；证明视频断言非永真，临时脚本跑后删除 |
+
+### 关键观测（本轮）
+
+- #6 E1：背景图列 PAG canvas 帧差 12.83%，缩略图列 PNG img naturalWidth=320；E2 反之（缩略图 PAG 帧差 7.15%，背景图 PNG）；E3 双 PAG 帧差 12.58%/10.87%。两列字段不再颠倒（#250 修复确认）。
+- #9 F5：弹窗/列表 video readyState=4、videoWidth=320、error 无，src 以 `.mp4` 结尾；F6 同，src 以 `.quicktime` 结尾；均无 img/canvas/错误占位（#251 修复确认）。
+- #3/#4/#5：PAG 帧差 10.71%/5.32%、PNG naturalWidth=320 且 canvas=0。
+- #7/#8/#10～#12：全部按用例预期通过；默认列表 Total 23 不变，未新增记录。
+- 结束状态：专用记录 BOT_TEST_PAG_3707（背景ID 23）两个媒体字段已恢复为 PAG；精确搜索 1 条。
+
+### 数据状态
+
+- 沿用专用记录 **BOT_TEST_PAG_3707（背景ID 23）**，未新增第二条、未修改其他记录；未执行 SQL。
+- 页面无删除入口，按需求方口径保留并标注「测试数据未清理」。

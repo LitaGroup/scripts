@@ -514,13 +514,15 @@ export abstract class AdminBase extends CheckBaseClass {
     await this.dialog().locator('button').filter({ hasText: /^\s*Confirm\s*$/ }).first().click();
   }
 
-  /** 当前上传区域预览的资源地址（canvas 取组件 src，静态取 img src） */
+  /** 当前上传区域预览的资源地址（canvas 取组件 src，静态取 img src，视频取 video src） */
   protected async currentPreviewSrc(label: string): Promise<string> {
     return this.formItem(label).evaluate((item) => {
       const canvas = item.querySelector('canvas.pag-canvas') as unknown as { __vue__?: { src?: string } } | null;
       if (canvas?.__vue__?.src) return canvas.__vue__.src;
       const img = item.querySelector('img');
-      return img?.getAttribute('src') ?? '';
+      if (img?.getAttribute('src')) return img.getAttribute('src') ?? '';
+      const video = item.querySelector('video');
+      return video?.getAttribute('src') ?? '';
     });
   }
 
@@ -549,7 +551,11 @@ export abstract class AdminBase extends CheckBaseClass {
         );
         if (!item) return false;
         const canvas = item.querySelector('canvas.pag-canvas') as unknown as { __vue__?: { src?: string } } | null;
-        const src = canvas?.__vue__?.src ?? item.querySelector('img')?.getAttribute('src') ?? '';
+        const src =
+          canvas?.__vue__?.src ??
+          item.querySelector('img')?.getAttribute('src') ??
+          item.querySelector('video')?.getAttribute('src') ??
+          '';
         return src !== '' && src !== previous;
       },
       { target: label, previous: prev },

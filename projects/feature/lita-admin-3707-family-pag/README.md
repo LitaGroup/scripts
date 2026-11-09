@@ -49,7 +49,7 @@ ADMIN_USERNAME=qa-ai ADMIN_PASSWORD='***' \
 
 ## 环境与 WAF 说明
 
-- Admin UI：`https://admin.test.lita.game`（2026-11-09 入口 `static/index-747ac2bd.js`，HTML Last-Modified 2026-11-09 11:04:36 GMT）。
+- Admin UI：`https://admin.test.lita.game`（2026-11-09 缺陷回归轮入口 `static/index-f3fad263.js`，HTML Last-Modified 2026-11-09 12:33:30 GMT；首次执行轮入口为 `static/index-747ac2bd.js`）。
 - 执行机直连 `https://m-api.test.lita.game` 返回 WAF 403；基类仅在 Playwright 浏览器层把该主机请求**原样转发**到同源测试入口 `https://funbit-mgr.test.cinta.team`，不改 URL 业务参数与请求/响应体（规范 R1 例外，已在代码注释与本文件声明）。
 - 验证点全部读取页面内容（DOM/可见文本/页面资源地址/渲染帧），不读取接口响应、不执行 SQL；网络留痕只写入 `run.json` 作为证据索引。
 
@@ -76,4 +76,18 @@ ADMIN_USERNAME=qa-ai ADMIN_PASSWORD='***' \
 | #10～#12 | 通过 | 三个必填项空值均保持弹窗打开、列表 Total 不变 |
 
 - 四态：通过 10 / 未通过 2 / 阻塞 0 / 未执行 0；执行率 100%，通过率 83.3%。
-- 缺陷：#250（中，前端，列表两列媒体颠倒）、#251（中，前端，mp4/mov 预览与列表破图），均待研发修复/回归。
+- 缺陷：#250（中，前端，列表两列媒体颠倒）、#251（中，前端，mp4/mov 预览与列表破图），修复后进入 TK-0133 回归。
+
+## 轮次结果（TK-0133 缺陷回归，2026-11-09）
+
+| 用例 | 结果 | 说明 |
+| --- | --- | --- |
+| #3/#4/#5 | 通过 | PAG 与 PNG 列表展示正常，修复未引入回归 |
+| #6 | 通过 | E1/E2/E3 列表两列与 Edit 回显均按预期，两列不再颠倒（#250 修复确认） |
+| #7/#8 | 通过 | en/zh 回显、PAG 预览地址与 Cancel 无副作用 |
+| #9 | 通过 | F1～F4 静态图正常；F5 mp4 / F6 mov 弹窗与列表均以 video 展示（readyState=4、videoWidth=320、error 无），无破图（#251 修复确认） |
+| #10～#12 | 通过 | 必填校验保持弹窗打开且 Total 23 不变 |
+
+- 部署基线：入口 `static/index-f3fad263.js`，家族群聊背景 chunk `static/index-975df218.js`。
+- 回归结果：45/45 check 通过；平台 testId 107 的 `run.md` 仍报 `ERR_MODULE_NOT_FOUND`（既有平台运行器问题），以工位本地 Node v24.22.1 直跑同脚本为准。
+- 视频断言适配：#9 F5/F6 按 `<video>` 的 readyState/videoWidth/error 判定可显示，F1～F4 仍按静态 img 判定；红证抽查（videoWidth 阈值改错）4 个 check 失败，恢复后 45/45 通过。

@@ -1,5 +1,5 @@
 /**
- * 项目3707 / TK-0129：Admin 特效管理-家族群聊背景 PAG 上传与展示
+ * 项目3707 / TK-0129 首次执行 + TK-0133 缺陷 #250/#251 修复回归：Admin 特效管理-家族群聊背景 PAG 上传与展示
  * 用例来源：TK-0127 HANDOFF 九列用例 #1～#12（/task/20261109/TK-0127/HANDOFF）；
  * 技术方案：/task/20261109/TK-0127/TECH_DESIGN（场景骨架/参数矩阵/造数/元素定位/引用式断言映射）。
  * 覆盖：#1 页面入口；#2 新增 PAG（缩略图 D1 PNG → D2 PAG）；#3 列表缩略图 PAG；#4 列表背景图 PAG；
@@ -10,6 +10,9 @@
  * 运行：ADMIN_USERNAME=… ADMIN_PASSWORD=*** node projects/feature/lita-admin-3707-family-pag/tests/family-pag-upload-display.test.ts
  *      自测（不新增记录）：追加 --selftest=1
  *      断点续跑（不重复新增）：追加 --from=3
+ * 回归适配（TK-0133）：修复后 mp4/mov 在弹窗与列表以 <video> 展示；#9 F5/F6 按
+ *      video 可见 + readyState>=2 + videoWidth>0 + error 为空 + 无破图占位判定，
+ *      F1～F4 仍按静态 img 判定，检查点与用例预期不变。
  */
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -48,7 +51,7 @@ const CASE9_ROWS = [
   { key: 'F6', ext: 'mov', file: MOV },
 ];
 
-type MediaKind = 'pag' | 'static';
+type MediaKind = 'pag' | 'static' | 'video';
 
 interface PagObservation {
   canvasVisible: boolean;
@@ -68,6 +71,8 @@ interface PreviewObservation {
   frame: FrameDiff;
   naturalWidth: number;
   videoReadyState: number | null;
+  videoWidth: number;
+  videoError: number | null;
   src: string;
   desc: string;
 }
@@ -250,6 +255,8 @@ class FamilyPagTest extends AdminBase {
     let src = '';
     let naturalWidth = 0;
     let videoReadyState: number | null = null;
+    let videoWidth = 0;
+    let videoError: number | null = null;
     if (canvasVisible) {
       src = await this.mediaSrc(canvas);
       return {
@@ -258,6 +265,8 @@ class FamilyPagTest extends AdminBase {
         frame,
         naturalWidth,
         videoReadyState,
+        videoWidth,
+        videoError,
         src,
         desc: `PAG canvas，帧差=${frame.ratio}%（最大通道差 ${frame.maxDelta}），src=${this.cleanUrl(src)}，PAG加载失败=${this.pagFailuresSince(mark).length} 条`,
       };
@@ -271,20 +280,55 @@ class FamilyPagTest extends AdminBase {
         frame,
         naturalWidth,
         videoReadyState,
+        videoWidth,
+        videoError,
         src,
         desc: `img，naturalWidth=${naturalWidth}，src=${this.cleanUrl(src)}`,
       };
     }
     if (videoVisible) {
-      videoReadyState = await video.evaluate((el) => (el as HTMLVideoElement).readyState).catch(() => 0);
+      // 视频预览：等待元数据/首帧就绪（有界），再读取 readyState/videoWidth/error 判定是否真实可显示
+      await video
+        .evaluate(
+          (el) =>
+            new Promise<void>((resolve) => {
+              const v = el as HTMLVideoElement;
+              if (v.readyState >= 2 || v.error) return resolve();
+              const done = () => resolve();
+              v.addEventListener('loadeddata', done, { once: true });
+              v.addEventListener('error', done, { once: true });
+              setTimeout(done, 15000);
+            }),
+        )
+        .catch(() => undefined);
+      const state = await video
+        .evaluate((el) => {
+          const v = el as HTMLVideoElement;
+          return { readyState: v.readyState, videoWidth: v.videoWidth, error: v.error ? v.error.code : null };
+        })
+        .catch(() => ({ readyState: 0, videoWidth: 0, error: -1 }));
+      videoReadyState = state.readyState;
+      videoWidth = state.videoWidth;
+      videoError = state.error;
       src = (await video.getAttribute('src')) ?? '';
-      return { kind: 'video', canvasVisible, frame, naturalWidth, videoReadyState, src, desc: `video，readyState=${videoReadyState}，src=${this.cleanUrl(src)}` };
+      return {
+        kind: 'video',
+        canvasVisible,
+        frame,
+        naturalWidth,
+        videoReadyState,
+        videoWidth,
+        videoError,
+        src,
+        desc: `video，readyState=${videoReadyState}，videoWidth=${videoWidth}，error=${videoError === null ? '无' : videoError}，src=${this.cleanUrl(src)}`,
+      };
     }
-    return { kind: 'none', canvasVisible, frame, naturalWidth, videoReadyState, src, desc: '上传区域没有任何预览元素' };
+    return { kind: 'none', canvasVisible, frame, naturalWidth, videoReadyState, videoWidth, videoError, src, desc: '上传区域没有任何预览元素' };
   }
 
   private previewOk(obs: PreviewObservation, kind: MediaKind): boolean {
     if (kind === 'pag') return obs.kind === 'canvas' && obs.frame.ratio >= 0.3 && obs.frame.maxDelta >= 20;
+    if (kind === 'video') return obs.kind === 'video' && (obs.videoReadyState ?? 0) >= 2 && obs.videoWidth > 0 && obs.videoError === null;
     return obs.kind === 'img' && obs.naturalWidth > 0;
   }
 
@@ -921,14 +965,18 @@ class FamilyPagTest extends AdminBase {
         await this.uploadFile('背景缩略图', row.file);
       });
 
+      const expectedKind: MediaKind = row.ext === 'mp4' || row.ext === 'mov' ? 'video' : 'static';
       await this.check(`用例#9-①[数据行${row.key}] Edit弹窗两个预览区域显示${row.ext.toUpperCase()}资源且无破图`, async () => {
         const main = await this.observePreview('背景图', mark);
         const thumb = await this.observePreview('背景缩略图', mark);
         await this.shotCurrent(`case9-${row.key}-preview`);
         return {
-          expect: `两个预览区域均渲染 ${row.ext} 资源（静态 img 已解码）`,
+          expect:
+            expectedKind === 'video'
+              ? `两个预览区域均渲染 ${row.ext} 视频（video readyState>=2、videoWidth>0、error 为空）`
+              : `两个预览区域均渲染 ${row.ext} 资源（静态 img 已解码）`,
           real: `背景图=${main.desc}；背景缩略图=${thumb.desc}`,
-          pass: this.previewOk(main, 'static') && this.previewOk(thumb, 'static'),
+          pass: this.previewOk(main, expectedKind) && this.previewOk(thumb, expectedKind),
           message: `数据行 ${row.key} 预览不符：背景图=${main.desc}；缩略图=${thumb.desc}`,
         };
       });
@@ -959,6 +1007,7 @@ class FamilyPagTest extends AdminBase {
         ];
         const results: string[] = [];
         let ok = true;
+        const isVideoRow = row.ext === 'mp4' || row.ext === 'mov';
         for (const item of cols) {
           const cell = this.cell(0, item.col);
           const img = cell.locator('img').first();
@@ -967,9 +1016,47 @@ class FamilyPagTest extends AdminBase {
           const canvas = await cell.locator('canvas').count();
           const err = await cell.locator('.el-image__error').count();
           const src = hasImg ? (await img.getAttribute('src')) ?? '' : '';
-          const colOk = hasImg && nw > 0 && canvas === 0 && err === 0;
+          const video = cell.locator('video').first();
+          const hasVideo = (await cell.locator('video').count()) > 0;
+          const videoVisible = hasVideo ? await video.isVisible().catch(() => false) : false;
+          let vr = 0;
+          let vw = 0;
+          let verr: number | null = null;
+          let videoSrc = '';
+          if (videoVisible) {
+            await video
+              .evaluate(
+                (el) =>
+                  new Promise<void>((resolve) => {
+                    const v = el as HTMLVideoElement;
+                    if (v.readyState >= 2 || v.error) return resolve();
+                    const done = () => resolve();
+                    v.addEventListener('loadeddata', done, { once: true });
+                    v.addEventListener('error', done, { once: true });
+                    setTimeout(done, 15000);
+                  }),
+              )
+              .catch(() => undefined);
+            const state = await video
+              .evaluate((el) => {
+                const v = el as HTMLVideoElement;
+                return { readyState: v.readyState, videoWidth: v.videoWidth, error: v.error ? v.error.code : null };
+              })
+              .catch(() => ({ readyState: 0, videoWidth: 0, error: -1 }));
+            vr = state.readyState;
+            vw = state.videoWidth;
+            verr = state.error;
+            videoSrc = (await video.getAttribute('src')) ?? '';
+          }
+          const colOk = isVideoRow
+            ? videoVisible && vr >= 2 && vw > 0 && verr === null && !hasImg && canvas === 0 && err === 0
+            : hasImg && nw > 0 && canvas === 0 && err === 0 && !videoVisible;
           ok = ok && colOk;
-          results.push(`${item.name}列：img=${hasImg}，naturalWidth=${nw}，canvas=${canvas}，错误占位=${err}，src=${this.cleanUrl(src)}`);
+          results.push(
+            isVideoRow
+              ? `${item.name}列：video=${videoVisible}，readyState=${vr}，videoWidth=${vw}，error=${verr === null ? '无' : verr}，img=${hasImg}，canvas=${canvas}，错误占位=${err}，src=${this.cleanUrl(videoSrc)}`
+              : `${item.name}列：img=${hasImg}，naturalWidth=${nw}，video=${videoVisible}，canvas=${canvas}，错误占位=${err}，src=${this.cleanUrl(src)}`,
+          );
         }
         await this.shotCurrent(`case9-${row.key}-list`);
         return {
