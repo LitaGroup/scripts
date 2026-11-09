@@ -1,4 +1,4 @@
-# 运行记录 — 项目 3707 家族群聊背景 PAG（TK-0129）
+# 运行记录 — 项目 3707 家族群聊背景 PAG（TK-0129 首次 + TK-0133 回归）
 
 执行机：Linux，Node v24.22.1，Playwright 1.64.1（Chromium headless），时区 Asia/Shanghai。
 环境：UI `https://admin.test.lita.game`；接口同源入口 `https://funbit-mgr.test.cinta.team`；账号口令仅运行时注入，本记录不含口令或 token。
