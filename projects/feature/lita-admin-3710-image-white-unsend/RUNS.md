@@ -133,3 +133,12 @@
 - 环境基线：Admin 入口 `static/index-02cabc45.js`；HTML Last-Modified 2026-11-09 23:55:35 CST；聊天记录 chunk `static/player-conver-a574985b.js`；后端 `/funbit/health` = `i am ok`。
 - 数据通道：工位资源权限「无权限」；`admin-ai/v1/query/execute` 只读（INSERT 返回 S1009）；未执行任何写操作，未造数/未清理。
 - 结论：#6/#19/#20/#25 阻塞（数据构造通道不可用，需求方选择 C）；#18/#21 回归通过；无新增缺陷；提测 46 维持「已通过」。
+
+### 4.1 红证抽查（P0 #18-①）
+
+| 步骤 | 操作 | 结果 | 公开日志 |
+| --- | --- | --- | --- |
+| fail | 临时副本 `redproof-18.test.ts` 把 #18-① 期望改为 `REDPROOF`，运行 `CASES=18` | `[check] 用例#18-① ... expect:"REDPROOF" real:"" status:"fail"`；10 步 9 成功 / 1 失败 | `http://work.cinta.team/files/20261109/1cd5b8cb-5d07-48f0-aeb4-b7b123f995a7.log` |
+| restored | 删除临时副本，原脚本运行 `CASES=18` | 3/3 check 通过；10 步 10 成功 | `http://work.cinta.team/files/20261109/9891884d-be15-4f73-9fcb-d5d1064385b2.log` |
+
+- 临时副本已删除，未提交；仓库 `tests/` 仅保留 `image-white-unsend.test.ts` 与 `image-white-permission.test.ts`。
