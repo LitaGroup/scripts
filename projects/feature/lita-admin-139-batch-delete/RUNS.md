@@ -212,3 +212,27 @@
 - 未执行 #38 全量回归：旧构建不能代表 #38 结果；#38 的“批量删除成功刷新当前页/恢复原交互/失败单次提示/旧请求防覆盖”均未判定。
 - 证据：`evidence/release38-deploy-blocked-20261104-193948/`（入口 HTML/headers/hash、actuator、api-probe.json、ui-probe 截图与 run.json）。
 - 详细报告：`/task/20261104/TK-0058/TEST_REPORT.md`（阅读地址 `http://work.cinta.team/api/docs/detail/task/20261104/TK-0058/TEST_REPORT.md`）。
+
+
+# TK-0105（2026-11-09）24 条 UI 用例执行
+
+## 执行结论
+
+- 用例 24 条：通过 23 / 未通过 0 / 阻塞 1（#24）/ 未执行 0；执行率 95.83%，通过率 100%。
+- 检查点 110 个：通过 102 / 失败 8（全部为用例#24 导出受限导致的无文件）；FLAKY：无；新增缺陷：无。
+- 环境：`https://admin.test.lita.game`；正式执行时入口 `static/index-92003405.js`，HTML Last-Modified 2026-11-09 15:12:57 CST。执行机直连 `m-api.test.lita.game` 403，浏览器层同源转发到 `funbit-mgr.test.cinta.team`。
+- 阻塞说明：用例#24 按步骤仅以「陪玩师No」筛选后导出，接口返回 `{"status":"1","msg":"不能无限制导出"}`；追加状态筛选的补充观测已验证新增列位置与值符合口径，非产品缺陷。
+
+## 正式运行记录
+
+| 时间（CST） | 脚本 | 步骤/检查点 | 结果 | 证据目录 |
+|:---|:---|:---|:---|:---|
+| 2026-11-09 15:31 | `tk0105-broad-config.test.ts` | 62 步 / 22 check | 通过 22，失败 0 | `evidence/tk0105-broad-config-20261109-153100/` |
+| 2026-11-09 15:32 | `tk0105-anchor-certification.test.ts` | 55 步 / 27 check | 通过 27，失败 0 | `evidence/tk0105-anchor-certification-20261109-153238/` |
+| 2026-11-09 15:34 | `tk0105-withdraw-time.test.ts` | 81 步 / 57 check | 通过 49，失败 8（#24 阻塞） | `evidence/tk0105-withdraw-time-20261109-153425/` |
+| 2026-11-09 15:26 | `tk0105-withdraw-batch-approve.test.ts --approve=1` | 7 步 / 4 check | 通过 4，失败 0 | `evidence/tk0105-withdraw-batch-approve-20261109-152654/` |
+| 2026-11-09 15:27 | 红证抽查（#18-① 期望临时改为 `#/review/withdrawal-REDPROOF`） | check 按预期失败，已恢复 | 红证有效 | `evidence/tk0105-withdraw-time-20261109-152742/` + `run-redproof.log` |
+
+- 平台登记：脚本已推 `LitaGroup/scripts` main 并完成 `settings/scripts/pull` + `scripts/import`；testId 见任务 HANDOFF 的代码交付信息。
+- 数据清理：广播 5 个测试房间无残留；主播认证 7 个测试用户无残留，列表 Total 恢复 19；提现仅处理授权 2 条现有记录（申请 ID 956、948，状态已流转「已通过&待打款」），未改库回滚。
+- 详细报告：`/task/20261109/TK-0105/TEST_REPORT.md`；证据索引：`/task/20261109/TK-0105/EVIDENCE.md`。

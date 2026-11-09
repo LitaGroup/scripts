@@ -8,7 +8,7 @@
 2. 语音房管理-主播认证标识配置：增加批量删除；
 3. 审核-提现-查询：增加【成为陪玩师时间】列（导出同样新增）。
 
-本目录为项目139 的自动化测试脚本。当前主交付为 **TK-0092（2026-11-06）47 条 UI 用例 + 8 项非 UI 核验**；另含 **TK-0096 缺陷 #233 修复回归**脚本。历史提测 #35/#36/#38 脚本保留在目录中仅供追溯，不属于上述覆盖范围。
+本目录为项目139 的自动化测试脚本。最新执行轮次为 **TK-0105（2026-11-09）24 条 UI 用例**（广播召人 #1～#8、主播认证 #9～#17、提现 #18～#24）；此前主交付为 **TK-0092（2026-11-06）47 条 UI 用例 + 8 项非 UI 核验**，另含 **TK-0096 缺陷 #233 修复回归**脚本。历史提测 #35/#36/#38 脚本保留在目录中仅供追溯。TK-0105 的覆盖与运行记录见 `COVERAGE-TK0105.md`、`RUNS.md` 与任务文档 `/task/20261109/TK-0105/`。
 
 ## TK-0092 交付脚本（47 条 UI 用例 + 8 项非 UI 核验）
 
@@ -19,6 +19,32 @@
 | `tests/withdraw-become-player-time-47cases.test.ts` | 用例 #21～#47：新列位置、非空/空值样本、最近三个月与样本范围导出、14 类筛选、组合/重置、分页、批量入口（不实际审核/打款） | 59 |
 | `tests/non-ui-verification.test.ts` | N-D1 console/HTTP 观测、N-D2-FE 前端 hash、N-D2-BE 后端健康/commit、N-D3 环境限制 | 4 |
 | `tests/broad-import-233-regression.test.ts` | **TK-0096 缺陷 #233 回归**：导入选择文件无根路径 POST/405、Confirm 仅 1 次 uploadBroad、导入生成配置；页面轻量冒烟（加载/查询/批量入口/单条删除）；console/HTTP 基线 | 14 |
+
+
+## TK-0105 交付脚本（24 条 UI 用例，2026-11-09）
+
+用例来源：TK-0101 HANDOFF v5（`/task/20261109/TK-0101/HANDOFF`）；技术方案：`/task/20261109/TK-0101/TECH_DESIGN`。本轮按用例重新编写，不复用历史脚本或历史结果。
+
+| 脚本 | 覆盖 | 检查点数 |
+|:---|:---|:---|
+| `tests/tk0105-broad-config.test.ts` | 用例 #1～#8：广播召人入口/空选、批量删除确认/取消/成功、单条删除、新增、编辑、Excel 导入 | 22 |
+| `tests/tk0105-anchor-certification.test.ts` | 用例 #9～#17：主播认证入口/空选、批量删除确认/取消/成功、跨页只计当前页、单条删除、多 uid 新增、编辑、导出 | 27 |
+| `tests/tk0105-withdraw-time.test.ts` | 用例 #18～#22、#24：成为陪玩师时间列位置、非空/空值、文本/日期/9 类下拉筛选、分页、导出 | 57 |
+| `tests/tk0105-withdraw-batch-approve.test.ts` | 用例 #23：2 条现有待审核记录批量通过、状态流转、时间值保持（需 `--approve=1`） | 4 |
+| `tests/lib/tk0105-base.ts` | TK-0105 页面操作/只读观测辅助（认证、提现表格、导出、查看陪玩师页） | — |
+
+运行（仓库根目录，凭证仅运行时注入）：
+
+```bash
+ADMIN_USERNAME=qa-ai ADMIN_PASSWORD='***' node projects/feature/lita-admin-139-batch-delete/tests/tk0105-broad-config.test.ts
+ADMIN_USERNAME=qa-ai ADMIN_PASSWORD='***' node projects/feature/lita-admin-139-batch-delete/tests/tk0105-anchor-certification.test.ts
+ADMIN_USERNAME=qa-ai ADMIN_PASSWORD='***' node projects/feature/lita-admin-139-batch-delete/tests/tk0105-withdraw-time.test.ts
+ADMIN_USERNAME=qa-ai ADMIN_PASSWORD='***' node projects/feature/lita-admin-139-batch-delete/tests/tk0105-withdraw-batch-approve.test.ts --approve=1
+```
+
+- `tk0105-withdraw-batch-approve.test.ts` 默认不带 `--approve=1` 时为安全演练，只验证勾选后按钮态，不提交审批；本任务仅授权 2 条现有待审核记录，正式执行一次并记录申请 ID。
+- TK-0105 数据隔离：广播仅用测试房间 `10100450/10100452/10100454/10100455/13100137`；主播认证仅用用户 `10310/16505/15911/16432/15940/15904/15938`（均预先只读确认无认证且 `verify_type=0`）；提现仅只读，批量审核仅处理授权 2 条现有记录。用例结束逐条清理，未修改数据库字段。
+- TK-0105 结果：23 条通过、0 条未通过、1 条阻塞（#24 仅按陪玩师No导出触发既有「不能无限制导出」保护，补充状态筛选验证新增列通过）；无新增缺陷。
 
 运行（仓库根目录，凭证仅运行时注入）：
 
@@ -58,6 +84,7 @@ ADMIN_USERNAME=admin ADMIN_PASSWORD='***' \
 projects/feature/lita-admin-139-batch-delete/
   README.md                                 项目说明
   COVERAGE.md                               用例/检查点 → 脚本 check 追溯（含 TK-0092 与历史轮次）
+  COVERAGE-TK0105.md                        TK-0105 24 条用例 110 个 check 双向核对
   RUNS.md                                   运行记录与回归结论（含 TK-0092 与历史轮次）
   tests/
     README.md                               用例说明
@@ -67,6 +94,11 @@ projects/feature/lita-admin-139-batch-delete/
     withdraw-become-player-time-47cases.test.ts TK-0092 提现 #21～#47
     non-ui-verification.test.ts             TK-0092 N-D1/D2/D3
     broad-import-233-regression.test.ts     TK-0096 缺陷 #233 修复回归（导入 405 + 轻量冒烟）
+    tk0105-broad-config.test.ts             TK-0105 广播召人 #1～#8
+    tk0105-anchor-certification.test.ts     TK-0105 主播认证 #9～#17
+    tk0105-withdraw-time.test.ts            TK-0105 提现 #18～#22、#24
+    tk0105-withdraw-batch-approve.test.ts   TK-0105 提现批量审核 #23
+    lib/tk0105-base.ts                      TK-0105 页面操作/只读观测辅助
     broad-config-batch-delete.test.ts       历史：提测 #35/#36 广播召人全链路
     anchor-certification-batch-delete.test.ts 历史：提测 #35/#36 主播认证全链路
     pagination-rules.test.ts                历史：提测 #36 通用分页规则
