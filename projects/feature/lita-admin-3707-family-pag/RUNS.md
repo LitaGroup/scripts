@@ -1,0 +1,72 @@
+# 运行记录 — 项目 3707 家族群聊背景 PAG（TK-0129）
+
+执行机：Linux，Node v24.22.1，Playwright 1.64.1（Chromium headless），时区 Asia/Shanghai。
+环境：UI `https://admin.test.lita.game`；接口同源入口 `https://funbit-mgr.test.cinta.team`；账号口令仅运行时注入，本记录不含口令或 token。
+
+## 部署基线（2026-11-09）
+
+| 项 | 实测 | 结论 |
+| --- | --- | --- |
+| 前端入口 JS | `static/index-747ac2bd.js`（2026-11-09 19:27 CST 采集） | 本轮实际运行构建 |
+| 入口 HTML Last-Modified | `Mon, 09 Nov 2026 11:04:36 GMT` = 2026-11-09 19:04:36 CST | 早于本轮执行时间，执行期间无再次部署 |
+| 家族群聊背景页面 chunk | `static/index-e04b61c9.js`（19:27 CST 采集） | 含 PAGPlayer 与 `.pag` accept |
+| 接口探针 | `GET /api/family/chatBackgroundList` / `POST /common/giftFileUpload` 均 HTTP 200、status=0 | 后端可用 |
+
+## 1. 自测（--selftest=1）
+
+| 时间（CST） | 命令 | 结果 | 证据目录（本地） |
+| --- | --- | --- | --- |
+| 2026-11-09 19:46:39 | `--selftest=1` | 31/31 步通过（13 check + 18 act）；未点击 #2 的 Confirm，未新增记录；默认列表 Total 22 保持不变 | `evidence/family-pag-3707-20261109-194639/` |
+
+- 覆盖 #1、#2 的 ①～③（主图 PAG、缩略图 D1 PNG、D2 PAG 预览）与 #10～#12 三个必填校验；保存链路（#2④⑤⑥、#3～#9）因「test 环境仅允许一条专用记录且不可删除」约束，留待正式执行一次性完成。
+- 当轮修复的脚本问题：① Element UI `.el-dialog__wrapper` 为 fixed 定位，`offsetParent` 恒为 null 导致弹窗可见性误判，改为 `display/visibility/opacity` 判定；② 固定右列表头选择器由 `.el-table__header-wrapper` 改为 `.el-table__fixed-right th`，正确读到「操作」列；③ 上传后等待预览资源地址切换，避免读到替换前旧预览。
+
+## 2. 红证抽查
+
+| 时间（CST） | 目标 | 操作 | 结果 | 证据 |
+| --- | --- | --- | --- | --- |
+| 2026-11-09 19:45 | P0 检查点 `用例#1-① 页面路由` | 临时把期望路由改为 `#/effect-manager/family-background-REDPROOF` 并同步改比较条件，运行自测 | 30/31，目标 check 失败（`real=#/effect-manager/family-background`），证明断言非永真；随后删除临时脚本、恢复原值 | 运行日志（本文件第 6 节）；临时脚本未提交 |
+
+## 3. 正式执行
+
+| 轮次 | 时间（CST） | 命令 | 覆盖 | 结果 | 证据目录（本地） |
+| --- | --- | --- | --- | --- | --- |
+| 正式-1 | 19:47:45～19:50:48 | 全量（#1～#12） | #1～#12 | 116 步：109 成功 / 7 失败；失败为 #6-②[E1]、#6-②[E2]、#7-②、#9-①/③[F5]、#9-①/③[F6] | `evidence/family-pag-3707-20261109-194745/` |
+| 正式-2 | 19:52:58～19:54:26 | `--from=7` | #7～#12 | 64 步：60 成功 / 4 失败（#9 F5/F6 的 ①③）；#7-② 仍按字面判失败 | `evidence/family-pag-3707-20261109-195258/` |
+| 正式-3（定稿） | 19:54:37～19:56:09 | `--from=7` | #7～#12 | 64 步：60 成功 / 4 失败（仅 #9 F5/F6 的 ①③） | `evidence/family-pag-3707-20261109-195437/` |
+
+### 定稿口径
+
+- #1～#6：采用正式-1（同一次执行内完成新增与列表/编辑验证，符合用例顺序）。
+- #7～#12：采用正式-3（#7-② 的「默认 en 页签」按用例问题 Q-01 处理：记录初始页签并显式切到 en 读取 en 名称，见 COVERAGE 第 5 节）。
+- 正式-2 与正式-3 的差异仅为 `listTotal()` 在单页时回退为列表行数（#8-③ 的 Total 由 `0` 修正为 `1`），不影响任何判定；正式-1 中 #2-⑤ 的 `Total=0` 同为此原因，结果行数=1 已直接断言。
+
+### 关键观测
+
+- #2：新增后精确搜索 1 条，背景ID **23**；主图/缩略图 PAG canvas 帧差 5.37%/9.68%，无 `PAG加载失败`、无破图节点。
+- #3/#4：列表「背景缩略图」「背景图」列 PAG canvas 帧差 11.48%/9.44%。
+- #5：两列均为 PNG img（naturalWidth=320），canvas=0。
+- #6：E1/E2 列表两列媒体内容互换（缺陷 #250）；E3 双 PAG 正常（帧差 11.08%/12.42%）；三条数据行的弹窗关闭与 Edit 回显 ①③ 均通过。
+- #7：en=`BOT_TEST_PAG_3707_EN`、zh=`BOT_TEST_PAG_3707_中文`；重开弹窗保留上次 zh 页签（用例问题 Q-01）。
+- #8：两个 PAG 预览地址去 query/hash 后均以 `.pag` 结尾；Cancel 后 Total/名称/两个资源地址与操作前完全一致。
+- #9：F1～F4 正常；F5/F6 上传成功但弹窗 img naturalWidth=0、列表 el-image「FAILED」（缺陷 #251）。
+- #10～#12：Confirm 后弹窗保持打开，提示分别为 `name不能为空`、`pic不能为空`、`picMin不能为空`；Cancel 后默认列表 Total 23 不变。
+
+## 4. 缺陷
+
+| ID | 用例 | 端 | 优先级 | 标题摘要 | 状态 |
+| --- | --- | --- | --- | --- | --- |
+| #250 | #6（E1/E2） | 前端 | 中 | 列表「背景缩略图」列渲染 pic、「背景图」列渲染 picMin，两列媒体内容颠倒 | 开放 |
+| #251 | #9（F5/F6） | 前端 | 中 | mp4/mov 背景在 Edit 预览与列表均用 img 渲染视频地址，显示破图和 FAILED | 开放 |
+
+## 5. 数据状态
+
+- 新增专用记录 **BOT_TEST_PAG_3707（背景ID 23）**，列表 Total 22 → 23；结束时两个媒体字段恢复为 PAG。
+- 页面无删除入口，**测试数据未清理**（需求方已确认保留并登记 ID）；未修改任何现有记录；未执行 SQL。
+
+## 6. 原始日志要点
+
+- 自测：`[done] {"status":"success","total":31,"success":31,"fail":0,"skip":0}`。
+- 红证：`[done] {"status":"fail","total":31,"success":30,"fail":1,...}`（目标 check `用例#1-①` 失败）。
+- 正式-1：`[done] {"status":"fail","total":116,"success":109,"fail":7,...}`。
+- 正式-3：`[done] {"status":"fail","total":64,"success":60,"fail":4,...}`。
