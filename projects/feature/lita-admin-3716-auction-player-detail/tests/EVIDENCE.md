@@ -2,9 +2,9 @@
 
 ## 证据包
 
-- 公开地址：http://work.cinta.team/files/20261111/6b9d4d24-0129-47fc-9c82-02b2d3189f36.zip
-- 大小：3.4 MB
-- 内容：`formal-p0-v3/`（P0 A 26 check 截图/run.json/导出）、`formal-p0b/`（P0 B 11 check 截图/导出 xlsx）、`formal-p1p2/`（P1/P2 23 check）、`redproof-formal/`（红证日志）
+- 公开地址：http://work.cinta.team/files/20261111/ed884840-eb4a-4a9f-b89e-d9dab415f248.zip
+- 大小：3.3 MB
+- 内容：`formal-p0-v3/`（P0 A 26 check）、`formal-p0b/`（P0 B 11 check/导出 xlsx）、`formal-p1p2/`（P1/P2 23 check）、`reg02-formal/`（REG-02 补测 3 check/分组表头截图）、`redproof-formal/`（红证日志）
 - 脱敏：仅业务页面与请求状态；账号密码/令牌/Cookie 未落盘；run.json accessToken 已 mask；无个人信息/生产数据。
 
 ## 按用例证据
@@ -29,7 +29,7 @@
 | TC-DISP-01 | `formal-p0b/disp01-headers.png` | 17 列 |
 | TC-DISP-02 | `formal-p0b/disp02-first-row.png`（同查询截图） | 首行字段 |
 | TC-REG-01 | `formal-p1p2/reg01-room-summary-1108.png` | 12 列/18 行/合计 |
-| TC-REG-02 | `formal-p1p2/reg02-player-daily.png` | 筛选项正常；日维度无数据 |
+| TC-REG-02 | `formal-p1p2/reg02-player-daily.png`、`reg02-formal/01-reg02-grouped-header.png` | 实际入口 player-data-report-new；日维度 2026-07-01~07-31，19,978 行；表头 2 行/86 列，父级分组 7 个 |
 | TC-EDGE-01 | `formal-p1p2/edge01-no-data.png` | 空态/Total 0 |
 | TC-EDGE-02 | `formal-p1p2/edge02-long-ids.png` | 5 行/Total 5 |
 

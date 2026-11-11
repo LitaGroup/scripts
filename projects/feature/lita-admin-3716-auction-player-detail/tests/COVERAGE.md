@@ -61,9 +61,9 @@
 | TC-REG-01 | P1 | ① 12 列表头 | tc-formal-p1p2 `用例#TC-REG-01-①` | 通过 |
 | TC-REG-01 | P1 | ② 18 行/Total 18 | tc-formal-p1p2 `用例#TC-REG-01-②` | 通过 |
 | TC-REG-01 | P1 | ③ 合计 35/21/14/728,846.40 | tc-formal-p1p2 `用例#TC-REG-01-③` | 通过 |
-| TC-REG-02 | P1 | ① 筛选项完整 | tc-formal-p1p2 `用例#TC-REG-02-①` | 通过 |
-| TC-REG-02 | P1 | ② 两级分组表头 | 条件执行；无数据则阻塞 | 阻塞 |
-| TC-REG-02 | P1 | ③ 数据行>0 | 条件执行；无数据则阻塞 | 阻塞 |
+| TC-REG-02 | P1 | ① 筛选项完整 | tc-reg02-formal `用例#TC-REG-02-①`（P1P2 已先行验证） | 通过 |
+| TC-REG-02 | P1 | ② 两级分组表头 | tc-reg02-formal `用例#TC-REG-02-②` | 通过 |
+| TC-REG-02 | P1 | ③ 数据行>0 | tc-reg02-formal `用例#TC-REG-02-③` | 通过 |
 | TC-EDGE-01 | P2 | ① 0 行/空态 | tc-formal-p1p2 `用例#TC-EDGE-01-①` | 通过 |
 | TC-EDGE-01 | P2 | ② Total 0 | tc-formal-p1p2 `用例#TC-EDGE-01-②` | 通过 |
 | TC-EDGE-01 | P2 | ③ 无报错/不白屏 | tc-formal-p1p2 `用例#TC-EDGE-01-③` | 通过 |
@@ -71,4 +71,4 @@
 | TC-EDGE-02 | P2 | ② 数据行或空态/无报错 | tc-formal-p1p2 `用例#TC-EDGE-02-②` | 通过 |
 | TC-EDGE-02 | P2 | ③ Total N≥0 | tc-formal-p1p2 `用例#TC-EDGE-02-③` | 通过 |
 
-> 执行说明：P0 因 ODPS 单次查询约 2–3 分钟，拆为 `tc-formal-p0.test.ts`（26 个 check）与 `tc-formal-p0b.test.ts`（11 个 check）两个脚本；P1/P2 由 `tc-formal-p1p2.test.ts` 执行（23 个 check）。REG-02 仅 ① 可验证（筛选项），②③ 因日维度无数据未渲染表头，按阻塞记录。
+> 执行说明：P0 因 ODPS 单次查询约 2–3 分钟，拆为 `tc-formal-p0.test.ts`（26 个 check）与 `tc-formal-p0b.test.ts`（11 个 check）；P1/P2 由 `tc-formal-p1p2.test.ts` 执行（23 个 check）。REG-02 补测：`player-daily-report` 为 configId，实际入口 `/#/data-stats-manager/player-stats/player-data-report-new`（菜单 Player Data Report(New)，页面标题「陪玩师日报表」）；日维度 2026-07-01~07-31 查到 19,978 行，两级分组表头（2 行/86 列）正常，`tc-reg02-formal.test.ts` 3/3 通过。唯一检查点 62 个全部通过（REG-02 ① 复跑一次）。
