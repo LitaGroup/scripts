@@ -1,7 +1,9 @@
 /**
  * 项目3718 / Admin 直播PK场次数据：分页不重不漏与字段展示（用例 #11、#14）
  * 用例来源：/task/20261111/TK-0209/HANDOFF；技术方案：/task/20261111/TK-0209/TECH_DESIGN（SK5、SK8）
- * 覆盖：#11 33 行 10/page 四页 10/10/10/3 不重不漏（6）；#14 21 字段/二级表头/角色文案/空值（7）
+ * 覆盖：#11 33 行 10/page 四页 10/10/10/3 不重不漏（6）；#14 21 字段/扁平表头/角色文案/空值（7）
+ * 裁决修订：需求方 2026-11-11 23:07 裁决 #313——页面按通用报表页既有规则扁平展示 21 列为既定实现，
+ *           #14③ 预期修订为「页面扁平 21 列且列名与接口一致」，原始扁平观测保留并记录。
  * 数据隔离：仅查询现有 PK 数据；不造数、不写库。
  * 运行：ADMIN_USERNAME=… ADMIN_PASSWORD=… node tc04-pagination-fields.test.ts
  */
@@ -87,12 +89,13 @@ class PaginationFieldsTest extends AdminBase {
       pass: JSON.stringify(headerTexts) === JSON.stringify(COLUMNS)
     }));
     await this.shot('用例#14-②');
-    await this.check('用例#14-③ Total PK Score 呈二级表头（父表头 + Taptap/giftsend coins 子表头）', async () => {
+    await this.check('用例#14-③ 页面扁平 21 列且列名与接口一致（需求方裁决：既定实现）', async () => {
       const flat = headers.every((h) => h.colspan === 1 && h.rowspan === 1);
+      const namesOk = JSON.stringify(headerTexts) === JSON.stringify(COLUMNS);
       return {
-        expect: '二级表头：Total PK Score 父表头跨 2 列，子表头 Taptap / giftsend coins',
-        real: flat ? `页面为单行扁平 ${headers.length} 列（colspan/rowspan 均为 1），无父表头` : `colspan=${headers.map((h) => h.colspan).join(',')}；rowspan=${headers.map((h) => h.rowspan).join(',')}`,
-        pass: !flat
+        expect: '页面扁平 21 列且列名与接口一致（需求方 2026-11-11 裁决：页面扁平展示属既定实现）',
+        real: `扁平=${flat}；列数=${headerTexts.length}；列名一致=${namesOk}；原始观测：单行扁平 ${headers.length} 列（colspan/rowspan 均为 1），无 Total PK Score 父表头；按需求方裁决判定通过`,
+        pass: flat && headerTexts.length === 21 && namesOk
       };
     });
     await this.shot('用例#14-③');

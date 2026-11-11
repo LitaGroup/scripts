@@ -1,8 +1,8 @@
 # COVERAGE — Admin 直播PK场次数据（项目 3718）
 
-- 定稿来源：本轮正式执行日志（121 个 check 实际执行）
+- 定稿来源：正式执行日志 + 需求方裁决后 #13/#14 复跑日志（121 个 check 实际执行）
+- 正式执行：2026-11-11 22:37~23:02；裁决返工复跑 23:08~23:15（需求方 23:07 裁决 #313/#314 为非缺陷并关闭，#13/#14 按裁决改判通过；原失败观测保留于 E-13/E-14，复跑证据 E-21/E-22）
 - 用例来源：/task/20261111/TK-0209/HANDOFF；技术方案：/task/20261111/TK-0209/TECH_DESIGN
-- 正式执行：2026-11-11 22:37~23:02（提测 54「进行中」）；缺陷 #313（表头二级结构）、#314（导出空值占位）
 - 双向核对：下表每一行对应代码中一个 check；代码中每个 check 均可在下表找到（正向无漏验、反向无私增）
 
 | 用例# | 检查点 | check 标记（代码） | 脚本 | 结果 | 用例级结论 |
@@ -91,19 +91,19 @@
 | 12 | ④ 表格数据清空并显示「请输入查询条件后查看数据」 | `用例#12-④ 表格数据清空并显示「请输入查询条件后查看数据」` | tc02-filter.test.ts | 通过 | 通过 |
 | 12 | ⑤ 分页显示 Total 0 | `用例#12-⑤ 分页显示 Total 0` | tc02-filter.test.ts | 通过 | 通过 |
 | 12 | ⑥ 重置后不自动查询（无请求、无 loading、无「查询完成」提示） | `用例#12-⑥ 重置后不自动查询（无请求、无 loading、无「查询完成」提示）` | tc02-filter.test.ts | 通过 | 通过 |
-| 13 | ① 下载 .xlsx 文件且文件名包含「PK模式陪玩师明细」 | `用例#13-① 下载 .xlsx 文件且文件名包含「PK模式陪玩师明细」` | tc05-export.test.ts | 通过 | 未通过 |
-| 13 | ② 文件共 35 行 × 21 列（2 行表头 + 33 行数据） | `用例#13-② 文件共 35 行 × 21 列（2 行表头 + 33 行数据）` | tc05-export.test.ts | 通过 | 未通过 |
-| 13 | ③ 二级表头：Total PK Score 父表头下含 Taptap、giftsend coins 子表头，21 列完整 | `用例#13-③ 二级表头：Total PK Score 父表头下含 Taptap、giftsend coins 子表头，21 列完整` | tc05-export.test.ts | 通过 | 未通过 |
-| 13 | ④ 首条数据行 date=2026-11-02、pk id=227、player_id=450400、pk rank=1 | `用例#13-④ 首条数据行 date=2026-11-02、pk id=227、player_id=450400、pk rank=1` | tc05-export.test.ts | 通过 | 未通过 |
-| 13 | ⑤ 末条数据行 date=2026-11-10、pk id=256、player_id=20410529、pk rank=2 | `用例#13-⑤ 末条数据行 date=2026-11-10、pk id=256、player_id=20410529、pk rank=2` | tc05-export.test.ts | 通过 | 未通过 |
-| 13 | ⑥ top 1 spender uid/no/nick 空值单元格与页面渲染一致（页面显示「-」） | `用例#13-⑥ top 1 spender uid/no/nick 空值单元格与页面渲染一致（页面显示「-」）` | tc05-export.test.ts | 未通过 | 未通过 |
-| 14 | ① 表格表头共显示 21 列 | `用例#14-① 表格表头共显示 21 列` | tc04-pagination-fields.test.ts | 通过 | 未通过 |
-| 14 | ② 21 个列名依次与约定完全一致 | `用例#14-② 21 个列名依次与约定完全一致` | tc04-pagination-fields.test.ts | 通过 | 未通过 |
-| 14 | ③ Total PK Score 呈二级表头（父表头 + Taptap/giftsend coins 子表头） | `用例#14-③ Total PK Score 呈二级表头（父表头 + Taptap/giftsend coins 子表头）` | tc04-pagination-fields.test.ts | 未通过 | 未通过 |
-| 14 | ④ player_role 列显示值仅为「发起者」或「参加者」 | `用例#14-④ player_role 列显示值仅为「发起者」或「参加者」` | tc04-pagination-fields.test.ts | 通过 | 未通过 |
-| 14 | ⑤ 无原始异常列名（无 player_role_code、null/undefined 列名） | `用例#14-⑤ 无原始异常列名（无 player_role_code、null/undefined 列名）` | tc04-pagination-fields.test.ts | 通过 | 未通过 |
-| 14 | ⑥ top 1 spender uid/no/nick 空值行显示「-」 | `用例#14-⑥ top 1 spender uid/no/nick 空值行显示「-」` | tc04-pagination-fields.test.ts | 通过 | 未通过 |
-| 14 | ⑦ 页面无报错 | `用例#14-⑦ 页面无报错` | tc04-pagination-fields.test.ts | 通过 | 未通过 |
+| 13 | ① 下载 .xlsx 文件且文件名包含「PK模式陪玩师明细」 | `用例#13-① 下载 .xlsx 文件且文件名包含「PK模式陪玩师明细」` | tc05-export.test.ts | 通过 | 通过 |
+| 13 | ② 文件共 35 行 × 21 列（2 行表头 + 33 行数据） | `用例#13-② 文件共 35 行 × 21 列（2 行表头 + 33 行数据）` | tc05-export.test.ts | 通过 | 通过 |
+| 13 | ③ 二级表头：Total PK Score 父表头下含 Taptap、giftsend coins 子表头，21 列完整 | `用例#13-③ 二级表头：Total PK Score 父表头下含 Taptap、giftsend coins 子表头，21 列完整` | tc05-export.test.ts | 通过 | 通过 |
+| 13 | ④ 首条数据行 date=2026-11-02、pk id=227、player_id=450400、pk rank=1 | `用例#13-④ 首条数据行 date=2026-11-02、pk id=227、player_id=450400、pk rank=1` | tc05-export.test.ts | 通过 | 通过 |
+| 13 | ⑤ 末条数据行 date=2026-11-10、pk id=256、player_id=20410529、pk rank=2 | `用例#13-⑤ 末条数据行 date=2026-11-10、pk id=256、player_id=20410529、pk rank=2` | tc05-export.test.ts | 通过 | 通过 |
+| 13 | ⑥ 空值底层取值一致，页面「-」、导出空白均可接受（需求方裁决） | `用例#13-⑥ 空值底层取值一致，页面「-」、导出空白均可接受（需求方裁决）` | tc05-export.test.ts | 通过 | 通过 |
+| 14 | ① 表格表头共显示 21 列 | `用例#14-① 表格表头共显示 21 列` | tc04-pagination-fields.test.ts | 通过 | 通过 |
+| 14 | ② 21 个列名依次与约定完全一致 | `用例#14-② 21 个列名依次与约定完全一致` | tc04-pagination-fields.test.ts | 通过 | 通过 |
+| 14 | ③ 页面扁平 21 列且列名与接口一致（需求方裁决：既定实现） | `用例#14-③ 页面扁平 21 列且列名与接口一致（需求方裁决：既定实现）` | tc04-pagination-fields.test.ts | 通过 | 通过 |
+| 14 | ④ player_role 列显示值仅为「发起者」或「参加者」 | `用例#14-④ player_role 列显示值仅为「发起者」或「参加者」` | tc04-pagination-fields.test.ts | 通过 | 通过 |
+| 14 | ⑤ 无原始异常列名（无 player_role_code、null/undefined 列名） | `用例#14-⑤ 无原始异常列名（无 player_role_code、null/undefined 列名）` | tc04-pagination-fields.test.ts | 通过 | 通过 |
+| 14 | ⑥ top 1 spender uid/no/nick 空值行显示「-」 | `用例#14-⑥ top 1 spender uid/no/nick 空值行显示「-」` | tc04-pagination-fields.test.ts | 通过 | 通过 |
+| 14 | ⑦ 页面无报错 | `用例#14-⑦ 页面无报错` | tc04-pagination-fields.test.ts | 通过 | 通过 |
 | 15 | ① 「直播相关数据」子菜单中可见「单次开播时长」菜单项 | `用例#15-① 「直播相关数据」子菜单中可见「单次开播时长」菜单项` | tc06-regression.test.ts | 通过 | 阻塞（环境/鉴权） |
 | 15 | ② 地址栏路由为 #/data-stats-manager/live-data/single-live-duration | `用例#15-② 地址栏路由为 #/data-stats-manager/live-data/single-live-duration` | tc06-regression.test.ts | 通过 | 阻塞（环境/鉴权） |
 | 15 | ③ 查询完成，页面无错误提示 | `用例#15-③ 查询完成，页面无错误提示` | tc06-regression.test.ts | 未通过 | 阻塞（环境/鉴权） |
@@ -131,12 +131,13 @@
 
 ## 说明
 
-- 用例 13 未通过：13⑥ 导出空值单元格为空、页面显示「-」，列表与导出占位不一致（缺陷见 TEST_REPORT）。
-- 用例 14 未通过：14③ 页面表头为单行扁平 21 列，无 Total PK Score 二级表头（缺陷见 TEST_REPORT）。
+- 用例 13/14 按需求方 2026-11-11 23:07 裁决改判通过：原失败观测（导出空单元格/页面扁平表头）保留于 E-13、E-14；裁决依据见缺陷 #314/#313 变更记录，复跑通过证据见 E-21/E-22。
+- 用例 13（原 13⑥）：页面「-」与导出空白为展示层差异、底层取值一致，按裁决非功能缺陷。
+- 用例 14（原 14③）：页面按通用报表页规则扁平展示 21 列为既定实现，按裁决非缺陷。
 - 用例 15~17 阻塞：旧式报表 /admin-main/* 在当前同源入口 404（环境/鉴权），其 ③⑤⑥ 失败为环境阻塞证据，不计产品缺陷。
 
 ## 统计
 
 - 用例条数：18（P0=12 / P1=6）
 - 检查点总数（数据行展开后）：121
-- check 通过：110 / 121
+- check 通过：112 / 121

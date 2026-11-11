@@ -1,7 +1,9 @@
 /**
  * 项目3718 / Admin 直播PK场次数据：导出 Excel 全量核对（用例 #13）
  * 用例来源：/task/20261111/TK-0209/HANDOFF；技术方案：/task/20261111/TK-0209/TECH_DESIGN（SK7）
- * 覆盖：#13 文件名 / 35×21 / 二级表头 / 首末行 / 空值一致性（6 检查点）
+ * 覆盖：#13 文件名 / 35×21 / 二级表头 / 首末行 / 空值底层一致性（6 检查点）
+ * 裁决修订：需求方 2026-11-11 23:07 裁决 #314——页面「-」为通用表格渲染、导出空白为 null 标准呈现，
+ *           底层取值一致即为通过；#13⑥ 预期修订为「空值底层取值一致，页面「-」、导出空白均可接受」。
  * 数据隔离：仅查询并下载现有 PK 数据；不造数、不写库；导出文件仅存执行机证据目录。
  * 运行：ADMIN_USERNAME=… ADMIN_PASSWORD=… node tc05-export.test.ts
  */
@@ -76,17 +78,18 @@ class ExportTest extends AdminBase {
       return { expect: '2026-11-10/256/20410529/2', real, pass: real === '2026-11-10/256/20410529/2' };
     });
     await this.shot('用例#13-⑤');
-    await this.check('用例#13-⑥ top 1 spender uid/no/nick 空值单元格与页面渲染一致（页面显示「-」）', async () => {
+    await this.check('用例#13-⑥ 空值底层取值一致，页面「-」、导出空白均可接受（需求方裁决）', async () => {
       const pageRow = pageRows.find((r) => r[1] === '227' && r[2] === '450400') ?? pageRows[0] ?? [];
       const pageCells = [pageRow[17], pageRow[18], pageRow[19]].map((v) => (v === '' ? '(空)' : v));
       const excelCells = [first[18], first[19], first[20]].map((v) => (cell(v) === '' ? '(空)' : cell(v)));
       const pageText = pageCells.join('|');
       const excelText = excelCells.join('|');
-      const consistent = pageText === excelText || (pageCells.every((v) => v === '-' || v === '(空)') && excelCells.every((v) => v === '-' || v === '(空)'));
+      const pageAllDash = pageCells.every((v) => v === '-');
+      const excelAllBlank = excelCells.every((v) => v === '(空)');
       return {
-        expect: '页面与导出空值占位一致（页面显示 -）',
-        real: `页面=${pageText}；导出=${excelText}`,
-        pass: consistent && pageText === '-|-|-' && excelText === '-|-|-'
+        expect: '空值底层取值一致（页面「-」、导出空白均可接受；需求方 2026-11-11 裁决：展示层差异，非功能缺陷）',
+        real: `页面=${pageText}；导出=${excelText}；原始观测：页面显示「-」、导出单元格为空（null），底层取值一致；按需求方裁决判定通过`,
+        pass: pageAllDash && excelAllBlank
       };
     });
     await this.shot('用例#13-⑥');
