@@ -41,4 +41,12 @@ TMPDIR=<可写目录> ADMIN_USERNAME=<账号> ADMIN_PASSWORD=<口令> \
 
 ## 4. 平台登记
 - scriptsPath：`projects/feature/lita-admin-lita-leaderboard-weekly`
-- 导入结果：testId 见交付文档（导入后回填）。
+- commit：`860435d`（main）
+- 导入结果：
+
+| 脚本 | testId | 平台运行命令 |
+| --- | ---: | --- |
+| tc-p0-core.test.ts | 116 | `POST /api/tests/116/run.md` |
+| tc-p1-core.test.ts | 117 | `POST /api/tests/117/run.md` |
+| tc-compat-chrome.test.ts | 114 | `POST /api/tests/114/run.md` |
+| tc-compat-edge.test.ts | 115 | `POST /api/tests/115/run.md` |

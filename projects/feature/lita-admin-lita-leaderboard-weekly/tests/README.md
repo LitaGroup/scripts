@@ -53,4 +53,6 @@ node tc-compat-edge.test.ts --evidence-dir=/path/to/evidence/edge
 
 ## 6. 平台登记
 - scriptsPath：`projects/feature/lita-admin-lita-leaderboard-weekly`（首次配置）
-- 导入：`POST /api/scripts/import.md {"projectId":3713}`，testId 见 RUNS.md 与交付文档。
+- 导入：`POST /api/scripts/import.md {"projectId":3713}`
+- testId：tc-p0-core=116、tc-p1-core=117、tc-compat-chrome=114、tc-compat-edge=115
+- 平台运行：`POST /api/tests/{testId}/run.md`
