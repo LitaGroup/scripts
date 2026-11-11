@@ -1,27 +1,35 @@
-# RUNS — 拍拍模式流水-房间维度
+# RUNS — 拍拍模式流水-房间维度（TK-0203）
 
-| 时间 | 脚本 | 命令（凭证运行时注入，不落盘） | 结果 | 证据 |
+- 用例来源：`/task/20261111/TK-0207/HANDOFF`（九列用例 1~18，2026-11-11 19:52 验收通过）
+- 环境：https://admin.test.lita.game（非生产）
+- 账号：qa-ai（admin 角色 + `auction-mode-room-summary` 权限；凭证运行时注入，未落盘）
+
+## 一、正式执行（权威结果）
+
+| 时间 | 脚本 | 命令 | 结果 | 证据目录/日志 |
 |:---|:---|:---|:---|:---|
-| 2026-11-11 17:44:34 | tc-auth-reg.test.ts | `ADMIN_USERNAME=… ADMIN_PASSWORD=… node tc-auth-reg.test.ts` | 4/6 check 通过；TC-REG-01-①、TC-REG-02-② 未通过（未执行查询导致表头未渲染） | `evidence/auction-room-summary-auth-reg-20261111-174434/` |
-| 2026-11-11 17:45:45 | tc-auth-reg.test.ts | 同上（修正：补充日期与查询步骤） | 4/6 通过；TC-REG-01-①、TC-REG-02-② 仍未通过：必填「数据维度」未选/日期提交后未触发 `/stats/query`；两次查询等待超时 | `evidence/auction-room-summary-auth-reg-20261111-174545/` |
+| 2026-11-11 19:55:48 | `tc-p0-report.test.ts` | `ADMIN_USERNAME=… ADMIN_PASSWORD=… node tc-p0-report.test.ts --evidence-dir=…` | 23/23 check 通过（P0 9 条） | `work/run/evidence/tk203-formal-p0-20261111-195548/`；日志 E11 |
+| 2026-11-11 19:57:24 | `tc-p1-edge.test.ts` | 同上 | 13/13 check 通过（UI-04/05、FILTER-04、EDGE-01/02） | `work/run/evidence/tk203-formal-p1-20261111-195724/`；日志 E17 |
+| 2026-11-11 19:58:53 | `tc-reg.test.ts` | 同上 | 4/6 check 通过；REG-01 ③（数据）、REG-02 ③（日期交互）失败并映射为阻塞 | `work/run/evidence/tk203-formal-reg-20261111-195853/`；日志 E22 |
 
-## 结论口径
-- TC-AUTH-02 / TC-AUTH-03（P1）单独运行稳定通过（菜单 390 项无目标项；直达路由 `#/404` 且无表格）。
-- TC-REG-01 / TC-REG-02 仅完成“页面可打开 + 筛选项”部分的观察；查询未触发，表头核验未完成，按阻塞记录，不计入通过。
-- 报表页全部 P0 用例因账号无 `auction-mode-room-summary` 权限无法执行。
+## 二、P0 红证抽查
 
-## 环境备注
-- `m-api.test.lita.game` 直连 403，脚本按同源入口转发（未改业务参数）。
-- 2026-11-11 17:50~18:00 期间 data-main 配置加载间歇失败：同一路由多次访问中，`.query-field` 时而渲染、时而显示「当前报表未配置查询条件」。该现象影响回归用例复现，未作为产品缺陷判定依据。
+| 时间 | 脚本 | 变更 | 结果 | 处置 |
+|:---|:---|:---|:---|:---|
+| 2026-11-11 20:00:27 | `tc-p0-redproof.test.ts`（临时副本） | `TOTALS.sessions` 35→36 | 用例#6-② 按预期 fail（expect 36 / real 35），其余 22 项通过 | 删除临时脚本，正式脚本未改动 |
 
-## 第二轮（admin 账号，2026-11-11 18:02~18:10）
+## 三、自测记录（非权威，仅证明脚本可运行）
 
-| 时间 | 脚本 | 结果 | 证据 |
+| 时间 | 脚本 | 结果 | 说明 |
 |:---|:---|:---|:---|
-| 18:02:47 | tc-p0-report.test.ts | 6/6 通过（前 6 项），导出下载读取失败 | `evidence/auction-room-summary-p0-20261111-180247/` |
-| 18:04:29 | tc-p0-report.test.ts | 9/10 通过；TC-UI-06 文件名含 `+`、TC-FILTER-01 行数断言口径错误 | `evidence/auction-room-summary-p0-20261111-180429/` |
-| 18:08:20 | tc-p0-report.test.ts | 9/10 通过；TC-UI-06 未通过（文件名 `拍拍模式流水+-+房间维度_94879002.xlsx`，缺陷 #309） | `evidence/auction-room-summary-p0-20261111-180820/` |
+| 2026-11-11 19:48:17 | `tc-p0-report.test.ts` | 23/23 | 正式执行前自测 |
+| 2026-11-11 19:49:55 | `tc-p1-edge.test.ts` | 13/13 | 正式执行前自测 |
+| 2026-11-11 19:51~19:54 | `tc-reg.test.ts` | 多轮 4/6 | 修正日期面板交互（面板点选 + Enter 提交）后稳定在 4/6；剩余 2 项为外部数据/页面交互阻塞 |
 
-- 稳定通过：AUTH-01、UI-01、UI-02、UI-03（行数+合计）、UI-07、FILTER-01（Total=30）、FILTER-02（2 行）、FILTER-03（1 行指标）。
-- 未通过：UI-06 文件名空格被编码为 `+`（内容 18×12 与合计一致）。
-- 未执行：UI-04、UI-05、FILTER-04、REG-01/02、EDGE-01/02（20 分钟目标内优先 P0）。
+> 自测只修复脚本类问题（日期面板定位/提交、分页选择器等待），未修改用例预期、未放宽断言、未 mock 业务接口。
+
+## 四、结果口径
+
+- 正式执行 check 总数 42：40 通过、2 失败（均对应用例序号 15/16 的第③检查点，按阻塞记录）。
+- 用例四态：通过 14、未通过 0、阻塞 4（序号 2、3、15、16）、未执行 0。
+- 逐页证据与日志见 `EVIDENCE.md` 与各 `run.log`。

@@ -1,16 +1,16 @@
 /**
- * 拍拍模式流水-房间维度：菜单权限与既有报表回归（UI）
+ * 拍拍模式流水-房间维度：无权限账号反向验证（历史脚本，保留待专用账号）
  *
- * 覆盖用例：
+ * 覆盖用例（TK-0207 序号 2、3）：
  * - TC-AUTH-02 无权限账号不可见报表菜单（P1）
  * - TC-AUTH-03 无权限账号直达路由被拦截（P1）
- * - TC-REG-01 既有分组表头报表无回归（P1，陪玩师数据报表(New)）
- * - TC-REG-02 送礼详情报表无回归（P1）
  *
- * 运行：ADMIN_USERNAME=… ADMIN_PASSWORD=… node tc-auth-reg.test.ts [--evidence-dir=...]
+ * 运行：ADMIN_USERNAME=<无权限账号> ADMIN_PASSWORD=… node tc-auth-reg.test.ts [--evidence-dir=...]
  *
- * 说明：TC-AUTH-01 及报表页 TC-UI、TC-FILTER、TC-EDGE 系列需要 auction-mode-room-summary 权限，
- * 当前测试账号不具备该权限（页面路由守卫跳 404），相关用例按阻塞处理，不在本脚本内伪造通过。
+ * 说明：
+ * - 2026-11-11 TK-0203 轮次无可用「非 admin 且无 auction-mode-room-summary 权限」账号（qa-ai 已授 admin），
+ *   序号 2/3 按阻塞记录，本脚本未运行；不得用 mock/注入模拟权限。
+ * - 本脚本内的 REG-01/02 检查已由 `tc-reg.test.ts` 承接；保留原代码供专用无权限账号到位后复用。
  */
 import { type CheckResult } from '../../../../src/base/CheckBaseClass.ts';
 import { AdminBase } from './lib/admin-base.ts';
