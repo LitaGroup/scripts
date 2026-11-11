@@ -1,49 +1,74 @@
-# COVERAGE — 项目 3716 主播维度报表（预检轮）
+# COVERAGE — 项目 3716 主播维度报表（正式轮）
 
-> **预检轮声明：** 用例来源为外部提供的 TEST_CASES，非合规用例编写子任务产出；本表结果仅作预检资产，正式轮以 TK-0206 合规用例集重做双向核对。
-
-> 双向核对：用例每个检查点在代码中有唯一 check；每个 check 都能映射回用例检查点。
-> 用例集：`/task/20261111/TK-0189/TEST_CASES`（19 条）。
-> 执行时间：2026-11-11 18:32–18:46。
+> 用例来源：`/task/20261111/TK-0206/HANDOFF`（22 条，P0 13 / P1 7 / P2 2）
+> 技术方案：`/task/20261111/TK-0206/TECH_DESIGN`
+> 双向核对：每个用例检查点在代码中有唯一 check；每个 check 映射回对应检查点。
 
 | 用例# | 优先级 | 检查点 | 脚本 / check 标记 | 结果 |
 |:---|:---|:---|:---|:---|
-| TC-AUTH-01 | P0 | ① 菜单可见「拍拍模式流水-主播维度」 | tc-p0-report `用例#TC-AUTH-01-①` | 通过 |
-| TC-AUTH-01 | P0 | ② 点击进入报表页（路由 + 标题） | tc-p0-report `用例#TC-AUTH-01-②` | 通过 |
-| TC-AUTH-02 | P1 | ① 无权限账号不可见菜单 | 无（无无权限账号，阻塞） | 阻塞 |
-| TC-AUTH-03 | P1 | ① 无权限账号直达路由被拦截 | 无（无无权限账号，阻塞） | 阻塞 |
-| TC-UI-01 | P0 | ① 首屏不自动查询（含分页/每页条数守卫） | tc-p0-report `用例#TC-UI-01-①` | 通过 |
-| TC-UI-01 | P0 | ② 空态「请输入查询条件后查看数据」 | tc-p0-report `用例#TC-UI-01-②` | 通过 |
-| TC-UI-02 | P0 | ① 未选日期提示选择开始日期 | tc-p0-report `用例#TC-UI-02-①` | 通过 |
-| TC-UI-02 | P0 | ② 未选日期不发出查询请求 | tc-p0-report `用例#TC-UI-02-②` | 通过 |
-| TC-UI-03 | P0 | ① 26 行且分页总数 26 | tc-p0-report `用例#TC-UI-03-①` | 通过 |
-| TC-UI-03 | P0 | ② 结算成功 15 / 无支持者 4 / 金额未达到最低等级 7 | tc-p0-report `用例#TC-UI-03-②` | 通过 |
-| TC-UI-03 | P0 | ③ 总流水 445,824.52 | tc-p0-report `用例#TC-UI-03-③` | 通过 |
-| TC-UI-04 | P1 | ① 分页总数 26 且可翻页 | tc-p1-extra `用例#TC-UI-04-①` | 通过 |
-| TC-UI-04 | P1 | ② 翻页不重复、不丢失 | tc-p1-extra `用例#TC-UI-04-②` | 通过 |
-| TC-FILTER-01 | P0 | ① in 大区 23 行 | tc-p0-report `用例#TC-FILTER-01-①` | 通过 |
-| TC-FILTER-01 | P0 | ② 大区控件单选 | tc-p0-report `用例#TC-FILTER-01-②` | 通过 |
-| TC-FILTER-01 | P0 | ③ 总流水 445,756.18 | tc-p0-report `用例#TC-FILTER-01-③` | 通过 |
-| TC-FILTER-02 | P0 | ① 房间 ID 批量 6 行 | tc-p0-report `用例#TC-FILTER-02-①` | 通过 |
-| TC-FILTER-02 | P0 | ② 仅两个指定房间 | tc-p0-report `用例#TC-FILTER-02-②` | 通过 |
-| TC-FILTER-03 | P0 | ① 陪玩师 ID 批量 2 行 | tc-p0-report `用例#TC-FILTER-03-①` | 通过 |
-| TC-FILTER-03 | P0 | ② player_id 322540/7214137 | tc-p0-report `用例#TC-FILTER-03-②` | 通过 |
-| TC-FILTER-04 | P1 | ① 大区+房间组合仅返回同时满足行 | tc-p1-extra `用例#TC-FILTER-04-①` | 通过 |
-| TC-UI-05 | P1 | ① 重置清空筛选条件 | tc-p1-extra `用例#TC-UI-05-①` | 通过 |
-| TC-UI-05 | P1 | ② 重置清空表格并恢复空态 | tc-p1-extra `用例#TC-UI-05-②` | 通过 |
-| TC-UI-06 | P0 | ① 文件名含报表名称 | tc-p0-report `用例#TC-UI-06-①` | 通过 |
-| TC-UI-06 | P0 | ② 26 行数据 × 17 列，数据未错位 | tc-p0-report `用例#TC-UI-06-②` | 通过 |
-| TC-UI-06 | P0 | ③ 导出合计 445,824.52 | tc-p0-report `用例#TC-UI-06-③` | 通过 |
-| TC-UI-07 | P0 | ① 17 列表头完整、无截断/错位/重排 | tc-p0-report `用例#TC-UI-07-①` | 通过 |
-| TC-UI-08 | P0 | ① 首行字段与接口基线一致、不串列 | tc-p0-report `用例#TC-UI-08-①` | 通过 |
-| TC-REG-01 | P1 | ① 房间维度报表可进入，12 列表头正常 | tc-p1-extra `用例#TC-REG-01-①` | 通过 |
-| TC-REG-01 | P1 | ② 18 行且合计 35/21/14/728,846.40 | tc-p1-extra `用例#TC-REG-01-②` | 通过 |
-| TC-REG-02 | P1 | ① 两级分组表头正常、筛选项与数据正常 | 无（未定位到报表数据表，阻塞） | 阻塞 |
-| TC-EDGE-01 | P2 | ① 无数据区间返回 0 行、无报错 | 未执行（P2 时间不足） | 未执行 |
-| TC-EDGE-02 | P2 | ① 100+ ID 查询正常、不白屏 | 未执行（P2 时间不足） | 未执行 |
+| TC-AUTH-01 | P0 | ① 菜单项可见 | tc-formal-p0 `用例#TC-AUTH-01-①` | 通过 |
+| TC-AUTH-01 | P0 | ② 面包屑与标题正确 | tc-formal-p0 `用例#TC-AUTH-01-②` | 通过 |
+| TC-AUTH-01 | P0 | ③ 路由正确 | tc-formal-p0 `用例#TC-AUTH-01-③` | 通过 |
+| TC-AUTH-02 | P1 | ① 无权限账号不可见菜单 | 无（无受限账号，阻塞） | 阻塞 |
+| TC-AUTH-03 | P1 | ① 无权限账号直达 404 / ② 路由不停留 | 无（无受限账号，阻塞） | 阻塞 |
+| TC-INIT-01 | P0 | ① 空态文案 | tc-formal-p0 `用例#TC-INIT-01-①` | 通过 |
+| TC-INIT-01 | P0 | ② Total 0 且分页禁用 | tc-formal-p0 `用例#TC-INIT-01-②` | 通过 |
+| TC-INIT-01 | P0 | ③ 无数据行/无 loading | tc-formal-p0 `用例#TC-INIT-01-③` | 通过 |
+| TC-VALID-01 | P0 | ① 提示「请选择开始日期」 | tc-formal-p0 `用例#TC-VALID-01-①` | 通过 |
+| TC-VALID-01 | P0 | ② 表格保持空态 | tc-formal-p0 `用例#TC-VALID-01-②` | 通过 |
+| TC-VALID-01 | P0 | ③ Total 0 / 无查询 | tc-formal-p0 `用例#TC-VALID-01-③` | 通过 |
+| TC-VALID-02 | P0 | ① 导出必填拦截、不下载 | tc-formal-p0 `用例#TC-VALID-02-①` | 通过 |
+| TC-VALID-02 | P0 | ② 表格保持空态 | tc-formal-p0 `用例#TC-VALID-02-②` | 通过 |
+| TC-GUARD-01 | P0 | ① 操作后空态/无数据行 | tc-formal-p0 `用例#TC-GUARD-01-①` | 通过 |
+| TC-GUARD-01 | P0 | ② Total 0 且分页禁用 | tc-formal-p0 `用例#TC-GUARD-01-②` | 通过 |
+| TC-GUARD-01 | P0 | ③ 无 loading/无新数据/无 query | tc-formal-p0 `用例#TC-GUARD-01-③` | 通过 |
+| TC-GUARD-02 | P0 | ① 重置后空态 | tc-formal-p1p2 `用例#TC-GUARD-02-①`（由 RESET-01 覆盖后置态） | 通过 |
+| TC-GUARD-02 | P0 | ② 操作分页后仍空态 | tc-formal-p1p2 `用例#TC-GUARD-02-②` | 通过 |
+| TC-GUARD-02 | P0 | ③ Total 0 且分页禁用 | tc-formal-p1p2 `用例#TC-GUARD-02-③` | 通过 |
+| TC-GUARD-02 | P0 | ④ 无 loading/无新数据/无 query | tc-formal-p1p2 `用例#TC-GUARD-02-④` | 通过 |
+| TC-QUERY-01 | P0 | ① Total 26 / 26 行 | tc-formal-p0 `用例#TC-QUERY-01-①` | 通过 |
+| TC-QUERY-01 | P0 | ② 状态分布 15/4/7 | tc-formal-p0 `用例#TC-QUERY-01-②` | 通过 |
+| TC-QUERY-01 | P0 | ③ 合计 445,824.52 | tc-formal-p0 `用例#TC-QUERY-01-③` | 通过 |
+| TC-QUERY-01 | P0 | ④ date 列区间 | tc-formal-p0 `用例#TC-QUERY-01-④` | 通过 |
+| TC-PAGE-01 | P1 | ① Total 26 | tc-formal-p1p2 `用例#TC-PAGE-01-①` | 通过 |
+| TC-PAGE-01 | P1 | ② 20+6 不重复 | tc-formal-p1p2 `用例#TC-PAGE-01-②` | 通过 |
+| TC-PAGE-01 | P1 | ③ 50/page 26 行集合一致 | tc-formal-p1p2 `用例#TC-PAGE-01-③` | 通过 |
+| TC-FILTER-01 | P0 | ① 大区单选 | tc-formal-p0 `用例#TC-FILTER-01-①` | 通过 |
+| TC-FILTER-01 | P0 | ② Total 23 / 23 行 | tc-formal-p0 `用例#TC-FILTER-01-②` | 通过 |
+| TC-FILTER-01 | P0 | ③ 合计 445,756.18 | tc-formal-p0 `用例#TC-FILTER-01-③` | 通过 |
+| TC-FILTER-02 | P0 | ① D1 6 行 | tc-formal-p0 `用例#TC-FILTER-02-①` | 通过 |
+| TC-FILTER-02 | P0 | ② D1 房间集合 | tc-formal-p0 `用例#TC-FILTER-02-②` | 通过 |
+| TC-FILTER-02 | P0 | ③ D1/D2 结果一致 | tc-formal-p0 `用例#TC-FILTER-02-③` | 通过 |
+| TC-FILTER-03 | P0 | ① 2 行 | tc-formal-p0 `用例#TC-FILTER-03-①` | 通过 |
+| TC-FILTER-03 | P0 | ② player_id 集合 | tc-formal-p0 `用例#TC-FILTER-03-②` | 通过 |
+| TC-FILTER-04 | P1 | ① 6 行 | tc-formal-p1p2 `用例#TC-FILTER-04-①` | 通过 |
+| TC-FILTER-04 | P1 | ② 房间集合 | tc-formal-p1p2 `用例#TC-FILTER-04-②` | 通过 |
+| TC-FILTER-04 | P1 | ③ 交集性质 | tc-formal-p1p2 `用例#TC-FILTER-04-③` | 通过 |
+| TC-RESET-01 | P1 | ① 条件清空 | tc-formal-p1p2 `用例#TC-RESET-01-①` | 通过 |
+| TC-RESET-01 | P1 | ② 空态/0 行 | tc-formal-p1p2 `用例#TC-RESET-01-②` | 通过 |
+| TC-RESET-01 | P1 | ③ Total 0 且分页禁用 | tc-formal-p1p2 `用例#TC-RESET-01-③` | 通过 |
+| TC-EXPORT-01 | P0 | ① 文件名 | tc-formal-p0 `用例#TC-EXPORT-01-①` | 通过 |
+| TC-EXPORT-01 | P0 | ② 17 列×26 行 | tc-formal-p0 `用例#TC-EXPORT-01-②` | 通过 |
+| TC-EXPORT-01 | P0 | ③ 合计 445,824.52 | tc-formal-p0 `用例#TC-EXPORT-01-③` | 通过 |
+| TC-EXPORT-01 | P0 | ④ 数据不错列 | tc-formal-p0 `用例#TC-EXPORT-01-④` | 通过 |
+| TC-DISP-01 | P0 | ① 17 列顺序 | tc-formal-p0 `用例#TC-DISP-01-①` | 通过 |
+| TC-DISP-01 | P0 | ② 列名完整不截断 | tc-formal-p0 `用例#TC-DISP-01-②` | 通过 |
+| TC-DISP-01 | P0 | ③ 连字符列名单行平铺 | tc-formal-p0 `用例#TC-DISP-01-③` | 通过 |
+| TC-DISP-02 | P0 | ① 批次号 | tc-formal-p0 `用例#TC-DISP-02-①` | 通过 |
+| TC-DISP-02 | P0 | ② 主播ID/编号/昵称 | tc-formal-p0 `用例#TC-DISP-02-②` | 通过 |
+| TC-DISP-02 | P0 | ③ 房间/状态/流水/竞价人数 | tc-formal-p0 `用例#TC-DISP-02-③` | 通过 |
+| TC-DISP-02 | P0 | ④ 得标/时间/关系 | tc-formal-p0 `用例#TC-DISP-02-④` | 通过 |
+| TC-REG-01 | P1 | ① 12 列表头 | tc-formal-p1p2 `用例#TC-REG-01-①` | 通过 |
+| TC-REG-01 | P1 | ② 18 行/Total 18 | tc-formal-p1p2 `用例#TC-REG-01-②` | 通过 |
+| TC-REG-01 | P1 | ③ 合计 35/21/14/728,846.40 | tc-formal-p1p2 `用例#TC-REG-01-③` | 通过 |
+| TC-REG-02 | P1 | ① 筛选项完整 | tc-formal-p1p2 `用例#TC-REG-02-①` | 通过 |
+| TC-REG-02 | P1 | ② 两级分组表头 | 条件执行；无数据则阻塞 | 阻塞 |
+| TC-REG-02 | P1 | ③ 数据行>0 | 条件执行；无数据则阻塞 | 阻塞 |
+| TC-EDGE-01 | P2 | ① 0 行/空态 | tc-formal-p1p2 `用例#TC-EDGE-01-①` | 通过 |
+| TC-EDGE-01 | P2 | ② Total 0 | tc-formal-p1p2 `用例#TC-EDGE-01-②` | 通过 |
+| TC-EDGE-01 | P2 | ③ 无报错/不白屏 | tc-formal-p1p2 `用例#TC-EDGE-01-③` | 通过 |
+| TC-EDGE-02 | P2 | ① 不白屏/不崩溃 | tc-formal-p1p2 `用例#TC-EDGE-02-①` | 通过 |
+| TC-EDGE-02 | P2 | ② 数据行或空态/无报错 | tc-formal-p1p2 `用例#TC-EDGE-02-②` | 通过 |
+| TC-EDGE-02 | P2 | ③ Total N≥0 | tc-formal-p1p2 `用例#TC-EDGE-02-③` | 通过 |
 
-## 双向核对
-
-- 正向：P0 10 条共 21 个检查点，全部有唯一 check；P1 已代码化 6 条共 7 个检查点。
-- 反向：tc-p0-report 的 21 个 check、tc-p1-extra 的 7 个 check 均能映射到上表；无额外私增验证点。
-- 未代码化/未执行：TC-AUTH-02、TC-AUTH-03（无无权限账号，阻塞）；TC-REG-02（查询后仅见查询记录表，未定位到报表数据分组表头，阻塞）；TC-EDGE-01、TC-EDGE-02（P2 时间不足，未执行）。
+> 执行说明：P0 因 ODPS 单次查询约 2–3 分钟，拆为 `tc-formal-p0.test.ts`（26 个 check）与 `tc-formal-p0b.test.ts`（11 个 check）两个脚本；P1/P2 由 `tc-formal-p1p2.test.ts` 执行（23 个 check）。REG-02 仅 ① 可验证（筛选项），②③ 因日维度无数据未渲染表头，按阻塞记录。

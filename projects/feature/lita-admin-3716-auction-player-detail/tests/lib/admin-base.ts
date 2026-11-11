@@ -279,6 +279,66 @@ export abstract class AdminBase extends CheckBaseClass {
     return m ? Number(m[1].replace(/,/g, '')) : 0;
   }
 
+  /** 分页总数原文（Total N）。 */
+  protected async totalText(): Promise<string> {
+    return (await this.page!.locator('.el-pagination__total').innerText().catch(() => '')).replace(/\s+/g, ' ').trim();
+  }
+
+  /** 切换每页条数并等待真实 query 响应。 */
+  protected async pageSize(n: number): Promise<void> {
+    const sel = this.page!.locator('.el-pagination__sizes .el-select').first();
+    if ((await sel.count()) === 0) return;
+    await sel.click();
+    await this.page!.waitForTimeout(700);
+    const opt = this.page!.locator('.el-select-dropdown:visible .el-select-dropdown__item', { hasText: `${n}/page` }).first();
+    try {
+      await opt.waitFor({ state: 'visible', timeout: 5000 });
+    } catch {
+      return;
+    }
+    const wait = this.page!.waitForResponse(
+      (r) => r.url().includes('/stats/query') && !r.url().includes('download'), { timeout: 120000 }
+    ).catch(() => null);
+    await opt.click();
+    await wait;
+    await this.page!.waitForTimeout(3000);
+  }
+
+  /** 分页初始/当前状态：Total、上/下一页与每页条数是否禁用。 */
+  protected async paginationState(): Promise<{ total: string; prevDisabled: boolean; nextDisabled: boolean; sizeDisabled: boolean }> {
+    const total = await this.totalText();
+    const prev = this.page!.locator('.el-pagination .btn-prev').first();
+    const next = this.page!.locator('.el-pagination .btn-next').first();
+    const prevDisabled = (await prev.count()) > 0 && await prev.evaluate((el) => (el as HTMLButtonElement).disabled || el.classList.contains('disabled')).catch(() => false);
+    const nextDisabled = (await next.count()) > 0 && await next.evaluate((el) => (el as HTMLButtonElement).disabled || el.classList.contains('disabled')).catch(() => false);
+    const size = this.page!.locator('.el-pagination__sizes .el-select').first();
+    const sizeDisabled = (await size.count()) > 0 && await size.evaluate((el) =>
+      el.classList.contains('is-disabled') || !!el.querySelector('input[disabled]')).catch(() => false);
+    return { total, prevDisabled, nextDisabled, sizeDisabled };
+  }
+
+  /** 直接输入日期值并提交（用于非当前月份，如 2026-01）。 */
+  protected async setDateValue(label: string, value: string): Promise<boolean> {
+    const field = this.page!.locator('.query-field', { has: this.page!.locator('.query-label', { hasText: label }) }).first();
+    const input = field.locator('input').first();
+    await input.click();
+    await input.fill(value);
+    await input.press('Enter');
+    await this.page!.keyboard.press('Escape');
+    await this.page!.waitForTimeout(600);
+    return (await input.inputValue()) === value;
+  }
+
+  /** 当前可见 loading 遮罩数量。 */
+  protected async loadingCount(): Promise<number> {
+    return this.page!.locator('.el-loading-mask:visible').count();
+  }
+
+  /** 面包屑文本（归一化空白）。 */
+  protected async breadcrumb(): Promise<string> {
+    return (await this.page!.locator('.el-breadcrumb').innerText().catch(() => '')).replace(/\s+/g, ' ').trim();
+  }
+
   protected async emptyText(): Promise<string> {
     return (await this.page!.locator('.el-table__empty-text').innerText().catch(() => '')).trim();
   }
