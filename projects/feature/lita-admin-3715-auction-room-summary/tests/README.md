@@ -9,7 +9,8 @@
 
 | 脚本 | 覆盖用例 | 说明 |
 |:---|:---|:---|
-| `tc-auth-reg.test.ts` | TC-AUTH-02、TC-AUTH-03、TC-REG-01、TC-REG-02 | 菜单权限反向验证 + 既有报表回归 |
+| `tc-auth-reg.test.ts` | TC-AUTH-02、TC-AUTH-03、TC-REG-01、TC-REG-02 | 菜单权限反向验证 + 既有报表回归（qa-ai） |
+| `tc-p0-report.test.ts` | TC-AUTH-01、TC-UI-01/02/03/06/07、TC-FILTER-01/02/03 | P0 报表主路径（admin） |
 
 > 报表页 TC-AUTH-01、TC-UI-01~07、TC-FILTER-01~04、TC-EDGE-01~02 需要 `auction-mode-room-summary` 权限，
 > 本轮测试账号 qa-ai 不具备该权限（直达路由跳 404），相关用例未代码化，按阻塞记录（见 COVERAGE.md）。

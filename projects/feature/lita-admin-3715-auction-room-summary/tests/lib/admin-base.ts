@@ -222,4 +222,64 @@ export abstract class AdminBase extends CheckBaseClass {
     await this.page!.getByRole('button', { name: '查询', exact: true }).click();
     await wait;
   }
+
+  /** 通过日期面板选择当月第 day 天（避免直接 fill 不提交 v-model）。 */
+  protected async pickDate(label: string, day: number): Promise<void> {
+    const field = this.page!.locator('.query-field', { has: this.page!.locator('.query-label', { hasText: label }) }).first();
+    const input = field.locator('input').first();
+    await input.click();
+    await this.page!.waitForTimeout(900);
+    const panel = this.page!.locator('.el-picker-panel').last();
+    try {
+      await panel.waitFor({ state: 'visible', timeout: 5000 });
+      const cell = panel.locator('.el-date-table td.available .cell')
+        .filter({ hasText: new RegExp(`^${day}$`) }).first();
+      await cell.click({ timeout: 5000 });
+      await this.page!.waitForTimeout(400);
+      return;
+    } catch {
+      // 面板不可用时的兜底：键盘输入并回车提交，点击标题失焦（不回退）
+    }
+    const yyyy = new Date().getFullYear();
+    const mm = String(new Date().getMonth() + 1).padStart(2, '0');
+    await input.fill(`${yyyy}-${mm}-${String(day).padStart(2, '0')}`);
+    await input.press('Enter');
+    await this.page!.waitForTimeout(500);
+    await this.page!.locator('.page-title').first().click().catch(() => undefined);
+    await this.page!.waitForTimeout(300);
+  }
+
+  /** 选择下拉筛选项（按选项文案）。 */
+  protected async pickOption(label: string, optionText: string): Promise<void> {
+    const field = this.page!.locator('.query-field', { has: this.page!.locator('.query-label', { hasText: label }) }).first();
+    await field.locator('.el-select').click();
+    await this.page!.waitForTimeout(500);
+    await this.page!.locator('.el-select-dropdown:visible .el-select-dropdown__item', { hasText: optionText }).first().click();
+    await this.page!.waitForTimeout(400);
+  }
+
+  /** 在指定筛选项填入文本。 */
+  protected async fillField(label: string, value: string): Promise<void> {
+    const field = this.page!.locator('.query-field', { has: this.page!.locator('.query-label', { hasText: label }) }).first();
+    const input = field.locator('input, textarea').first();
+    await input.fill(value);
+    await this.page!.waitForTimeout(200);
+  }
+
+  /** 读取表格数据行（二维文本数组）。 */
+  protected async tableRows(): Promise<string[][]> {
+    return this.page!.locator('.el-table__body-wrapper tbody tr').evaluateAll((rows) =>
+      rows.map((tr) => Array.from(tr.querySelectorAll('td')).map((td) => (td.textContent ?? '').trim()))
+    );
+  }
+
+  protected async paginationTotal(): Promise<number> {
+    const text = await this.page!.locator('.box-pagination').innerText().catch(() => '');
+    const m = text.replace(/\s+/g, ' ').match(/Total\s+([\d,]+)/i);
+    return m ? Number(m[1].replace(/,/g, '')) : 0;
+  }
+
+  protected async emptyText(): Promise<string> {
+    return (await this.page!.locator('.el-table__empty-text').innerText().catch(() => '')).trim();
+  }
 }
