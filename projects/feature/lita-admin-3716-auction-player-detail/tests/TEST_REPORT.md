@@ -5,7 +5,7 @@
 | 项 | 内容 |
 |:---|:---|
 | 项目 | 3716【报表需求】拍拍模式流水 - 主播维度（P0，w291） |
-| 提测 | releaseId=53（2026-11-11 18:20 提测，测试人员 丁媛，分支 LitaGroup/lita-admin-original @ dev） |
+| 提测 | releaseId=53（2026-11-11 18:20 提测，测试人员 丁媛，分支 LitaGroup/lita-admin-original @ dev；18:50:32 判定未通过） |
 | 环境 | https://admin.test.lita.game（非生产） |
 | 执行时间 | 2026-11-11 18:32–18:50 |
 | 用例输入 | `/task/20261111/TK-0189/TEST_CASES`（19 条九列用例，父任务指定为唯一输入） |
@@ -111,11 +111,13 @@
 - 目录：`projects/feature/lita-admin-3716-auction-player-detail/tests/`
 - 文件：`lib/admin-base.ts`、`tc-p0-report.test.ts`、`tc-p1-extra.test.ts`、`COVERAGE.md`、`RUNS.md`、`README.md`
 - 运行：`node tc-p0-report.test.ts` / `node tc-p1-extra.test.ts`（凭证运行时注入）
-- 提交/导入：见 HANDOFF（按工位权限执行，记录 commit/分支/PR 与 testId 或未登记原因）。
+- 分支：`test/tk0201-auction-player-detail`；commit：`49a5324`（test: 新增项目3716主播维度报表UI用例脚本）；已 push origin。
+- PR：工位无 `gh`/GitHub 凭证，未自动创建；创建入口 https://github.com/LitaGroup/scripts/pull/new/test/tk0201-auction-player-detail 。
+- 平台 import：未完成（scripts/import 扫描 main，本轮按权限未直推 main），无 testId。
 
 ## 11. 提测状态
 
-- 流转：待冒烟 → 进行中（18:32）→ **未通过**（18:5x）。
+- 流转：待冒烟 → 进行中（18:32）→ **未通过**（18:50:32，判定人：技术-测试-Admin 用例执行）。
 - 依据：19 条中 3 条阻塞、2 条未执行，未满足「计划内用例全部通过、无未说明阻塞/未执行」的通过门槛；本轮 0 产品缺陷，阻塞为账号权限/既有报表定位/数据可用性。建议下一轮补齐账号与 REG-02 技术方案后复测。
 
 ## 12. 限制、来源声明与结论
