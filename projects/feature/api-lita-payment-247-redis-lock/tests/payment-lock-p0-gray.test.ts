@@ -96,18 +96,30 @@ class PaymentLockP0GrayTest extends CheckBaseClass {
 
     try {
       if (SCOPE === 'whitelist') {
-        await this.case101A();
-        await this.case102BNotLocked();
+        await this.runCase('101', () => this.case101A());
+        await this.runCase('102', () => this.case102BNotLocked());
       } else {
-        await this.case101A();
-        await this.case104BAllLocked();
-        await this.case105AAllLocked();
+        await this.runCase('101', () => this.case101A());
+        await this.runCase('104', () => this.case104BAllLocked());
+        await this.runCase('105', () => this.case105AAllLocked());
       }
     } finally {
       await restoreToBaseline(this.client, USER_A, BIZ, this.baselineA, RUN_ID, 'GRAY-A-END');
       await restoreToBaseline(this.client, USER_B, BIZ, this.baselineB, RUN_ID, 'GRAY-B-END');
     }
-    await this.case106Cleanup();
+    await this.runCase('106', () => this.case106Cleanup());
+  }
+
+  private async runCase(id: string, fn: () => Promise<void>): Promise<void> {
+    try {
+      await fn();
+    } catch (e) {
+      await this.check(`用例#API-LOCK-${id}-执行异常`, async (): Promise<CheckResult> => ({
+        expect: '用例可执行且请求成功返回',
+        real: (e as Error).message,
+        pass: false,
+      }));
+    }
   }
 
   private async case101A(): Promise<void> {

@@ -63,14 +63,26 @@ class PaymentLockP0TransactionTest extends CheckBaseClass {
     });
 
     try {
-      await this.case301RollbackRelease();
-      await this.case302ValidationRelease();
-      await this.case303SuccessReleaseSmoke();
-      await this.case304CommitOrderLimit();
+      await this.runCase('301', () => this.case301RollbackRelease());
+      await this.runCase('302', () => this.case302ValidationRelease());
+      await this.runCase('303', () => this.case303SuccessReleaseSmoke());
+      await this.runCase('304', () => this.case304CommitOrderLimit());
     } finally {
       await restoreToBaseline(this.client, USER_A, BIZ, this.baselineA, RUN_ID, 'TX-END');
     }
-    await this.case305Cleanup();
+    await this.runCase('305', () => this.case305Cleanup());
+  }
+
+  private async runCase(id: string, fn: () => Promise<void>): Promise<void> {
+    try {
+      await fn();
+    } catch (e) {
+      await this.check(`用例#API-LOCK-${id}-执行异常`, async (): Promise<CheckResult> => ({
+        expect: '用例可执行且请求成功返回',
+        real: (e as Error).message,
+        pass: false,
+      }));
+    }
   }
 
   private async case301RollbackRelease(): Promise<void> {

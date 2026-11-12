@@ -91,18 +91,30 @@ class PaymentLockP0ConcurrencyTest extends CheckBaseClass {
     });
 
     try {
-      await this.case201DifferentTransNo();
-      await this.case202SameTransNo();
-      await this.case203AddAndSub();
-      await this.case204AddAndRefund();
-      await this.case205DifferentUsers();
-      await this.case206HighConcurrency();
-      await this.case207Transactions();
+      await this.runCase('201', () => this.case201DifferentTransNo());
+      await this.runCase('202', () => this.case202SameTransNo());
+      await this.runCase('203', () => this.case203AddAndSub());
+      await this.runCase('204', () => this.case204AddAndRefund());
+      await this.runCase('205', () => this.case205DifferentUsers());
+      await this.runCase('206', () => this.case206HighConcurrency());
+      await this.runCase('207', () => this.case207Transactions());
     } finally {
       await restoreToBaseline(this.client, USER_A, BIZ, this.baselineA, RUN_ID, 'CONC-A-END');
       await restoreToBaseline(this.client, USER_B, BIZ, this.baselineB, RUN_ID, 'CONC-B-END');
     }
-    await this.case208Cleanup();
+    await this.runCase('208', () => this.case208Cleanup());
+  }
+
+  private async runCase(id: string, fn: () => Promise<void>): Promise<void> {
+    try {
+      await fn();
+    } catch (e) {
+      await this.check(`用例#API-LOCK-${id}-执行异常`, async (): Promise<CheckResult> => ({
+        expect: '用例可执行且请求成功返回',
+        real: (e as Error).message,
+        pass: false,
+      }));
+    }
   }
 
   private async case201DifferentTransNo(): Promise<void> {

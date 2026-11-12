@@ -81,14 +81,26 @@ class PaymentLockP0OffTest extends CheckBaseClass {
     });
 
     try {
-      await this.case001Add();
-      await this.case002Sub();
-      await this.case003Refund();
-      await this.case004ConcurrentAdd();
+      await this.runCase('001', () => this.case001Add());
+      await this.runCase('002', () => this.case002Sub());
+      await this.runCase('003', () => this.case003Refund());
+      await this.runCase('004', () => this.case004ConcurrentAdd());
     } finally {
       await restoreToBaseline(this.client, USER_A, BIZ, this.baselineA, RUN_ID, 'END');
     }
-    await this.case005Cleanup();
+    await this.runCase('005', () => this.case005Cleanup());
+  }
+
+  private async runCase(id: string, fn: () => Promise<void>): Promise<void> {
+    try {
+      await fn();
+    } catch (e) {
+      await this.check(`用例#API-LOCK-${id}-执行异常`, async (): Promise<CheckResult> => ({
+        expect: '用例可执行且请求成功返回',
+        real: (e as Error).message,
+        pass: false,
+      }));
+    }
   }
 
   private async case001Add(): Promise<void> {

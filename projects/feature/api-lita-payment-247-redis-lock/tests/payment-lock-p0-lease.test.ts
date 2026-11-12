@@ -87,14 +87,26 @@ class PaymentLockP0LeaseTest extends CheckBaseClass {
 
     try {
       if (MODE === 'lease0') {
-        await this.case401WatchdogSmoke();
+        await this.runCase('401', () => this.case401WatchdogSmoke());
       } else {
-        await this.case402Expiry();
+        await this.runCase('402', () => this.case402Expiry());
       }
     } finally {
       await restoreToBaseline(this.client, USER_A, BIZ, this.baselineA, RUN_ID, 'LEASE-END');
     }
-    await this.case405Cleanup();
+    await this.runCase('405', () => this.case405Cleanup());
+  }
+
+  private async runCase(id: string, fn: () => Promise<void>): Promise<void> {
+    try {
+      await fn();
+    } catch (e) {
+      await this.check(`用例#API-LOCK-${id}-执行异常`, async (): Promise<CheckResult> => ({
+        expect: '用例可执行且请求成功返回',
+        real: (e as Error).message,
+        pass: false,
+      }));
+    }
   }
 
   private async case401WatchdogSmoke(): Promise<void> {
