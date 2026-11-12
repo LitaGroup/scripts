@@ -322,3 +322,12 @@
 ```
 
 - 证据：/home/ecs-user/work/tk251-evidence/C3-metrics
+
+## 2026-11-12 22:59:18 · C4 恢复安全基线
+
+- Nacos C4 读回：enabled=false、wait-ms=300、lease-ms=0、key-prefix="lock:deal:"、fail-fast=true、fallback-to-db=true、startup-check=WARN、gray-games=["1043"]、gray-biz-list=["gamecenter_baishun1043"]、gray-user-whitelist=[]；transaction-p99-ms 实际键已移除（仅注释提及）。
+- 配置注释：TK-0251 C4 恢复：余额锁安全基线，enabled=false，移除 transaction-p99-ms，仅测试环境。
+- 生效时间：2026-11-12 22:59:18 CST。
+- 稳定观察：22:59:30 → 23:01:30（120s）redis_lock_acquire_total 385 → 385，delta=0。
+- 余额核对：A=7586 0.00，B=7587 0.0000。
+- 结论：测试环境已恢复默认关闭；测试数据已清理。

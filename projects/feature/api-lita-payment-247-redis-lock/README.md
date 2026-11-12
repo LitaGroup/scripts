@@ -121,6 +121,7 @@ LITA_PAYMENT_TRANS_PASSWORD=*** node payment-redis-lock-on.test.ts
 - C1：灰度 5/5（A=7586 加锁、B=7587 不加锁，biz 配置不参与）；并发 17/17（30 并发 ok=4/busy=26，余额 0.04，BUSY 未入账）；事务 6 通过 + 1 skip（304 接口层限制）；lease0 3/3；指标 4 通过 + 2 skip。
 - C2：灰度 9/9（空白名单 A/B 均加锁，B acquireDelta=15/busy=5）；并发 17/17（30 并发 ok=8/busy=22，余额 0.08）；事务 6 通过 + 1 skip。
 - C3：lease1 5/5（10 并发 ok=10，expiredDelta=10，余额 0.10，后续 add 成功）；metrics 5 通过 + 1 skip（expired=14、timeout=64、acquire=325）。
+- C4：2026-11-12 22:59:18 恢复 enabled=false、lease-ms=0、transaction-p99-ms 键移除；120s 内 acquire 无增量，A/B 余额 0.00。
 - 统计：29 条用例（P0 27/P1 2），61 个唯一检查点；59 通过、0 未通过、2 阻塞（304 事务顺序、501-③ Redis 异常指标，引用 P0-7/TK-0252）。
 - 缺陷：未发现产品缺陷，未创建缺陷。
 - 详细报告与证据：任务文档 `/task/20261112/TK-0251/TEST_REPORT.md`、`EVIDENCE.md`；运行记录见 `RUNS.md`，追溯见 `COVERAGE.md`。
