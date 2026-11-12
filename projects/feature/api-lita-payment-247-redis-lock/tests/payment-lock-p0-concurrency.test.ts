@@ -56,7 +56,7 @@ class PaymentLockP0ConcurrencyTest extends CheckBaseClass {
   constructor() {
     super();
     this.client = new PaymentClient();
-    this.total = 16;
+    this.total = 17;
   }
 
   async execute(): Promise<void> {
@@ -327,6 +327,11 @@ class PaymentLockP0ConcurrencyTest extends CheckBaseClass {
         expect: `acquireDelta>=${summary.ok.length} 且 acquireDelta>0`,
         real: `acquireDelta=${d.acquire}，ok=${summary.ok.length}，busy=${summary.busy.length}，timeoutDelta=${d.timeout}`,
         pass: summary.ok.length > 0 && d.acquire > 0 && d.acquire >= summary.ok.length,
+      }));
+      await this.check('用例#API-LOCK-206-④(API-LOCK-206) 高并发触发等待超时指标', async (): Promise<CheckResult> => ({
+        expect: 'busy>=1 且 acquire_fail_total{reason="timeout"} 增量>=1',
+        real: `busy=${summary.busy.length}，timeoutDelta=${d.timeout}`,
+        pass: summary.busy.length >= 1 && d.timeout >= 1,
       }));
     } finally {
       await restoreToBaseline(this.client, USER_A, BIZ, this.baselineA, RUN_ID, '206');
