@@ -297,7 +297,7 @@ class PaymentLockP0ConcurrencyTest extends CheckBaseClass {
       const d = metricsDelta(m0, m1);
       const summary = summarize(items);
       this.highConcurrencyItems = items;
-      await this.check('用例#API-LOCK-206-①(API-LOCK-206) 同用户 30 并发 add 结果仅为 OK 或 BUSY', async (): Promise<CheckResult> => ({
+      await this.check(`用例#API-LOCK-206-①(API-LOCK-206) 同用户 ${CONCURRENCY} 并发 add 结果仅为 OK 或 BUSY`, async (): Promise<CheckResult> => ({
         expect: `total=${CONCURRENCY}，other=0`,
         real: `ok=${summary.ok.length}，busy=${summary.busy.length}，other=${summary.other.length}${summary.other.length ? '，sample=' + JSON.stringify(summary.other[0].response.body) : ''}`,
         pass: summary.other.length === 0 && summary.ok.length + summary.busy.length === CONCURRENCY,

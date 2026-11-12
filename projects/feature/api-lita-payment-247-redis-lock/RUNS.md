@@ -97,3 +97,20 @@
 | C2 | payment-lock-p0-transaction.test.ts | node payment-lock-p0-transaction.test.ts | 未执行 |
 | C3 | payment-lock-p0-lease.test.ts | node payment-lock-p0-lease.test.ts --mode=lease1 | 未执行 |
 | 指标 | payment-lock-p0-metrics.test.ts | node payment-lock-p0-metrics.test.ts | 未执行 |
+
+## 2026-11-12 21:30-21:31 · 脚本自测（旧版本，仅验证可执行性）
+
+- 环境：https://lita-payment.test.cinta.team，仍是 TK-0247 版本（旧 inScope：gray-games 1043 命中，A/B 均加锁）
+- 目的：验证脚本、公共工具、余额回补、指标解析可执行；**不作为 TK-0250 P0 版本的结论**。
+- 配置：旧版本 redis-lock.enabled=true、gray-games=["1043"]、wait-ms=300、lease-ms=3000、fail-fast=true
+- 运行与结果：
+
+| 脚本 | 命令 | 结果 | 说明 |
+| --- | --- | --- | --- |
+| payment-lock-p0-gray.test.ts | --scope=all，并发 10 | done success，9 check 通过，0 fail，0 skip | A/B 各 10 并发，acquireDelta=10/10，余额回补 0.00 |
+| payment-lock-p0-concurrency.test.ts | --scope=all，并发 20 | done success，16 check 通过，0 fail，0 skip | 同用户 20 并发 ok=9/busy=11，余额=0.09；BUSY 均未入账；orderNo 唯一 |
+| payment-lock-p0-transaction.test.ts | 默认 | done success，6 check 通过，1 skip | 301/302/303/305 通过；304 接口层无法观察提交顺序，skip 并引用 P0-7 |
+| payment-lock-p0-lease.test.ts | --mode=lease0 | done success，3 check 通过，0 fail，0 skip | 旧版本 lease=3000，仅验证正常释放路径；**不代表 lease-ms=0 看门狗已验证** |
+| payment-lock-p0-metrics.test.ts | 默认 | done success，5 check 通过，0 fail，2 skip | acquire/timeout/标签基数通过；expired/redis_error 未触发，skip |
+
+- 结论：脚本可执行；正式 P0 结论必须在 5a3e2cb 部署后按 C0-C3 重新执行。
