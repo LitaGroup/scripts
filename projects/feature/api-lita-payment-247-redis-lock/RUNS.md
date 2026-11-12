@@ -72,3 +72,28 @@
 - 23 条用例、48 个检查点最终全部通过（锁关闭 38 + 锁开启 10）。
 - 首次锁开启运行的 1 个失败为脚本基线错误，已修正并复跑通过，不计产品缺陷。
 - 未发现产品缺陷。
+
+---
+
+# TK-0251 运行记录（余额 Redis 锁 P0 接口并发与灰度回归）
+
+## 状态
+
+- 2026-11-12 21:29：测试代码与用例已准备完成，等待 TK-0250 修复（bot-250-balance-lock-p0 @ 5a3e2cb）部署到测试环境。
+- 当前未执行任何依赖 P0 新版本的用例；不把旧版本探测结果写入本任务结论。
+- 配置阶段 C0-C3 由需求方/运维在测试环境 Nacos 切换；执行前记录实际配置与生效时间。
+
+## 待执行运行矩阵
+
+| 阶段 | 脚本 | 命令 | 状态 |
+| --- | --- | --- | --- |
+| C0 | payment-lock-p0-off.test.ts | node payment-lock-p0-off.test.ts | 未执行（等待部署/配置） |
+| C1 | payment-lock-p0-gray.test.ts | node payment-lock-p0-gray.test.ts --scope=whitelist | 未执行 |
+| C1 | payment-lock-p0-concurrency.test.ts | node payment-lock-p0-concurrency.test.ts --scope=whitelist | 未执行 |
+| C1 | payment-lock-p0-transaction.test.ts | node payment-lock-p0-transaction.test.ts | 未执行 |
+| C1 | payment-lock-p0-lease.test.ts | node payment-lock-p0-lease.test.ts --mode=lease0 | 未执行 |
+| C2 | payment-lock-p0-gray.test.ts | node payment-lock-p0-gray.test.ts --scope=all | 未执行 |
+| C2 | payment-lock-p0-concurrency.test.ts | node payment-lock-p0-concurrency.test.ts --scope=all | 未执行 |
+| C2 | payment-lock-p0-transaction.test.ts | node payment-lock-p0-transaction.test.ts | 未执行 |
+| C3 | payment-lock-p0-lease.test.ts | node payment-lock-p0-lease.test.ts --mode=lease1 | 未执行 |
+| 指标 | payment-lock-p0-metrics.test.ts | node payment-lock-p0-metrics.test.ts | 未执行 |

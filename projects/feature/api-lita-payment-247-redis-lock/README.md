@@ -1,6 +1,6 @@
-# lita-payment 余额变更 Redis 锁改造（TK-0247 / TK-0249）
+# lita-payment 余额变更 Redis 锁改造（TK-0247 / TK-0249 / TK-0251）
 
-TK-0249「任务 247 的改动测试」的接口测试脚本。被测变更为 **TK-0247**：`lita-payment` 余额变更入口增加 Redis 单写者锁。
+TK-0249「任务 247 的改动测试」与 TK-0251「余额 Redis 锁 P0 接口并发与灰度回归」的接口测试脚本。被测变更为 **TK-0247**（Redis 单写者锁）与 **TK-0250**（P0 审计整改）。
 
 ## 被测接口
 
@@ -69,3 +69,47 @@ LITA_PAYMENT_TRANS_PASSWORD=*** node payment-redis-lock-on.test.ts
 - 锁开启路径依赖测试环境 Nacos 配置：`redis-lock.enabled=true`、`gray-games=["1043"]`、`fail-fast=true`、`fallback-to-db=true`。未开启时脚本将锁开启场景标记 `skip`（阻塞），不伪造通过。
 - 不直接读写 Redis/MySQL；Redis 故障/降级、看门狗续期等场景由 TK-0247 单元测试覆盖，本接口测试不重复注入基础设施故障。
 - 不做性能压测；80 并发仅用于触发有界等待/快速失败，不评估吞吐。
+
+---
+
+# TK-0251 余额 Redis 锁 P0 接口并发与灰度回归
+
+- 被测变更：TK-0250「lita-payment 余额 Redis 锁 P0 审计整改」，修复分支 `bot-250-balance-lock-p0` @ `5a3e2cb`
+- 用例设计：`/task/20261112/TK-0251/CASES.md`
+- 追溯表：`COVERAGE.md` 的 TK-0251 章节
+- 范围：默认关闭回归、P0-1 灰度语义、P0-4/P0-7 并发互斥、P0-4 事务边界、P0-5 租约、指标；不做全量回归/性能/故障注入（故障注入由 TK-0252 覆盖）
+
+## TK-0251 测试用户
+
+| 变量 | 默认 | 说明 |
+| --- | --- | --- |
+| `LITA_PAYMENT_TEST_USER_ID` | `7586` | 白名单用户 A |
+| `LITA_PAYMENT_GRAY_USER_ID` | `7586` | 灰度用例的白名单用户 A |
+| `LITA_PAYMENT_NON_GRAY_USER_ID` | 无（必填） | 非白名单用户 B，需求方确认使用 `7587` |
+| `LITA_PAYMENT_BIZ` | `gamecenter_baishun1043` | 测试业务 |
+| `LITA_PAYMENT_TRANS_PASSWORD` | 无（必填） | 运行期环境变量注入，不落仓库 |
+| `LITA_PAYMENT_GRAY_SCOPE` | `whitelist` | `whitelist`（C1）或 `all`（C2） |
+| `LITA_PAYMENT_LEASE_MODE` | `lease0` | `lease0`（C1）或 `lease1`（C3） |
+| `LITA_PAYMENT_CONCURRENCY` | `30` | 并发互斥脚本并发数 |
+| `LITA_PAYMENT_GRAY_CONCURRENCY` | `20` | 灰度全量脚本并发数 |
+| `LITA_PAYMENT_LEASE_CONCURRENCY` | `10` | 短租约脚本并发数 |
+
+## TK-0251 配置阶段与运行命令
+
+| 阶段 | 配置要点 | 命令 |
+| --- | --- | --- |
+| C0 | `enabled=false` | `node payment-lock-p0-off.test.ts` |
+| C1 | `enabled=true`、`gray-user-whitelist=[7586]`、`gray-games/gray-biz-list` 非空、`lease-ms=0`、`wait-ms=300`、`fail-fast=true` | `node payment-lock-p0-gray.test.ts --scope=whitelist`；`node payment-lock-p0-concurrency.test.ts --scope=whitelist`；`node payment-lock-p0-transaction.test.ts`；`node payment-lock-p0-lease.test.ts --mode=lease0` |
+| C2 | 空白名单、`lease-ms=0` | `node payment-lock-p0-gray.test.ts --scope=all`；`node payment-lock-p0-concurrency.test.ts --scope=all`；`node payment-lock-p0-transaction.test.ts` |
+| C3 | `lease-ms=1`、`wait-ms=300`、`fail-fast=true` | `node payment-lock-p0-lease.test.ts --mode=lease1` |
+| 指标 | 建议在 C1-C3 后执行 | `node payment-lock-p0-metrics.test.ts` |
+
+每个脚本都支持 `--evidence-dir=<目录>`，默认写入 `tests/evidence/`（仓库 `.gitignore` 已忽略）。
+
+## TK-0251 限制
+
+- 配置切换由需求方/运维在测试环境 Nacos 操作，脚本不修改配置；执行前必须确认实际配置与生效时间。
+- 接口层无法直接观察事务提交顺序、看门狗续期、ERROR 日志；引用 TK-0250 P0-7 集成测试与 TK-0252 日志，并在报告中标注“引用不替代接口级结论”。
+- P0 实现未提供 `redis_lock_skipped` 指标；非白名单用户“未加锁”用请求前后 `redis_lock_acquire_total` 无增量证明。
+- 短租约 C3 若需要重启，需同时设置 `transaction-p99-ms=0` 或 `startup-check=WARN/SKIP`，否则启动自检可能失败。
+- 只操作测试环境与自建流水；A/B 余额按基线回补，流水号 `TK251-` 前缀可追溯。
