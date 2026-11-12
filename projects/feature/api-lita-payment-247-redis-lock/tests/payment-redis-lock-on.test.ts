@@ -100,7 +100,8 @@ class PaymentRedisLockOnTest extends CheckBaseClass {
         pass: true,
       }));
 
-      // 同用户 80 并发加钱，制造有界等待/快速失败
+      // 同用户 80 并发加钱，制造有界等待/快速失败（基线需包含 setup 的 0.01）
+      const beforeBatch = await this.amount();
       const batch = await Promise.all(Array.from({ length: CONCURRENCY }, (_, i) => this.add(0.01, `102-${i}`)));
       const ok = batch.filter((x) => isOk(x.response.body));
       const busy = batch.filter((x) => businessState(x.response.body) === BUSY_STATE && businessStatus(x.response.body) === BUSY_STATUS);
@@ -133,9 +134,9 @@ class PaymentRedisLockOnTest extends CheckBaseClass {
       }));
 
       const afterBatch = await this.amount();
-      const expected = Number((this.baseline + 0.01 * ok.length).toFixed(2));
-      await this.check('用例#API-PAY-104-①(API-PAY-104) 批次后余额等于基线加成功笔数金额', async (): Promise<CheckResult> => ({
-        expect: `余额=${expected.toFixed(2)}（基线 ${this.baseline.toFixed(2)} + 0.01×${ok.length}）`,
+      const expected = Number((beforeBatch + 0.01 * ok.length).toFixed(2));
+      await this.check('用例#API-PAY-104-①(API-PAY-104) 批次后余额等于批次前余额加成功笔数金额', async (): Promise<CheckResult> => ({
+        expect: `余额=${expected.toFixed(2)}（批次前 ${beforeBatch.toFixed(2)} + 0.01×${ok.length}）`,
         real: `余额=${Number.isFinite(afterBatch) ? afterBatch.toFixed(2) : String(afterBatch)}`,
         pass: afterBatch === expected,
       }));
