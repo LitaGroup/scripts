@@ -62,8 +62,8 @@
 | --- | --- |
 | 仓库 | `git@github.com:LitaGroup/scripts.git` |
 | 分支 | `test/tk-0314-moment-live-api`（开发分支）→ 合并 `main` |
-| 提交 | `a7f2258`（用例提交）；`b7d6cfe`（merge 到 main） |
-| 远端 main | `b7d6cfe26cca882cef361208ae2932c9cd1fb57e`（`git ls-remote origin refs/heads/main` 核对） |
+| 提交 | `a7f2258`（用例提交）；`b7d6cfe`（merge 到 main）；后续仅文档补充提交 |
+| 远端 main | 已包含上述提交（核对：`git ls-remote origin refs/heads/main`，交付时 HEAD 由 HANDOFF 记录） |
 
 ## 数据与安全
 
