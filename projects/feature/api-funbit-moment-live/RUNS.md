@@ -56,6 +56,15 @@
 | 17:35:25–17:35:32 | `moment-live-query.test.ts`（第 2 次） | 登录返回 `status=3 / System error`（同一时段手工复测已恢复正常） | 环境瞬时故障，重跑第 3 次成功 |
 | — | — | 以上两次均未产生动态数据；第 3 次运行前后均核验残留 0 条 | — |
 
+## 代码提交
+
+| 项 | 值 |
+| --- | --- |
+| 仓库 | `git@github.com:LitaGroup/scripts.git` |
+| 分支 | `test/tk-0314-moment-live-api`（开发分支）→ 合并 `main` |
+| 提交 | `a7f2258`（用例提交）；`b7d6cfe`（merge 到 main） |
+| 远端 main | `b7d6cfe26cca882cef361208ae2932c9cd1fb57e`（`git ls-remote origin refs/heads/main` 核对） |
+
 ## 数据与安全
 
 - 测试账号：`locale=in`，凭证来自本地 `config.json`（`.gitignore`），不提交、不打印。
