@@ -31,29 +31,30 @@ class ImageWhitePermissionTest extends AdminBase {
       await this.login(username, password);
     });
 
-    // #17-① 用户管理下不显示用户发图片白名单菜单
+    // #17-① 左侧菜单不显示「用户管理」分组及「用户发图片白名单」菜单
     let menuItems: string[] = [];
-    await this.act('用例#17 步骤：展开用户管理菜单', async () => {
-      const submenu = this.p.locator('.sidebar-container .el-submenu__title').filter({ hasText: /^\s*用户管理\s*$/ }).first();
-      await submenu.waitFor({ state: 'visible', timeout: 15000 });
-      await submenu.click();
-      await this.p.locator('.sidebar-container .el-menu-item').filter({ hasText: /用户工具/ }).first().waitFor({ state: 'visible', timeout: 10000 });
-      menuItems = (await this.p.locator('.sidebar-container .el-menu-item').allInnerTexts()).map((t) => t.trim()).filter(Boolean);
-      await this.shot('case17-user-manager-menu');
+    await this.act('用例#17 步骤：查看左侧菜单的用户管理分组', async () => {
+      await this.p.waitForSelector('.sidebar-container .el-menu-item, .sidebar-container .el-submenu__title', { timeout: 20000 });
+      menuItems = (await this.p.locator('.sidebar-container .el-menu-item, .sidebar-container .el-submenu__title').allInnerTexts())
+        .map((t) => t.trim())
+        .filter(Boolean);
+      await this.shot('case17-menu');
     });
+    const userManagerGroup = this.p.locator('.sidebar-container .el-submenu__title').filter({ hasText: /^\s*用户管理\s*$/ });
+    const userManagerCount = await userManagerGroup.count();
     const imageWhiteMenu = this.p.locator('.sidebar-container .el-menu-item').filter({ hasText: /用户发图片白名单/ });
     const imageWhiteMenuCount = await imageWhiteMenu.count();
-    await this.check('用例#17-① 用户管理下不显示用户发图片白名单菜单', async () => ({
-      expect: '0 个「用户发图片白名单」菜单项',
-      real: `${imageWhiteMenuCount} 个；用户管理下=[${menuItems.filter((t) => t !== 'Dashboard').join(',')}]`,
-      pass: imageWhiteMenuCount === 0 && menuItems.some((t) => t.includes('用户工具')),
+    await this.check('用例#17-① 左侧菜单不显示「用户管理」分组及「用户发图片白名单」菜单', async () => ({
+      expect: '0 个「用户管理」分组；0 个「用户发图片白名单」菜单项',
+      real: `用户管理=${userManagerCount}；用户发图片白名单=${imageWhiteMenuCount}；菜单=[${menuItems.join(',')}]`,
+      pass: userManagerCount === 0 && imageWhiteMenuCount === 0 && menuItems.every((t) => !t.includes('用户管理') && !t.includes('用户发图片白名单')),
     }));
 
     // #17-②/③ 直达路由
     await this.act('用例#17 步骤：新标签页直达目标路由', async () => {
       const page = await this.newPage();
       await page.goto(`${UI_BASE}/${WHITE_HASH}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
-      await page.waitForFunction((target) => location.hash !== target, WHITE_HASH, { timeout: 8000 }).catch(() => undefined);
+      await page.waitForFunction((target) => location.hash !== target, WHITE_HASH, { timeout: 10000 }).catch(() => undefined);
       await this.shot('case17-direct-url', page);
       const state = await page.evaluate(() => ({
         hash: location.hash,
@@ -63,16 +64,16 @@ class ImageWhitePermissionTest extends AdminBase {
         hasNo: document.querySelectorAll('input[placeholder="NO"]').length,
         headers: Array.from(document.querySelectorAll('.app-container .el-table__header-wrapper th')).map((th) => (th.textContent ?? '').trim()).filter(Boolean),
         rows: document.querySelectorAll('.app-container .el-table__body-wrapper tbody tr.el-table__row').length,
-        body: (document.querySelector('.app-main')?.textContent ?? '').slice(0, 200),
+        body: (document.body.innerText ?? '').replace(/\s+/g, ' ').slice(0, 300),
       }));
       (this as unknown as { directState: typeof state }).directState = state;
       await page.close();
     });
     const directState = (this as unknown as { directState?: { hash: string; title: string; hasLocale: number; hasId: number; hasNo: number; headers: string[]; rows: number; body: string } }).directState;
-    await this.check('用例#17-② 直达后不显示页面标题及 Locale/ID/NO 筛选区', async () => ({
-      expect: 'hash≠目标路由；Locale/ID/NO=0',
-      real: `hash=${directState?.hash ?? '(missing)'},title=${directState?.title ?? ''},Locale=${directState?.hasLocale ?? -1},ID=${directState?.hasId ?? -1},NO=${directState?.hasNo ?? -1}`,
-      pass: directState !== undefined && directState.hash !== WHITE_HASH && directState.hasLocale === 0 && directState.hasId === 0 && directState.hasNo === 0 && !directState.title.includes('用户发图片白名单'),
+    await this.check('用例#17-② 直达后跳转 #/404 并显示 OOPS，不显示白名单页面标题与筛选区', async () => ({
+      expect: 'hash=#/404；body 含 OOPS；Locale/ID/NO=0；title 不含用户发图片白名单',
+      real: `hash=${directState?.hash ?? '(missing)'},title=${directState?.title ?? ''},Locale=${directState?.hasLocale ?? -1},ID=${directState?.hasId ?? -1},NO=${directState?.hasNo ?? -1},body=${(directState?.body ?? '').replace(/\s+/g, ' ').slice(0, 120)}`,
+      pass: directState !== undefined && directState.hash === '#/404' && directState.hasLocale === 0 && directState.hasId === 0 && directState.hasNo === 0 && !directState.title.includes('用户发图片白名单') && directState.body.includes('OOPS'),
     }));
     await this.check('用例#17-③ 不展示白名单七列表格及任何白名单数据', async () => ({
       expect: '七列表头=0；数据行=0',

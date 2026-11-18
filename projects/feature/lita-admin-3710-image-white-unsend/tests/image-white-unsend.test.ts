@@ -1,16 +1,16 @@
 /**
- * 项目 3710 / TK-0136 首次执行 + TK-0140 缺陷 #252 回归：Admin 用户发图片白名单 + 陪玩师聊天记录 Unsend + 会话限制白名单回归
- * 用例来源：/task/20261109/TK-0135/HANDOFF（28 条九列用例）；技术方案：/task/20261109/TK-0135/TECH_DESIGN
- * 覆盖：#1~#16、#18、#21~#24、#26~#28；#6（BD-04 无数据）、#19/#20/#25（无 UNSEND 数据）按阻塞取证不生成检查点
- * TK-0140 回归：#7 使用 T=21 直接断言切换每页条数后 currentPage=1 且无 page=2&rows=20 覆盖请求；#26-②/#28-③ 按实际行为 Reset 后补 Search
- * TK-0144 补测复核：测试环境 DML 通道不可用（工位资源权限 none；admin-ai 查询只读 S1009）；#6/#19/#20/#25 维持阻塞，需求方 2026-11-10 选择 C 维持现状按阻塞交付
- * 数据隔离：仅使用测试环境真实用户 ID；通过页面添加/删除图片白名单与会话限制白名单测试行；禁止 SQL 写库
- * 运行：ADMIN_USERNAME=… ADMIN_PASSWORD=*** node projects/feature/lita-admin-3710-image-white-unsend/tests/image-white-unsend.test.ts
+ * 项目 3710 / TK-0335 执行：Admin 用户发图片白名单 + 陪玩师聊天记录 Unsend + 会话限制白名单回归
+ * 用例来源：/task/20261118/TK-0334/HANDOFF（28 条九列用例，已验收）；技术方案：/task/20261118/TK-0334/TECH_DESIGN
+ * 覆盖：#1~#16、#18、#21~#24、#26~#28；#6 按 BD-04R 页面构造主判定；#19/#20/#25 按 BD-13R 就绪确认，
+ *       无法产出 Admin 可见 UNSEND 行时按数据缺口阻塞取证（不生成检查点，不以空结果通过）；#17 在 image-white-permission.test.ts
+ * 数据隔离：仅使用测试环境真实用户 ID；图片白名单/会话限制白名单全部通过页面新增与删除；只读 SQL 仅用于 BD-04R/BD-14 就绪确认与清理核对
+ * 断言边界：所有 check 读取页面内容；SQL 结果只写入前置说明/run.json，不作为检查点判定值（#21 的 K 为 BD-14 就绪基线，页面行数与其比对）
+ * 运行：ADMIN_USERNAME=… ADMIN_PASSWORD=*** LITA_USER_TOKEN=… node projects/feature/lita-admin-3710-image-white-unsend/tests/image-white-unsend.test.ts
  * 回归选择：CASES=2,5,7,14,26,27,28（仅回归/自测；平台全量运行不要传）
  */
 import { AdminBase, WHITE_HASH, SESSION_HASH, arg, type Candidate, type WhiteRow, type SessionRow, type PaginationInfo, type ToastResult } from './lib/admin-base.ts';
 
-const CASE_TOTAL = 87;
+const CASE_TOTAL = 90;
 
 interface WhiteDataRow {
   label: string;
@@ -28,11 +28,26 @@ interface ConvoDataRow {
   count: number;
 }
 
-const CONVO_ROWS: ConvoDataRow[] = [
-  { label: 'D1', playerId: '14', start: '2026-10-26', end: '2026-11-09', type: 'Normal', display: 'NORMAL', count: 6 },
-  { label: 'D2', playerId: '5519', start: '2026-10-15', end: '2026-10-28', type: 'Auto Greeting', display: 'Auto Greeting', count: 1 },
-  { label: 'D3', playerId: '1460', start: '2026-07-30', end: '2026-08-12', type: 'Group Messaging', display: 'Group Messaging', count: 1 },
-];
+/** 执行日（Asia/Shanghai） */
+function cstDate(offsetDays = 0): string {
+  const now = new Date(Date.now() + 8 * 3600 * 1000 + offsetDays * 86400 * 1000);
+  return now.toISOString().slice(0, 10);
+}
+
+/** 日期字符串 → 当日 00:00:00.000（Asia/Shanghai）毫秒 */
+function dayStart(date: string): number {
+  return new Date(`${date}T00:00:00+08:00`).getTime();
+}
+
+/** 日期字符串 → 当日 23:59:59.999（Asia/Shanghai）毫秒 */
+function dayEnd(date: string): number {
+  return dayStart(date) + 86400 * 1000 - 1;
+}
+
+/** 日期字符串平移 offsetDays 天 */
+function shiftDate(date: string, offsetDays: number): string {
+  return new Date(dayStart(date) + offsetDays * 86400000).toISOString().slice(0, 10);
+}
 
 const LOCALE_LABELS: Record<string, string> = {
   en: '英语区',
@@ -61,6 +76,10 @@ function timeToEpoch(display: string): number {
 
 class ImageWhiteUnsendTest extends AdminBase {
   private candidates: Candidate[] = [];
+  private pool: Candidate[] = [];
+  private poolCursor = 0;
+  private used = new Set<string>();
+  private stockIds = new Set<string>();
   private adminUser = process.env.ADMIN_USERNAME ?? '';
   private sessionUser: Candidate | null = null;
   private blockedNotes: string[] = [];
@@ -75,7 +94,13 @@ class ImageWhiteUnsendTest extends AdminBase {
       await this.login();
     });
     await this.act('BD-01 采集真实用户样本（陪玩师管理列表，只读）', async () => {
-      this.candidates = await this.collectCandidates(600);
+      this.candidates = await this.collectCandidates(900);
+    });
+    await this.act('BD-01 就绪确认：只读 SQL 记录图片白名单存量 ID（不复用/不改动）', async () => {
+      const stock = await this.sqlQuery('basic', 'SELECT user_id FROM user_image_white');
+      this.stockIds = new Set(stock.rows.map((r) => String(r[0])));
+      this.pool = this.candidates.filter((c) => !this.stockIds.has(String(c.id)));
+      this.log(`图片白名单存量 ${this.stockIds.size} 行（ID: ${[...this.stockIds].join(',')}）；可用真实用户样本 ${this.pool.length} 个`);
     });
     await this.act('前置清理：删除本账号上一轮残留的图片白名单行', async () => {
       const result = await this.whiteCleanupByOperator(this.adminUser);
@@ -89,7 +114,7 @@ class ImageWhiteUnsendTest extends AdminBase {
         { no: 3, run: () => this.case3() },
         { no: 4, run: () => this.case4() },
         { no: 5, run: () => this.case5() },
-        { no: 6, run: () => this.case6Blocked() },
+        { no: 6, run: () => this.case6() },
         { no: 7, run: () => this.case7() },
         { no: 8, run: () => this.case8() },
         { no: 9, run: () => this.case9() },
@@ -101,11 +126,13 @@ class ImageWhiteUnsendTest extends AdminBase {
         { no: 15, run: () => this.case15() },
         { no: 16, run: () => this.case16() },
         { no: 18, run: () => this.case18() },
-        { no: 19, run: () => this.case19to25Blocked() },
+        { no: 19, run: () => this.case19Blocked() },
+        { no: 20, run: () => this.case20Blocked() },
         { no: 21, run: () => this.case21() },
         { no: 22, run: () => this.case22() },
         { no: 23, run: () => this.case23() },
         { no: 24, run: () => this.case24() },
+        { no: 25, run: () => this.case25Blocked() },
         { no: 26, run: () => this.case26() },
         { no: 27, run: () => this.case27() },
         { no: 28, run: () => this.case28() },
@@ -135,6 +162,55 @@ class ImageWhiteUnsendTest extends AdminBase {
 
   private async chk(title: string, expect: string, real: string, pass?: boolean, message?: string): Promise<void> {
     await this.check(title, async () => ({ expect, real, pass, message }));
+  }
+
+  /** 从可用样本池顺序取 n 个互不复用的真实用户（已排除存量白名单 ID） */
+  private take(n: number): Candidate[] {
+    const out: Candidate[] = [];
+    while (out.length < n && this.poolCursor < this.pool.length) {
+      const candidate = this.pool[this.poolCursor++];
+      if (this.used.has(String(candidate.id))) continue;
+      this.used.add(String(candidate.id));
+      out.push(candidate);
+    }
+    if (out.length < n) throw new Error(`BD-01 真实用户样本不足：需要 ${n}，剩余 ${out.length}`);
+    return out;
+  }
+
+  private takeOne(): Candidate {
+    return this.take(1)[0];
+  }
+
+  private takeWhere(predicate: (candidate: Candidate) => boolean): Candidate | undefined {
+    const index = this.pool.findIndex((c) => !this.used.has(String(c.id)) && predicate(c));
+    if (index < 0) return undefined;
+    const candidate = this.pool[index];
+    this.used.add(String(candidate.id));
+    return candidate;
+  }
+
+  /**
+   * 只读 SQL（仅用于 BD-04R/BD-14/BD-19 就绪确认、清理核对，不作为任何 check 的判定值）。
+   * 通过平台 admin-ai 资源代理执行；禁止 INSERT/UPDATE/DELETE/DDL。
+   */
+  private async sqlQuery(database: 'basic' | 'funbit' | 'stats', sql: string): Promise<{ header: string[]; rows: unknown[][] }> {
+    const token = process.env.LITA_USER_TOKEN ?? '';
+    if (!token) throw new Error('缺少 LITA_USER_TOKEN（只读 SQL 就绪确认用，运行时注入，不落交付物）');
+    const response = await fetch('https://api.test.cinta.team/admin-ai/v1/query/execute', {
+      method: 'POST',
+      headers: { 'L-USER-TOKEN': token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ database, sql }),
+      signal: AbortSignal.timeout(120000),
+    });
+    if (!response.ok) throw new Error(`只读 SQL 请求失败：HTTP ${response.status}`);
+    const json = (await response.json()) as { status?: number; msg?: string; data?: { header?: string[]; data?: unknown[][] } };
+    if (json.status !== 0 || !json.data) throw new Error(`只读 SQL 失败：${json.msg ?? 'unknown'}`);
+    return { header: json.data.header ?? [], rows: json.data.data ?? [] };
+  }
+
+  private async sqlCount(database: 'basic' | 'funbit' | 'stats', sql: string): Promise<number> {
+    const result = await this.sqlQuery(database, sql);
+    return Number(result.rows[0]?.[0] ?? NaN);
   }
 
   private msgHas(toast: ToastResult, parts: string[]): boolean {
@@ -225,14 +301,15 @@ class ImageWhiteUnsendTest extends AdminBase {
         pass: ok,
       };
     });
+    await this.shot('case1-entry');
   }
 
   // ---------- #2 Locale 筛选 ----------
 
   private async case2(): Promise<void> {
-    const first = this.candidates[0];
+    const first = this.takeOne();
     const label = localeLabel(first.locale);
-    const other = this.candidates.find((c) => c.id !== first.id && c.locale && c.locale !== first.locale && localeLabel(c.locale) && c.locale !== '');
+    const other = this.takeWhere((c) => c.locale !== first.locale && localeLabel(c.locale) !== '');
     if (!other || !label) throw new Error(`BD-02 样本不足：first=${first.id}/${first.locale}, other=${other?.id}/${other?.locale}`);
     const otherLabel = localeLabel(other.locale);
     await this.act('用例#2 前置：页面添加两个不同 Locale 的真实用户', async () => {
@@ -288,6 +365,7 @@ class ImageWhiteUnsendTest extends AdminBase {
         pass: ok,
       };
     });
+    await this.shot('case2-locale-filter');
     await this.act('用例#2 清理：删除本次两个白名单行', async () => {
       await this.cleanupWhite();
     });
@@ -296,7 +374,7 @@ class ImageWhiteUnsendTest extends AdminBase {
   // ---------- #3 ID 筛选 ----------
 
   private async case3(): Promise<void> {
-    const exist = this.candidates[1];
+    const exist = this.takeOne();
     const absent = '999999999';
     await this.act('用例#3 前置：页面添加 ID 样本', async () => {
       await this.gotoWhite();
@@ -347,6 +425,7 @@ class ImageWhiteUnsendTest extends AdminBase {
       real: `errors=${d2Error},tableVisible=${d2Table}`,
       pass: d2Error === 0 && d2Table,
     }));
+    await this.shot('case3-id-filter');
     await this.act('用例#3 清理：删除本次白名单行', async () => {
       await this.whiteDeleteById(String(exist.id));
     });
@@ -355,7 +434,7 @@ class ImageWhiteUnsendTest extends AdminBase {
   // ---------- #4 NO 筛选 ----------
 
   private async case4(): Promise<void> {
-    const exist = this.candidates[4];
+    const exist = this.takeOne();
     const absentNo = '999999998';
     await this.act('用例#4 前置：页面添加 NO 样本', async () => {
       await this.gotoWhite();
@@ -404,6 +483,7 @@ class ImageWhiteUnsendTest extends AdminBase {
       real: `errors=${d2Error}`,
       pass: d2Error === 0,
     }));
+    await this.shot('case4-no-filter');
     await this.act('用例#4 清理：删除本次白名单行', async () => {
       await this.whiteDeleteById(String(exist.id));
     });
@@ -412,7 +492,7 @@ class ImageWhiteUnsendTest extends AdminBase {
   // ---------- #5 列表完整资料 ----------
 
   private async case5(): Promise<void> {
-    const target = this.candidates[2];
+    const target = this.takeOne();
     await this.act('用例#5 前置：页面添加完整资料用户', async () => {
       await this.gotoWhite();
       await this.whiteAdd(String(target.id));
@@ -447,32 +527,99 @@ class ImageWhiteUnsendTest extends AdminBase {
     });
   }
 
-  // ---------- #6 阻塞取证 ----------
+  // ---------- #6 资料缺失行（BD-04R 主判定：页面构造） ----------
 
-  private async case6Blocked(): Promise<void> {
-    await this.act('用例#6 阻塞取证：白名单无资料缺失行且 DML 通道不可用', async () => {
+  private async case6(): Promise<void> {
+    // 主判定 L：真实存在、NO/Nick 有资料但无 user_config（无 Locale）的用户；只读 SQL 仅作就绪确认
+    let target: { id: string; no: string; nick: string } | undefined;
+    await this.act('用例#6 就绪确认：选取有资料但无 Locale 配置且未入白名单的真实用户', async () => {
+      const readiness = await this.sqlQuery(
+        'funbit',
+        `SELECT p.id, p.no, p.nick FROM user_profile p LEFT JOIN user_config c ON c.id = p.id
+         WHERE c.id IS NULL AND p.no IS NOT NULL AND p.no <> '' AND p.nick IS NOT NULL AND p.nick <> ''
+         ORDER BY p.id DESC LIMIT 20`,
+      );
+      const samples = readiness.rows.map((r) => ({ id: String(r[0]), no: String(r[1]), nick: String(r[2]) }));
+      for (const sample of samples) {
+        await this.gotoWhite();
+        await this.whiteSearch({ id: sample.id });
+        const existing = await this.whiteRows();
+        if (existing.length === 0) { target = sample; break; }
+      }
+      if (!target) throw new Error('BD-04R 就绪失败：未找到「有资料但无 Locale 配置且未入白名单」的真实用户');
+      this.notes.push(`BD-04R 主判定样本：ID=${target.id}, NO=${target.no}, Nick=${target.nick}（user_config 无记录）`);
+    });
+
+    let toast: ToastResult = { texts: [], errors: [] };
+    await this.act('用例#6 前置：页面添加无 Locale 配置的真实用户 L', async () => {
       await this.gotoWhite();
-      const total = await this.whiteTotal();
-      const rows = await this.whiteRows();
-      await this.shot('case6-blocked-white-list');
-      this.blockedNotes.push(`用例#6 阻塞：BD-04 需已存在的 M1（999999999 无用户资料）/M2（1573 locale 为空）白名单行；实测 Total=${total.total}、rows=${rows.length}（现有 5517/liyang 为需求方数据，未改动）；页面 addList 跳过不存在用户，测试环境 DML 通道不可用（admin-ai 查询只读 S1009、工位资源权限 none）；需求方 2026-11-10 选择 C 维持现状按阻塞交付。`);
-      this.notes.push(this.blockedNotes[this.blockedNotes.length - 1]);
-      this.log(this.blockedNotes[this.blockedNotes.length - 1]);
+      toast = await this.whiteAdd(target!.id);
+    });
+    await this.act('用例#6 步骤：Reset 后按 L 精确查询', async () => {
+      await this.whiteReset();
+      await this.whiteSearch({ id: target!.id });
+    });
+    const rows = await this.whiteRows();
+    const row = rows[0];
+    const errors = await this.errorToastCount();
+    const tableVisible = await this.tableVisible();
+    // 附加数据行 M1（非通过必要条件）：存量行中若存在 NO/Nick 缺失行，则附加核对；不存在时按用例口径跳过
+    let m1: WhiteRow | undefined;
+    await this.act('用例#6 附加核对：检查默认列表是否存在 NO/Nick 缺失的存量行 M1', async () => {
+      await this.whiteReset();
+      const defaults = await this.whiteRows();
+      m1 = defaults.find((r) => r.no === '' || r.nick === '');
+      this.notes.push(`BD-04R 附加行 M1：${m1 ? `存在（ID=${m1.id}, NO='${m1.no}', Nick='${m1.nick}'）` : '不存在，按用例口径跳过附加检查'}`);
+    });
+    await this.shot('case6-locale-empty-row');
+
+    await this.check('用例#6-① 添加结果提示新增 1/重复 0/不存在 0', async () => ({
+      expect: '新增 1，重复 0，不存在 0',
+      real: toast.texts.join(' | ') || '(无提示)',
+      pass: this.countAddMessage(toast, 1, 0, 0),
+    }));
+    await this.check('用例#6-② 目标行 Locale 为空且 ID/NO/Nick 与 BD-04R 记录一致', async () => ({
+      expect: `Locale=''|ID=${target!.id}|NO=${target!.no}|Nick=${target!.nick}`,
+      real: row ? `Locale='${row.locale}'|ID=${row.id}|NO=${row.no}|Nick=${row.nick}` : '(无行)',
+      pass: rows.length === 1 && row?.locale === '' && row?.id === target!.id && row?.no === target!.no && row?.nick === target!.nick,
+    }));
+    await this.check('用例#6-③ 页面无错误提示、无白屏且表格可见', async () => ({
+      expect: 'errors=0; tableVisible=true',
+      real: `errors=${errors}; tableVisible=${tableVisible}`,
+      pass: errors === 0 && tableVisible,
+    }));
+    if (m1) {
+      await this.check('用例#6-附加 M1 存量行 NO/Nick 为空且 ID 仍显示、页面不报错', async () => ({
+        expect: `ID=${m1!.id};NO='';Nick='';errors=0`,
+        real: `ID=${m1!.id};NO='${m1!.no}';Nick='${m1!.nick}';errors=${errors}`,
+        pass: m1!.no === '' && m1!.nick === '' && m1!.id !== '' && errors === 0,
+      }));
+    }
+    await this.act('用例#6 清理：页面删除 L', async () => {
+      await this.whiteDeleteById(target!.id);
     });
   }
 
   // ---------- #7 分页 ----------
 
   private async case7(): Promise<void> {
-    // 本缺陷回归使用 T=21：既满足 T>D(10)，又保证切到 20/page 后仍有 2 页，
+    // 本缺陷回归使用 21 个自建行：既满足 T>D，又保证切到 20/page 后仍有 2 页，
     // 使分页控件保持可见，可直接断言切换后 currentPage 回到 1（不依赖单页隐藏的等价推断）。
-    const list = this.candidates.slice(41, 62);
-    await this.act('用例#7 前置：添加 21 个真实用户使 T=21（T>20，切 20/page 后分页仍可见）', async () => {
+    const list = this.take(21);
+    await this.act('用例#7 前置：读取默认总数并添加 21 个真实用户', async () => {
       await this.gotoWhite();
+      const before = await this.whiteTotal();
+      this.notes.push(`用例#7 添加前默认总数 T0=${before.total}，默认每页=${before.pageSize || '(单页隐藏)'}`);
       await this.whiteAdd(list.map((c) => String(c.id)).join('\n'));
+      const after = await this.whiteTotal();
+      this.notes.push(`用例#7 添加后总数 T=${after.total}（预期 ${before.total + list.length}）`);
     });
+    const total = (await this.whiteTotal()).total;
+    const addedIds = list.map((c) => String(c.id));
+    const expectedIds = [...this.stockIds, ...addedIds];
     const p1 = await this.whiteTotal();
     const rows1 = await this.whiteRows();
+    const d1 = Number((p1.pageSize.match(/\d+/) ?? ['0'])[0]);
     await this.act('用例#7 步骤：点击下一页', async () => {
       await this.waitListResponse('/api/userImageWhite/list', async () => {
         await this.clickPager('2');
@@ -495,26 +642,24 @@ class ImageWhiteUnsendTest extends AdminBase {
     const badSizeCalls = sizeCalls.filter((u) => /[?&]page=2(&|$)/.test(u) && /[?&]rows=20(&|$)/.test(u));
     await this.shot('case7-pagination');
 
-    await this.check('用例#7-① 初始分页 Total=T/第1页/每页D条', async () => ({
-      expect: `total=${list.length},current=1,pageSize=10/page`,
+    await this.check('用例#7-① 初始分页显示 Total=T、第 1 页、每页 D 条', async () => ({
+      expect: `total=${total},current=1,pageSize=${d1}/page`,
       real: `total=${p1.total},current=${p1.current},pageSize=${p1.pageSize}`,
-      pass: p1.total === list.length && p1.current === '1' && p1.pageSize === '10/page',
+      pass: p1.total === total && p1.current === '1' && p1.pageSize === `${d1}/page` && d1 > 0,
     }));
-    await this.check('用例#7-② 第一页行数为 D 且 ID 集合一致', async () => {
+    await this.check('用例#7-② 第一页行数为 D 且 ID 均属于 BD-05 数据集', async () => {
       const ids1 = this.ids(rows1);
-      const expectedIds = list.map((c) => String(c.id));
       return {
-        expect: `10 行且属于 BD-05 的 ${list.length} 个 ID`,
+        expect: `${d1} 行且属于 BD-05 的 ${expectedIds.length} 个 ID`,
         real: `${rows1.length} 行 / [${ids1}]`,
-        pass: rows1.length === 10 && new Set(ids1).size === 10 && ids1.every((id) => expectedIds.includes(id)),
+        pass: rows1.length === d1 && new Set(ids1).size === d1 && ids1.every((id) => expectedIds.includes(id)),
       };
     });
     await this.check('用例#7-③ 下一页为第 2 页且行数与第一页不重复', async () => {
       const ids1 = this.ids(rows1);
       const ids2 = this.ids(rows2);
       const overlap = ids1.filter((id) => ids2.includes(id));
-      const expectedIds = list.map((c) => String(c.id));
-      const expectedPage2Rows = Math.min(10, list.length - 10);
+      const expectedPage2Rows = Math.min(d1, total - d1);
       return {
         expect: `current=2,rows=${expectedPage2Rows},overlap=0,ids2⊂BD-05`,
         real: `current=${p2.current},rows=${rows2.length},overlap=[${overlap}],ids2=[${ids2}]`,
@@ -527,20 +672,21 @@ class ImageWhiteUnsendTest extends AdminBase {
       };
     });
     await this.check('用例#7-④ 切换 S=20/page 后回第 1 页、Total=T、行数 min(S,T)', async () => {
-      // T=21，切到 20/page 后仍有 2 页，分页控件保持可见：
-      // 直接断言 currentPage=1（不是单页隐藏时的等价推断），并核对请求序列不含 page=2&rows=20 的过期覆盖请求。
+      // T>20，切到 20/page 后仍有 2 页，分页控件保持可见：
+      // 直接断言 currentPage=1，并核对请求序列不含 page=2&rows=20 的过期覆盖请求。
       const paginationVisible = await this.p.locator('.el-pagination').first().isVisible().catch(() => false);
       return {
-        expect: `current=1,pageSize=20/page,total=${list.length},rows=${Math.min(20, list.length)},pages=[1,2],page2rows20=0`,
+        expect: `current=1,pageSize=20/page,total=${total},rows=${Math.min(20, total)},pages含2,page2rows20=0`,
         real: `current=${p4.current},pageSize=${p4.pageSize},total=${p4.total},rows=${rows4.length},pages=[${p4.pages.join(',')}],pagesVisible=${paginationVisible},sizeCalls=${sizeCalls.length},badSizeCalls=[${badSizeCalls.join('|')}]`,
         pass:
           paginationVisible &&
           p4.current === '1' &&
           p4.pageSize === '20/page' &&
-          p4.total === list.length &&
-          rows4.length === Math.min(20, list.length) &&
+          p4.total === total &&
+          rows4.length === Math.min(20, total) &&
           p4.pages.includes('2') &&
-          badSizeCalls.length === 0,
+          badSizeCalls.length === 0 &&
+          this.ids(rows4).every((id) => expectedIds.includes(id)),
       };
     });
     await this.act('用例#7 清理：删除本次 21 个白名单行', async () => {
@@ -551,7 +697,7 @@ class ImageWhiteUnsendTest extends AdminBase {
   // ---------- #8 批量分隔符 ----------
 
   private async case8(): Promise<void> {
-    const base = this.candidates.slice(21, 33);
+    const base = this.take(12);
     const rows: WhiteDataRow[] = [
       { label: 'D1', text: `${base[0].id}\n${base[1].id}\n${base[2].id}`, ids: [base[0].id, base[1].id, base[2].id] },
       { label: 'D2', text: `${base[3].id},${base[4].id},${base[5].id}`, ids: [base[3].id, base[4].id, base[5].id] },
@@ -583,6 +729,7 @@ class ImageWhiteUnsendTest extends AdminBase {
         real: resultText,
         pass: searchResults.every((r) => r.rows.length === 1 && r.rows[0]?.id === String(r.id)),
       }));
+      await this.shot(`case8-${data.label}-batch`);
       await this.act(`用例#8[${data.label}] 清理：删除本次 3 个白名单行`, async () => {
         await this.cleanupWhite();
       });
@@ -600,7 +747,7 @@ class ImageWhiteUnsendTest extends AdminBase {
   // ---------- #9 500 上限 ----------
 
   private async case9(): Promise<void> {
-    const list = this.candidates.slice(100, 600);
+    const list = this.take(500);
     const tBefore = (await this.gotoWhite(), (await this.whiteTotal()).total);
     let toast: ToastResult = { texts: [], errors: [] };
     await this.act('用例#9 步骤：单次提交 500 个真实 UID', async () => {
@@ -669,8 +816,7 @@ class ImageWhiteUnsendTest extends AdminBase {
   // ---------- #11 去重与幂等 ----------
 
   private async case11(): Promise<void> {
-    const a = this.candidates[33];
-    const b = this.candidates[34];
+    const [a, b] = this.take(2);
     const tBefore = (await this.gotoWhite(), (await this.whiteTotal()).total);
     let toast1: ToastResult = { texts: [], errors: [] };
     let toast2: ToastResult = { texts: [], errors: [] };
@@ -700,6 +846,7 @@ class ImageWhiteUnsendTest extends AdminBase {
       real: `A=${searchA.length},B=${searchB.length},total=${totalAfter.total}`,
       pass: searchA.length === 1 && searchA[0]?.id === String(a.id) && searchB.length === 1 && searchB[0]?.id === String(b.id) && totalAfter.total === tBefore + 2,
     }));
+    await this.shot('case11-dedup');
     await this.act('用例#11 清理：删除 A/B', async () => {
       await this.cleanupWhite();
     });
@@ -731,6 +878,7 @@ class ImageWhiteUnsendTest extends AdminBase {
       real: `total=${tAfter.total},rows=${tAfter.rows}`,
       pass: tAfter.total === tBefore.total && tAfter.rows === tBefore.rows,
     }));
+    await this.shot('case12-invalid-uid');
     await this.act('用例#12 清理：取消添加弹窗', async () => {
       await this.whiteCancelAdd();
     });
@@ -739,7 +887,7 @@ class ImageWhiteUnsendTest extends AdminBase {
   // ---------- #13 真实 + 不存在混合 ----------
 
   private async case13(): Promise<void> {
-    const a = this.candidates[35];
+    const a = this.takeOne();
     const n = '999999999';
     const tBefore = (await this.gotoWhite(), (await this.whiteTotal()).total);
     let toast: ToastResult = { texts: [], errors: [] };
@@ -766,6 +914,7 @@ class ImageWhiteUnsendTest extends AdminBase {
       real: String(totalAfter.total),
       pass: totalAfter.total === tBefore + 1,
     }));
+    await this.shot('case13-mixed-uid');
     await this.act('用例#13 清理：删除 A', async () => {
       await this.cleanupWhite();
     });
@@ -774,15 +923,17 @@ class ImageWhiteUnsendTest extends AdminBase {
   // ---------- #14 删除二次确认 ----------
 
   private async case14(): Promise<void> {
-    const target = this.candidates[36];
-    await this.act('用例#14 前置：添加待删除行', async () => {
+    const target = this.takeOne();
+    let totalBeforeAdd = 0;
+    await this.act('用例#14 前置：读取默认总数并添加待删除行', async () => {
       await this.gotoWhite();
+      totalBeforeAdd = (await this.whiteTotal()).total;
       await this.whiteAdd(String(target.id));
     });
     await this.act('用例#14 步骤：按 ID 查询并点击删除', async () => {
       await this.whiteSearch({ id: String(target.id) });
     });
-    const tBefore = await this.whiteTotal();
+    const totalWithTarget = totalBeforeAdd + 1;
     let confirm = { text: '', buttons: [] as string[] };
     let toast: ToastResult = { texts: [], errors: [] };
     await this.act('用例#14 步骤：二次确认删除', async () => {
@@ -811,9 +962,9 @@ class ImageWhiteUnsendTest extends AdminBase {
     });
     const defaultTotal = await this.whiteTotal();
     await this.check('用例#14-③ 默认列表总数为 T-1', async () => ({
-      expect: String(tBefore.total - 1),
+      expect: String(totalWithTarget - 1),
       real: `filteredTotal=${tAfter.total},defaultTotal=${defaultTotal.total}`,
-      pass: defaultTotal.total === tBefore.total - 1,
+      pass: defaultTotal.total === totalWithTarget - 1,
     }));
     await this.act('用例#14 清理：确认目标已不存在', async () => {
       const rows = await this.whiteRows();
@@ -824,13 +975,15 @@ class ImageWhiteUnsendTest extends AdminBase {
   // ---------- #15 双标签重复删除 ----------
 
   private async case15(): Promise<void> {
-    const target = this.candidates[37];
-    await this.act('用例#15 前置：添加目标行并在标签页 A 查询', async () => {
+    const target = this.takeOne();
+    let totalBeforeAdd = 0;
+    await this.act('用例#15 前置：读取默认总数、添加目标行并在标签页 A 查询', async () => {
       await this.gotoWhite();
+      totalBeforeAdd = (await this.whiteTotal()).total;
       await this.whiteAdd(String(target.id));
       await this.whiteSearch({ id: String(target.id) });
     });
-    const tBefore = await this.whiteTotal();
+    const totalWithTarget = totalBeforeAdd + 1;
     const pageB = await this.newPage();
     await this.act('用例#15 前置：标签页 B 加载同一目标行', async () => {
       await this.gotoHash(WHITE_HASH, true, pageB);
@@ -876,10 +1029,23 @@ class ImageWhiteUnsendTest extends AdminBase {
       Array.from(document.querySelectorAll('.app-container .el-table__body-wrapper tbody tr.el-table__row')).map((tr) => Array.from(tr.querySelectorAll('td')).map((td) => (td.textContent ?? '').trim())),
     );
     const bNoData = (await pageB.locator('.app-container .el-table__empty-text').first().innerText().catch(() => '')).trim();
-    const bTotal = await pageB.evaluate(() => {
-      const text = document.querySelector('.el-pagination__total')?.textContent?.trim() ?? '';
-      const m = text.match(/\d+/);
-      return m ? Number(m[0]) : document.querySelectorAll('.app-container .el-table__body-wrapper tbody tr.el-table__row').length;
+    let bTotal = 0;
+    await this.act('用例#15 步骤：标签页 B 重置筛选后读取默认列表总数（预期 T-1 的可观察路径）', async () => {
+      await Promise.all([
+        pageB.waitForResponse((r) => r.url().includes('/api/userImageWhite/list') && r.request().method() === 'GET', { timeout: 45000 }),
+        pageB.locator('.app-container button').filter({ hasText: /^\s*Reset Filters\s*$/ }).first().click(),
+      ]);
+      await pageB.waitForFunction(
+        () => document.querySelectorAll('.app-container .el-table__body-wrapper tbody tr.el-table__row').length > 0,
+        null,
+        { timeout: 15000 },
+      );
+      bTotal = await pageB.evaluate(() => {
+        const text = document.querySelector('.el-pagination__total')?.textContent?.trim() ?? '';
+        const m = text.match(/\d+/);
+        return m ? Number(m[0]) : document.querySelectorAll('.app-container .el-table__body-wrapper tbody tr.el-table__row').length;
+      });
+      await pageB.screenshot({ path: `${this.evidenceDir}/case15-tabB-default-list.png`, fullPage: true });
     });
 
     await this.check('用例#15-① 标签页 A 删除后目标行消失', async () => ({
@@ -893,9 +1059,9 @@ class ImageWhiteUnsendTest extends AdminBase {
       pass: bToast.errors.length === 0,
     }));
     await this.check('用例#15-③ 刷新后目标仍 No Data 且总数为 T-1', async () => ({
-      expect: `0 行; No Data; total=${tBefore.total - 1}`,
+      expect: `0 行; No Data; total=${totalWithTarget - 1}`,
       real: `${bRows.length} 行; ${bNoData}; total=${bTotal}`,
-      pass: bRows.length === 0 && bNoData.includes('No Data') && bTotal === tBefore.total - 1,
+      pass: bRows.length === 0 && bNoData.includes('No Data') && bTotal === totalWithTarget - 1,
     }));
     await pageB.close();
     await this.act('用例#15 清理：确认目标已不存在', async () => {
@@ -907,7 +1073,7 @@ class ImageWhiteUnsendTest extends AdminBase {
   // ---------- #16 操作留痕 ----------
 
   private async case16(): Promise<void> {
-    const target = this.candidates[38];
+    const target = this.takeOne();
     const before = new Date();
     let toast: ToastResult = { texts: [], errors: [] };
     await this.act('用例#16 前置：添加真实新 UID', async () => {
@@ -964,37 +1130,112 @@ class ImageWhiteUnsendTest extends AdminBase {
       const expected = ['Auto Greeting', 'Group Messaging', 'Normal', 'Unsend'];
       return { expect: expected.join('|'), real: options.join('|'), pass: expected.every((v, i) => options[i] === v) };
     });
-    await this.check('用例#18-③ 其他筛选为空且日期保持默认范围', async () => {
+    await this.check('用例#18-③ 其他筛选为空且日期保持默认近 14 天范围', async () => {
       const empty = !before.player && !before.user && !before.paid && !before.firstPaid && !before.cinta;
       const unchanged = datesBefore.start === datesAfter.start && datesBefore.end === datesAfter.end && datesBefore.start !== '';
+      const spanDays = Math.round((dayStart(datesBefore.end) - dayStart(datesBefore.start)) / 86400000);
+      const defaultRange = datesBefore.end === cstDate() && (spanDays === 13 || spanDays === 14);
       return {
-        expect: '其他筛选为空；日期未变化且非空',
-        real: `player='${before.player}',user='${before.user}',paid='${before.paid}',firstPaid='${before.firstPaid}',cinta='${before.cinta}',dates=${datesBefore.start}~${datesBefore.end}->${datesAfter.start}~${datesAfter.end}`,
-        pass: empty && unchanged,
+        expect: `其他筛选为空；日期未变化且为近14天（截至 ${cstDate()}）`,
+        real: `player='${before.player}',user='${before.user}',paid='${before.paid}',firstPaid='${before.firstPaid}',cinta='${before.cinta}',dates=${datesBefore.start}~${datesBefore.end}->${datesAfter.start}~${datesAfter.end},span=${spanDays}`,
+        pass: empty && unchanged && defaultRange,
       };
     });
   }
 
-  // ---------- #19/#20/#25 阻塞取证 ----------
+  // ---------- #19/#20/#25 阻塞取证（BD-13R 数据缺口） ----------
 
-  private async case19to25Blocked(): Promise<void> {
-    await this.act('用例#19/#20/#25 阻塞取证：候选会话无 UNSEND 且 DML 通道不可用', async () => {
-      await this.gotoConvo();
-      await this.convoSearch({ playerId: '7016', start: '2026-10-28', end: '2026-11-10', type: 'Unsend' });
-      const rows = await this.convoRows();
-      const noData = await this.noDataText();
-      await this.shot('case19-25-unsend-empty');
-      const note = `用例#19/#20/#25 阻塞：外部只读预检 player_message.biz='UNSEND' 近14天=0；候选会话 player 7016/13419 有 14 条 CHAT，但测试环境 DML 通道不可用（admin-ai 查询只读 S1009、工位资源权限 none）；页面 player 7016 + Unsend + 2026-10-28~2026-11-10 查询 ${rows.length} 行（${noData}）；未以空结果通过；需求方 2026-11-10 选择 C 维持现状按阻塞交付。`;
-      this.blockedNotes.push(note);
-      this.notes.push(note);
-      this.log(note);
+  /**
+   * UNSEND 数据缺口取证：只读 SQL 证明撤回已发生但 Admin 数据源无 UNSEND 行，页面证明筛选为 No Data。
+   * 仅用于阻塞证据，不生成 check、不以空结果判通过。
+   */
+  private async unsendEvidence(tag: string): Promise<string> {
+    const unsendTotal = await this.sqlCount('stats', "SELECT COUNT(*) FROM player_message WHERE biz='UNSEND'");
+    const revokedTotal = await this.sqlCount('funbit', 'SELECT COUNT(*) FROM im_message WHERE status=6');
+    const revokedToday = await this.sqlCount('funbit', 'SELECT COUNT(*) FROM im_message WHERE status=6 AND date=CURDATE()');
+    const sample = await this.sqlQuery(
+      'funbit',
+      "SELECT message_id, sender_user_id, receive_user_id FROM im_message WHERE status=6 AND receive_user_id=13285 ORDER BY id DESC LIMIT 1",
+    );
+    const messageId = sample.rows[0]?.[0] ? String(sample.rows[0][0]) : '';
+    let copiedBiz = '(未复制)';
+    if (messageId) {
+      const copied = await this.sqlQuery('stats', `SELECT biz FROM player_message WHERE message_id='${messageId}' LIMIT 1`);
+      copiedBiz = copied.rows[0]?.[0] === null || copied.rows[0]?.[0] === undefined ? 'null' : String(copied.rows[0][0]);
+    }
+    await this.gotoConvo();
+    await this.convoSearch({ playerId: '13285', start: cstDate(-13), end: cstDate(), type: 'Unsend' });
+    const rows = await this.convoRows();
+    const noData = await this.noDataText();
+    await this.shot(tag);
+    const note =
+      `player_message.biz='UNSEND'=${unsendTotal}；im_message.status=6=${revokedTotal}（当日 ${revokedToday}）；` +
+      `样本 message_id=${messageId || '(无)'} 的 player_message.biz=${copiedBiz}；` +
+      `页面 player 13285 + Unsend + ${cstDate(-13)}~${cstDate()} → ${rows.length} 行（${noData}）`;
+    this.notes.push(`${tag}：${note}`);
+    this.log(`${tag}：${note}`);
+    return note;
+  }
+
+  private async case19Blocked(): Promise<void> {
+    await this.act('用例#19 阻塞取证：BD-13R 撤回已发生但 Admin 数据源无 UNSEND 行', async () => {
+      const note = await this.unsendEvidence('case19-unsend-empty');
+      this.blockedNotes.push(`用例#19 阻塞：${note}；缺 player_message.biz='UNSEND' 行，需 3709/IM 侧按 FEATURES 20 契约补齐撤回写入或需求方对齐 3417/3406 判定口径`);
+    });
+  }
+
+  private async case20Blocked(): Promise<void> {
+    await this.act('用例#20 阻塞取证：无法定位可展示 Unsend 类型的撤回消息行', async () => {
+      const note = await this.unsendEvidence('case20-unsend-row');
+      this.blockedNotes.push(`用例#20 阻塞：${note}；目标行不可得，无法核对 message type 单元格`);
+    });
+  }
+
+  private async case25Blocked(): Promise<void> {
+    await this.act('用例#25 阻塞取证：无法定位文本/图片/语音撤回行核对红色 Unsend 前缀', async () => {
+      const note = await this.unsendEvidence('case25-unsend-content');
+      this.blockedNotes.push(`用例#25 阻塞：${note}；三类撤回内容行不可得，无法核对 [Unsend] 前缀与原文保留`);
     });
   }
 
   // ---------- #21 既有类型回归 ----------
 
   private async case21(): Promise<void> {
-    for (const data of CONVO_ROWS) {
+    let convoRows: ConvoDataRow[] = [];
+    await this.act('用例#21 前置：BD-14 按执行日只读确认三类样本与 K 值', async () => {
+      await this.gotoConvo();
+      const defaults = await this.convoReadDates();
+      const d1Start = defaults.start;
+      const d1End = defaults.end;
+      const k1 = await this.sqlCount(
+        'stats',
+        `SELECT COUNT(*) FROM player_message WHERE player_id=13374 AND time>=${dayStart(d1Start)} AND time<=${dayEnd(d1End)} AND (biz IS NULL OR biz='NORMAL')`,
+      );
+      const k2 = await this.sqlCount(
+        'stats',
+        `SELECT COUNT(*) FROM player_message WHERE player_id=8142 AND time>=${dayStart(d1Start)} AND time<=${dayEnd(d1End)} AND biz='AUTO_GREET'`,
+      );
+      const latest = await this.sqlQuery(
+        'stats',
+        "SELECT DATE_FORMAT(FROM_UNIXTIME(MAX(time)/1000), '%Y-%m-%d') FROM player_message WHERE player_id=1460 AND biz='BATCH_SEND'",
+      );
+      const d3End = String(latest.rows[0]?.[0] ?? '');
+      if (!d3End) throw new Error('BD-14 就绪失败：未找到 player 1460 的 BATCH_SEND 样本');
+      const d3Start = shiftDate(d3End, -13);
+      const k3 = await this.sqlCount(
+        'stats',
+        `SELECT COUNT(*) FROM player_message WHERE player_id=1460 AND time>=${dayStart(d3Start)} AND time<=${dayEnd(d3End)} AND biz='BATCH_SEND'`,
+      );
+      convoRows = [
+        { label: 'D1', playerId: '13374', start: d1Start, end: d1End, type: 'Normal', display: 'NORMAL', count: k1 },
+        { label: 'D2', playerId: '8142', start: d1Start, end: d1End, type: 'Auto Greeting', display: 'Auto Greeting', count: k2 },
+        { label: 'D3', playerId: '1460', start: d3Start, end: d3End, type: 'Group Messaging', display: 'Group Messaging', count: k3 },
+      ];
+      this.notes.push(`BD-14 就绪基线：${convoRows.map((r) => `${r.label} ${r.playerId}/${r.type}/${r.start}~${r.end}/K=${r.count}`).join('；')}`);
+      if (convoRows.some((r) => !(r.count > 0))) throw new Error('BD-14 就绪失败：存在 K=0 的消息类型数据行');
+    });
+
+    for (const data of convoRows) {
       await this.act(`用例#21[${data.label}] 步骤：筛选 ${data.type}`, async () => {
         await this.gotoConvo();
         await this.convoSearch({ playerId: data.playerId, start: data.start, end: data.end, type: data.type });
@@ -1019,6 +1260,7 @@ class ImageWhiteUnsendTest extends AdminBase {
           pass: types.length === 1 && types[0] === data.display && errors === 0,
         };
       });
+      await this.shot(`case21-${data.label}-${data.type.replace(/\s+/g, '')}`);
     }
   }
 
@@ -1043,14 +1285,17 @@ class ImageWhiteUnsendTest extends AdminBase {
       real: `rows=${rows.length};player='${values.player}',user='${values.user}'`,
       pass: rows.length === 0 && values.player === '' && values.user === '',
     }));
+    await this.shot('case22-required');
   }
 
   // ---------- #23 跨度校验 ----------
 
   private async case23(): Promise<void> {
-    await this.act('用例#23 步骤：输入 2026-10-01~2026-11-09 并 Search', async () => {
+    const start = cstDate(-20);
+    const end = cstDate();
+    await this.act(`用例#23 步骤：输入 ${start}~${end}（跨度 20 天）并 Search`, async () => {
       await this.gotoConvo();
-      await this.convoSetDates('2026-10-01', '2026-11-09');
+      await this.convoSetDates(start, end);
       await this.fillByPlaceholder('Player ID', '14');
       await this.clearToasts();
       await this.clickButton('Search');
@@ -1064,19 +1309,22 @@ class ImageWhiteUnsendTest extends AdminBase {
       pass: toast.texts.some((t) => t === '时间跨度不能大于14天'),
     }));
     await this.check('用例#23-② 不展示查询结果且输入条件保留', async () => ({
-      expect: `rows=0; dates=2026-10-01~2026-11-09`,
+      expect: `rows=0; dates=${start}~${end}`,
       real: `rows=${rows.length}; dates=${dates.start}~${dates.end}`,
-      pass: rows.length === 0 && dates.start === '2026-10-01' && dates.end === '2026-11-09',
+      pass: rows.length === 0 && dates.start === start && dates.end === end,
     }));
+    await this.shot('case23-range');
   }
 
   // ---------- #24 反向日期 ----------
 
   private async case24(): Promise<void> {
+    const start = cstDate();
+    const end = cstDate(-14);
     let toast: ToastResult = { texts: [], errors: [] };
-    await this.act('用例#24 步骤：输入开始 2026-11-09、结束 2026-10-26 并 Search', async () => {
+    await this.act(`用例#24 步骤：输入开始 ${start}、结束 ${end} 并 Search`, async () => {
       await this.gotoConvo();
-      await this.convoSetDates('2026-11-09', '2026-10-26');
+      await this.convoSetDates(start, end);
       await this.fillByPlaceholder('Player ID', '14');
       await this.clearToasts();
       await this.clickButton('Search');
@@ -1089,22 +1337,23 @@ class ImageWhiteUnsendTest extends AdminBase {
     });
     const dates = await this.convoReadDates();
     const tableVisible = await this.tableVisible();
-    await this.check('用例#24-① Search 后开始与结束日期均为 2026-11-09', async () => ({
-      expect: '2026-11-09 ~ 2026-11-09',
+    await this.check('用例#24-① Search 后开始与结束日期均为开始日期', async () => ({
+      expect: `${start} ~ ${start}`,
       real: `${dates.start} ~ ${dates.end}`,
-      pass: dates.start === '2026-11-09' && dates.end === '2026-11-09',
+      pass: dates.start === start && dates.end === start,
     }));
     await this.check('用例#24-② 无日期错误提示且主内容区/结果表格可见', async () => ({
       expect: 'errors=0; tableVisible=true',
       real: `errors=${toast.errors.length}; tableVisible=${tableVisible}; texts=${toast.texts.join('|')}`,
       pass: toast.errors.length === 0 && tableVisible,
     }));
+    await this.shot('case24-reverse-date');
   }
 
   // ---------- #26 图片/会话隔离 ----------
 
   private async case26(): Promise<void> {
-    const isolate = this.candidates[39];
+    const isolate = this.takeOne();
     const historyBefore = await this.sessionHistory();
     await this.act('用例#26 前置：仅将 I 加入图片白名单并确认图片页 1 行', async () => {
       await this.gotoWhite();
@@ -1207,7 +1456,7 @@ class ImageWhiteUnsendTest extends AdminBase {
   // ---------- #28 会话增删回归 ----------
 
   private async case28(): Promise<void> {
-    const s = this.candidates[40];
+    const s = this.takeOne();
     this.sessionUser = s;
     const historyBefore = await this.sessionHistory();
     await this.act('用例#28 步骤：批量新增 S 并查询', async () => {
