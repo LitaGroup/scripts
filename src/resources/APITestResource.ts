@@ -10,6 +10,15 @@ export interface APITestOptions {
   timeoutMs?: number;
 }
 
+/** 原始响应（不按业务 status 抛错），供负例断言使用 */
+export interface APITestRawResponse {
+  url: string;
+  httpStatus: number;
+  body: Record<string, unknown>;
+  curl: string;
+  costMs: number;
+}
+
 const DEFAULT_HOST = 'https://api.test.cinta.team/';
 const DEFAULT_TIMEOUT_MS = 30_000;
 
@@ -43,7 +52,11 @@ export class APITestResource {
     this.defaultTimeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   }
 
-  async request(path: string, options: APITestOptions = {}): Promise<unknown> {
+  /**
+   * 原始响应：不按 HTTP>=400 / status!=0 抛错，供负例与非 0 业务码断言使用。
+   * 网络异常、超时、非 JSON 响应仍抛错（带可复现 curl）。
+   */
+  async requestRaw(path: string, options: APITestOptions = {}): Promise<APITestRawResponse> {
     const url = joinUrl(this.host, path);
     const method = options.method ?? 'POST';
     const headers: Record<string, string> = {
@@ -66,6 +79,7 @@ export class APITestResource {
       init.body = typeof options.body === 'string' ? options.body : JSON.stringify(options.body);
     }
 
+    const startedAt = Date.now();
     let res: Response;
     try {
       res = await fetch(url, init);
@@ -85,14 +99,25 @@ export class APITestResource {
       throw attachCurl(new Error(`APITestResource: 非 JSON 响应: ${res.status} ${text.slice(0, 500)}`), curl);
     }
 
-    const body = asRecord(data);
-    if (res.status >= 400) {
-      const msg = body.msg ?? body.message ?? res.statusText;
-      throw attachCurl(new Error(`APITestResource: HTTP ${res.status}: ${msg}`), curl);
+    return {
+      url,
+      httpStatus: res.status,
+      body: asRecord(data),
+      curl,
+      costMs: Date.now() - startedAt,
+    };
+  }
+
+  async request(path: string, options: APITestOptions = {}): Promise<unknown> {
+    const raw = await this.requestRaw(path, options);
+    const body = raw.body;
+    if (raw.httpStatus >= 400) {
+      const msg = body.msg ?? body.message ?? 'HTTP error';
+      throw attachCurl(new Error(`APITestResource: HTTP ${raw.httpStatus}: ${msg}`), raw.curl);
     }
     const status = body.status;
     if (status !== undefined && status !== 0) {
-      throw attachCurl(new Error(`APITestResource: 业务错误 status=${status}: ${body.msg ?? ''}`), curl);
+      throw attachCurl(new Error(`APITestResource: 业务错误 status=${status}: ${body.msg ?? ''}`), raw.curl);
     }
     return body.data;
   }
