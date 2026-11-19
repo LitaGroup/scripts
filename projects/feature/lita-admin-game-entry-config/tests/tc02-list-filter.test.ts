@@ -16,6 +16,8 @@ const EXISTING_NO_PROFILE = '22518445';
 const NONEXIST = '999999999999';
 
 class ListFilterCase extends GameEntryBase {
+  private invalidToast: string[] = [];
+
   constructor() { super('tc02-list-filter'); this.total = 54; }
 
   private async ensureAbsent(uid: string): Promise<void> {
@@ -263,15 +265,24 @@ class ListFilterCase extends GameEntryBase {
     await this.act('用例#12 步骤2 在用户 UID 输入框输入 abc', async () => {
       await this.fillUid('abc');
     });
-    await this.act('用例#12 步骤3 点击查询并观察页面反馈', async () => {
-      await this.clickQuery();
-      await this.page!.waitForFunction(() => !!document.querySelector('.el-message__content'), undefined, { timeout: 2000 }).catch(() => undefined);
-      await this.drainMessages();
+    await this.act('用例#12 步骤3 点击查询并观察页面反馈（瞬时 Toast 立即采集）', async () => {
+      // 非法输入场景不发起 page 请求，提示为瞬态 Toast；不能等待 4s 查询响应后再采集，否则 Toast 已消失
+      const respP = this.page!.waitForResponse((r) => r.url().includes('/entryWhitelist/page'), { timeout: 2500 }).catch(() => null);
+      await this.page!.getByRole('button', { name: '查询' }).first().click();
+      await this.page!.waitForFunction(() => !!document.querySelector('.el-message__content'), undefined, { timeout: 3000 }).catch(() => undefined);
+      this.invalidToast = await this.drainMessages();
+      await respP;
+      await this.page!.waitForFunction(() => {
+        const rows = document.querySelectorAll('.el-table__body-wrapper tbody tr').length;
+        const total = (document.querySelector('.el-pagination__total')?.textContent ?? '').trim();
+        return rows === 0 || total === 'Total 0';
+      }, undefined, { timeout: 5000 }).catch(() => undefined);
       await this.shot('case12-invalid-uid', true);
     });
     await this.check('用例#12-① 页面显示参数错误的中文提示（明确 UID 非法语义）', async () => {
       const body = await this.bodyText();
-      const toast = (await this.page!.locator('.el-message').allInnerTexts()).join(' / ');
+      const current = (await this.page!.locator('.el-message').allInnerTexts()).join(' / ');
+      const toast = (this.invalidToast.join(' / ') || current).trim();
       const hit = /(参数错误|格式错误|非法|请输入[^。]{0,10}(数字|UID))/i.test(`${toast} || ${body}`);
       return { expect: '显示 UID 非法/参数错误中文提示', real: `toast=「${toast}」; bodyHasError=${hit}`, pass: hit };
     });
