@@ -1,12 +1,14 @@
 /**
  * 项目 BL-0005 / TK-0443：房间管理-列表筛选（新增筛选 + 原有筛选回归）
  * 用例来源：TK-0442 HANDOFF 九列用例 #8/#9/#13/#14/#15/#16/#19/#21/#22/#23/#26；技术方案：TECH_DESIGN §5 断言映射
- * 覆盖：#8/#9 Room Tag 筛选；#13 房间名称模糊；#14 Room Category 精确；#15 房间Tagtype 筛选（CD-1）；
+ * 覆盖：#8/#9 Room Tag 筛选；#13 房间名称模糊；#14 Room Category 精确；#15 房间Tagtype 筛选（#406 回归）；
  *       #16 组合筛选；#19 房间类型计数；#21 原有 8 项筛选数据变体；#22 创建日期范围；#23 重置；#26 空态
+ * 回归轮次：R2（TK-0548）；#15 按修复后实现回归，逐行读取详情 Tagtype 校验筛选结果
  * 数据隔离：仅读取列表 + 使用 BD-1 已配置标签/分类；结束时恢复 BD-1 原状态由 tc02/清理负责
  * 运行：ADMIN_USERNAME=… ADMIN_PASSWORD=*** BL5_RUN_ID=… node projects/feature/lita-admin-voice-room-bl5/tests/tc03-room-filters.test.ts
  */
 import { VoiceRoomBase, ROOM_COL } from './lib/voice-room-base.ts';
+import { UI_BASE } from './lib/admin-base.ts';
 
 class RoomFiltersTest extends VoiceRoomBase {
   constructor() { super('tc03-room-filters'); this.total = 62; }
@@ -173,36 +175,95 @@ class RoomFiltersTest extends VoiceRoomBase {
       };
     });
 
-    // ---------------- 用例#15（CD-1：房间Tagtype 筛选项） ----------------
-    await this.act('用例#15 查看筛选区是否存在「房间Tagtype」筛选项', async () => {
+    // ---------------- 用例#15（#406 回归：房间Tagtype 筛选项） ----------------
+    await this.act('用例#15 准备已知 Tagtype 样本（BD-1=chat、BD-2=fun）', async () => {
+      await this.editRoom(this.shared.room1 as string, async (page) => {
+        await this.dlgPick(page, '房间Tagtype', 'chat');
+      });
+      await this.editRoom(this.shared.room2 as string, async (page) => {
+        await this.dlgPick(page, '房间Tagtype', 'fun');
+      });
+      this.notes.push('#15 样本：BD-1(chat) / BD-2(fun)，用于筛选结果包含/排除比对');
+    });
+    await this.act('用例#15 查看筛选区并选择「房间Tagtype=chat」后搜索', async () => {
+      await this.openManager();
       await this.managerReset();
-      const tagtypeInputs = await this.page!.locator('.app-main input[placeholder*="Tagtype"], .app-main input[placeholder*="TagType"]').count();
-      const filterText = await this.page!.locator('.app-main').innerText();
-      this.shared.c15 = { tagtypeInputs, hasText: /房间Tagtype/.test(filterText) };
-      await this.shot('case15-tagtype-filter', true);
+      const select = this.page!.locator('.app-main .el-select:has(input[placeholder="房间Tagtype"])').first();
+      const visible = await select.isVisible().catch(() => false);
+      const options = visible ? await this.managerSelectOptions('房间Tagtype') : [];
+      this.shared.c15visible = visible;
+      this.shared.c15options = options;
+      if (!visible) return;
+      await this.managerPick('房间Tagtype', 'chat');
+      await this.clickAndWaitResponse(this.page!, this.page!.getByRole('button', { name: '搜索' }), '/voiceroom/voiceRoomList');
+      this.shared.c15total = await this.totalCount(this.page!);
+      await this.managerPageSize(50).catch(() => this.notes.push('#15 分页条数控件不可用，保持默认 10/page'));
+      this.shared.c15rows = await this.managerRows();
+      await this.shot('case15-tagtype-chat', true);
+    });
+    await this.act('用例#15 逐行打开结果房间详情读取「房间Tagtype」值', async () => {
+      const rows = (this.shared.c15rows as string[][]) ?? [];
+      const types: string[] = [];
+      const errors: string[] = [];
+      for (const row of rows) {
+        const id = row[ROOM_COL.roomId];
+        const popup = await this.context!.newPage();
+        try {
+          await popup.goto(`${UI_BASE}/#/voice-room/voice-room-detail?roomId=${id}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+          await popup.locator('.app-main').waitFor({ state: 'visible', timeout: 60000 });
+          await popup.waitForFunction(() => (document.querySelector('.app-main')?.textContent ?? '').includes('房主NO'), undefined, { timeout: 30000 });
+          await popup.locator('button', { hasText: 'Edit' }).first().click();
+          await popup.locator('.el-dialog__wrapper:visible .el-dialog__title').waitFor({ state: 'visible', timeout: 15000 });
+          // 以「房间名称」回填值非空作为详情数据已加载完成的就绪条件，避免读取到空表单。
+          await popup.waitForFunction(() => {
+            const dlg = [...document.querySelectorAll('.el-dialog__wrapper')].find((w) => (w as HTMLElement).style.display !== 'none');
+            const items = [...(dlg?.querySelectorAll('.el-form-item') ?? [])];
+            const hit = items.find((x) => (x.querySelector('.el-form-item__label')?.textContent ?? '').includes('房间名称'));
+            const i = hit?.querySelector('input') as HTMLInputElement | undefined;
+            return !!i && i.value.trim() !== '';
+          }, undefined, { timeout: 15000 });
+          const item = popup.locator('.el-dialog__wrapper:visible .el-form-item').filter({ hasText: '房间Tagtype' }).first();
+          types.push((await item.locator('input').first().inputValue()).trim());
+        } catch (e) {
+          errors.push(`${id}:${(e as Error).message.split('\n')[0].slice(0, 120)}`);
+        } finally {
+          await popup.close().catch(() => undefined);
+        }
+      }
+      this.shared.c15types = types;
+      this.shared.c15readErrors = errors;
+      this.notes.push(`#15 逐行读取 Tagtype：成功 ${types.length}/${rows.length}，失败 ${errors.length}`);
     });
     await this.check('用例#15-① 筛选区显示「房间Tagtype」筛选项', async () => {
-      const info = this.shared.c15 as { tagtypeInputs: number; hasText: boolean };
+      const visible = this.shared.c15visible as boolean;
+      const options = (this.shared.c15options as string[]) ?? [];
+      const expected = ['game', 'fun', 'sing', 'chat'];
+      const same = options.length === expected.length && expected.every((o) => options.includes(o));
       return {
-        expect: '存在「房间Tagtype」筛选控件',
-        real: `Tagtype 输入控件数=${info.tagtypeInputs}；筛选区文本含「房间Tagtype」=${info.hasText}`,
-        pass: info.tagtypeInputs > 0
+        expect: '筛选区存在可见的「房间Tagtype」筛选控件，选项为 game/fun/sing/chat',
+        real: `控件可见=${visible}；选项=${options.join('/') || '（无）'}`,
+        pass: visible && same
       };
     });
     await this.check('用例#15-② 选择 Tagtype 值后列表仅显示对应记录', async () => {
-      const info = this.shared.c15 as { tagtypeInputs: number };
+      const rows = (this.shared.c15rows as string[][]) ?? [];
+      const types = (this.shared.c15types as string[]) ?? [];
+      const errors = (this.shared.c15readErrors as string[]) ?? [];
+      const bad = types.filter((t) => t !== 'chat');
+      const hasBd2 = rows.some((r) => r[ROOM_COL.roomId] === this.shared.room2);
       return {
-        expect: '可选择 Tagtype 值并筛选',
-        real: info.tagtypeInputs === 0 ? '筛选项不存在，无法选择与筛选（需求 PRD §6 要求存在）' : '筛选项存在但未执行选择',
-        pass: false
+        expect: '选择 chat 后结果行房间Tagtype 均为 chat，且不含 fun 样本房间（BD-2）',
+        real: `结果行=${rows.length}；详情读取成功=${types.length}；非 chat 行=${bad.length}${bad.length ? `（${bad.slice(0, 3).join('/')}）` : ''}；读取失败=${errors.length}${errors.length ? `（${errors.slice(0, 2).join('；')}）` : ''}；含 BD-2(fun)=${hasBd2}`,
+        pass: rows.length > 0 && types.length === rows.length && bad.length === 0 && !hasBd2
       };
     });
     await this.check('用例#15-③ 分页 Total 与筛选结果一致', async () => {
-      const info = this.shared.c15 as { tagtypeInputs: number };
+      const rows = (this.shared.c15rows as string[][]) ?? [];
+      const total = Number(this.shared.c15total);
       return {
-        expect: 'Total 与 Tagtype 筛选结果一致',
-        real: info.tagtypeInputs === 0 ? '筛选项不存在，无法产生筛选结果' : '未执行筛选',
-        pass: false
+        expect: '分页 Total = 当前筛选结果行数',
+        real: `Total=${total}；结果行数=${rows.length}`,
+        pass: total > 0 && total === rows.length
       };
     });
 

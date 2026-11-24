@@ -272,8 +272,9 @@ class RoomTagCrudTest extends VoiceRoomBase {
     });
 
     // ---------------- 用例#20：连续修改房间类型四次 ----------------
-    const typeSeq = ['娱乐1(fun1)', '个人房', '派单(orders)', '娱乐(fun)'];
-    const typeValue = ['fun1', 'person', 'orders', 'fun'];
+    // v8/TK-0456 修订：娱乐(fun)→娱乐1(fun1)→派单(orders)→娱乐1(fun1)→娱乐(fun)，避开「个人房」禁用态。
+    const typeSeq = ['娱乐1(fun1)', '派单(orders)', '娱乐1(fun1)', '娱乐(fun)'];
+    const typeValue = ['fun1', 'orders', 'fun1', 'fun'];
     const stepResults: string[] = [];
     await this.act('用例#20 连续四次修改房间类型', async () => {
       for (let i = 0; i < typeSeq.length; i++) {

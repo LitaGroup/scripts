@@ -435,7 +435,7 @@ export abstract class VoiceRoomBase extends AdminBase {
     await this.clickAndWaitResponse(this.page!, this.page!.getByRole('button', { name: 'Reset Filters' }), '/voiceroom/voiceRoomConfigRecommendList');
   }
 
-  /** 推荐列表切换每页条数。 */
+  /** 推荐列表切换每页条数（等待列表请求完成，避免读取到加载中的空表）。 */
   protected async recPageSize(n: number): Promise<void> {
     const sel = this.page!.locator('.el-pagination__sizes .el-select').first();
     if ((await sel.count()) === 0 || !(await sel.isVisible().catch(() => false))) {
@@ -445,7 +445,9 @@ export abstract class VoiceRoomBase extends AdminBase {
     await sel.click();
     const dd = this.page!.locator('.el-select-dropdown:visible').last();
     await dd.waitFor({ state: 'visible', timeout: 10000 });
+    const resp = this.page!.waitForResponse((r) => r.url().includes('/voiceroom/voiceRoomConfigRecommendList'), { timeout: 15000 }).catch(() => null);
     await dd.locator('.el-select-dropdown__item', { hasText: `${n}/page` }).first().click();
+    await resp;
     await dd.waitFor({ state: 'hidden', timeout: 10000 }).catch(() => undefined);
     await this.waitTableSettled();
   }
@@ -604,12 +606,14 @@ export abstract class VoiceRoomBase extends AdminBase {
     await this.waitTableSettled();
   }
 
-  /** 房间列表切换每页条数。 */
+  /** 房间列表切换每页条数（等待列表请求完成，避免读取到加载中的空表）。 */
   protected async managerPageSize(n: number): Promise<void> {
     await this.page!.locator('.el-pagination__sizes .el-select').first().click();
     const dd = this.page!.locator('.el-select-dropdown:visible').last();
     await dd.waitFor({ state: 'visible', timeout: 10000 });
+    const resp = this.page!.waitForResponse((r) => r.url().includes('/voiceroom/voiceRoomList'), { timeout: 15000 }).catch(() => null);
     await dd.locator('.el-select-dropdown__item', { hasText: `${n}/page` }).first().click();
+    await resp;
     await dd.waitFor({ state: 'hidden', timeout: 10000 }).catch(() => undefined);
     await this.waitTableSettled();
   }

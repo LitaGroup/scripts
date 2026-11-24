@@ -1,9 +1,10 @@
 /**
  * 项目 BL-0005 / TK-0443：房间推荐管理-批量导出
  * 用例来源：TK-0442 HANDOFF 九列用例 #44~#48；技术方案：TECH_DESIGN §5 断言映射、§6.6 Excel 断言口径
- * 覆盖：#44 导出成功与文件名；#45 导出列名；#46 导出数据与筛选结果一致；#47 空结果导出不报错（检查点②为观察项）；
- *       #48 空值 Excel 留空
- * 数据隔离：AC-1 写入 QA 自建房间真实实验KEY，执行后按房间批量删除
+ * 覆盖：#44 导出成功与文件名；#45 导出列名；#46 导出数据与筛选结果一致（v8 四检查点：#407 回归）；
+ *       #47 空结果导出不报错（检查点②为观察项）；#48 空值 Excel 留空
+ * 回归轮次：R2（TK-0548）；#46 增加 AC-2 短时记录（检查点③）与 AC-1 永久空值口径（检查点④）
+ * 数据隔离：AC-1 永久 + AC-2 短时写入 QA 自建房间真实实验KEY，执行后按房间批量删除
  * 运行：ADMIN_USERNAME=… ADMIN_PASSWORD=*** BL5_RUN_ID=… node projects/feature/lita-admin-voice-room-bl5/tests/tc07-rec-export.test.ts
  */
 import ExcelJS from 'exceljs';
@@ -39,14 +40,20 @@ async function parseXlsx(buffer: Buffer): Promise<{ headers: string[]; rows: str
 }
 
 class RecExportTest extends VoiceRoomBase {
-  constructor() { super('tc07-rec-export'); this.total = 13; }
+  constructor() { super('tc07-rec-export'); this.total = 14; }
 
   protected async run(): Promise<void> {
-    await this.act('登录并准备 BD-1 与 AC-1 永久推荐记录', async () => {
+    await this.act('登录并准备 BD-1 与 AC-1 永久、AC-2 短时推荐记录', async () => {
       await this.login();
       this.shared.room1 = await this.ensureRoom1TagCategory();
-      await this.recDeleteByRoomIds([this.shared.room1 as string]);
-      await this.recEnsure({ roomId: this.shared.room1 as string, keyLabel: this.giftKey, type: '永久', weight: 10 });
+      const roomId = this.shared.room1 as string;
+      await this.recDeleteByRoomIds([roomId]);
+      const now = Date.now();
+      await this.recEnsure({ roomId, keyLabel: this.giftKey, type: '永久', weight: 10 });
+      await this.recEnsure({
+        roomId, keyLabel: this.nogiftKey, type: '短时', weight: 20,
+        start: new Date(now - 3600 * 1000), end: new Date(now + 24 * 3600 * 1000)
+      });
     });
     const room1 = this.shared.room1 as string;
 
@@ -105,12 +112,13 @@ class RecExportTest extends VoiceRoomBase {
       };
     });
 
-    // ---------------- 用例#46 ----------------
-    await this.act('用例#46 房间ID筛选 AC-1 后导出并比对列表行', async () => {
+    // ---------------- 用例#46（#407 回归，v8 四检查点） ----------------
+    await this.act('用例#46 房间ID筛选 AC-1/AC-2 后导出并比对列表行', async () => {
       await this.recSearch({ roomId: room1 });
       const rows = await this.recRows();
       this.shared.c46listTotal = await this.totalCount(this.page!);
-      this.shared.c46listRow = rows.find((r) => r[REC_COL.roomId] === room1 && r[REC_COL.configKey].includes(this.giftKey)) ?? null;
+      this.shared.c46ac1 = rows.find((r) => r[REC_COL.roomId] === room1 && r[REC_COL.configKey].includes(this.giftKey)) ?? null;
+      this.shared.c46ac2 = rows.find((r) => r[REC_COL.roomId] === room1 && r[REC_COL.configKey].includes(this.nogiftKey)) ?? null;
       const result = await this.recExport();
       this.shared.c46parsed = await parseXlsx(result.buffer);
       await this.shot('case46-consistency');
@@ -120,43 +128,72 @@ class RecExportTest extends VoiceRoomBase {
       const total = Number(this.shared.c46listTotal);
       return { expect: `数据行数=${total}`, real: `数据行数=${parsed.rows.length}`, pass: parsed.rows.length === total };
     });
-    await this.check('用例#46-② Excel 该房间行字段值与列表行显示值一致', async () => {
+    await this.check('用例#46-② Excel 中 AC-1/AC-2 两条记录行各字段值与列表行显示值一致', async () => {
       const parsed = this.shared.c46parsed as { rows: string[][] };
-      const list = this.shared.c46listRow as string[] | null;
-      const excel = parsed.rows[0];
-      if (!list || !excel) return { expect: '逐字段一致', real: `列表行=${list ? '有' : '无'}；Excel 行=${excel ? '有' : '无'}`, pass: false };
-      const pairs: Array<[string, string, string]> = [
-        ['大区', mapLocale(list[REC_COL.locale]), excel[0]],
-        ['推荐类型', mapType(list[REC_COL.type]), excel[1]],
-        ['生效状态', list[REC_COL.effective], excel[2]],
-        ['所属平台', list[REC_COL.platform], excel[3]],
-        ['房间ID', list[REC_COL.roomId], excel[4]],
-        ['房间名称', list[REC_COL.roomName], excel[5]],
-        ['Room Category', list[REC_COL.roomCategory], excel[6]],
-        ['房间状态', list[REC_COL.roomStatus], excel[7]],
-        ['权重', list[REC_COL.weight], excel[8]],
-        ['操作人', list[REC_COL.operateName], excel[11]]
-      ];
-      const diff = pairs.filter(([, l, e]) => l !== e).map(([k, l, e]) => `${k}:列表=${l}/导出=${e}`);
+      const ac1 = this.shared.c46ac1 as string[] | null;
+      const ac2 = this.shared.c46ac2 as string[] | null;
+      if (!ac1 || !ac2) {
+        return {
+          expect: 'AC-1 永久与 AC-2 短时两条记录逐字段一致',
+          real: `列表行 AC-1=${ac1 ? '有' : '无'}；AC-2=${ac2 ? '有' : '无'}`,
+          pass: false
+        };
+      }
+      const findExcel = (list: string[]): string[] | null => {
+        const type = mapType(list[REC_COL.type]);
+        return parsed.rows.find((r) => r[4] === list[REC_COL.roomId] && r[1] === type) ?? null;
+      };
+      const diffs: string[] = [];
+      for (const [name, list] of [['AC-1', ac1], ['AC-2', ac2]] as Array<[string, string[]]>) {
+        const excel = findExcel(list);
+        if (!excel) { diffs.push(`${name}:导出中未找到对应行`); continue; }
+        const pairs: Array<[string, string, string]> = [
+          ['大区', mapLocale(list[REC_COL.locale]), excel[0]],
+          ['推荐类型', mapType(list[REC_COL.type]), excel[1]],
+          ['生效状态', list[REC_COL.effective], excel[2]],
+          ['所属平台', list[REC_COL.platform], excel[3]],
+          ['房间ID', list[REC_COL.roomId], excel[4]],
+          ['房间名称', list[REC_COL.roomName], excel[5]],
+          ['Room Category', list[REC_COL.roomCategory], excel[6]],
+          ['房间状态', list[REC_COL.roomStatus], excel[7]],
+          ['权重', list[REC_COL.weight], excel[8]],
+          ['操作人', list[REC_COL.operateName], excel[11]]
+        ];
+        for (const [k, l, e] of pairs) if (l !== e) diffs.push(`${name}.${k}:列表=${l}/导出=${e}`);
+      }
       return {
-        expect: '逐字段一致（大区按 locale 编码、推荐类型按 暂时/短时 展示映射）',
-        real: diff.length === 0 ? '全部一致' : diff.join('；'),
-        pass: diff.length === 0
+        expect: 'AC-1/AC-2 逐字段一致（大区按 locale 编码、推荐类型按 暂时/短时 展示映射）',
+        real: diffs.length === 0 ? '两条记录全部一致' : diffs.join('；'),
+        pass: diffs.length === 0
       };
     });
-    await this.check('用例#46-③ 推荐开始/结束时间与列表「推荐时间」列起止值一致', async () => {
+    await this.check('用例#46-③ AC-2 短时记录推荐开始/结束时间与列表「推荐时间」列起止值一致', async () => {
       const parsed = this.shared.c46parsed as { rows: string[][] };
-      const list = this.shared.c46listRow as string[] | null;
-      const excel = parsed.rows[0];
-      if (!list || !excel) return { expect: '起止时间一致', real: '缺少列表行或 Excel 行', pass: false };
+      const list = this.shared.c46ac2 as string[] | null;
+      if (!list) return { expect: '短时记录起止时间一致', real: '缺少 AC-2 列表行', pass: false };
+      const excel = parsed.rows.find((r) => r[4] === list[REC_COL.roomId] && r[1] === mapType(list[REC_COL.type])) ?? null;
+      if (!excel) return { expect: '短时记录起止时间一致', real: '导出中未找到 AC-2 行', pass: false };
       const parts = list[REC_COL.time].split('~').map((s) => s.trim());
       const listStart = parts[0] ?? '';
       const listEnd = parts[1] ?? '';
-      const same = listStart === excel[9] && listEnd === excel[10];
       return {
         expect: `开始=${listStart}；结束=${listEnd}`,
         real: `导出开始=${excel[9] || '（空）'}；导出结束=${excel[10] || '（空）'}`,
-        pass: same
+        pass: listStart !== '' && listEnd !== '' && listStart === excel[9] && listEnd === excel[10]
+      };
+    });
+    await this.check('用例#46-④ AC-1 永久记录推荐时间显示为空或「-」（不含 NaN），导出起止时间为空', async () => {
+      const parsed = this.shared.c46parsed as { rows: string[][] };
+      const list = this.shared.c46ac1 as string[] | null;
+      if (!list) return { expect: '永久记录推荐时间为空或「-」，导出起止时间为空', real: '缺少 AC-1 列表行', pass: false };
+      const excel = parsed.rows.find((r) => r[4] === list[REC_COL.roomId] && r[1] === mapType(list[REC_COL.type])) ?? null;
+      const time = (list[REC_COL.time] ?? '').trim();
+      const timeOk = time === '' || time === '-';
+      const noNaN = !/NaN/i.test(time);
+      return {
+        expect: '列表推荐时间=空或「-」且不含 NaN；导出开始/结束单元格为空',
+        real: `列表推荐时间=${time === '' ? '（空）' : time}；含NaN=${!noNaN}；导出开始=${excel ? (excel[9] || '（空）') : '无行'}；导出结束=${excel ? (excel[10] || '（空）') : '无行'}`,
+        pass: timeOk && noNaN && !!excel && excel[9] === '' && excel[10] === ''
       };
     });
 
