@@ -73,6 +73,10 @@ export abstract class AdminBase extends CheckBaseClass {
   protected notes: string[] = [];
   protected shared: Record<string, unknown> = {};
   protected pageErrors: string[] = [];
+  /** 页面请求头中的 accesstoken（仅用于前置造数接口的会话透传，不写入证据）。 */
+  protected accessToken = '';
+  /** 推荐列表接口响应计数（仅用于等待网络静默，不作为断言）。 */
+  protected recListResponses = 0;
   protected cleanupTasks: CleanupTask[] = [];
   protected cleanupResults: Array<{ title: string; ok: boolean; message: string }> = [];
   private callSeq = 0;
@@ -101,7 +105,14 @@ export abstract class AdminBase extends CheckBaseClass {
   }
 
   protected bindPage(page: Page): void {
-    page.on('response', (response) => { void this.capture(response); });
+    page.on('response', (response) => {
+      if (response.url().includes('/voiceroom/voiceRoomConfigRecommendList')) this.recListResponses++;
+      void this.capture(response);
+    });
+    page.on('request', (request) => {
+      const token = request.headers()['accesstoken'];
+      if (token) this.accessToken = token;
+    });
     page.on('pageerror', (error) => { this.pageErrors.push(mask(error.message).slice(0, 300)); });
   }
 

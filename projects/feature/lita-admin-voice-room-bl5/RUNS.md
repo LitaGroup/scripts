@@ -1,5 +1,37 @@
 # RUNS — 执行记录
 
+## R3 定向回归（TK-0552，2026-11-25）
+
+- 环境：https://admin.test.lita.game（非生产）；入口 `static/index-f609ce81.js`（HTTP Last-Modified `2026-11-24 18:32:10 GMT` = 2026-11-25 02:32:10 +08:00）；推荐管理 chunk `recommend-config-319cdf51.js`（HTTP 200，bundle 含 `hide-on-single-page":e.listTotal===0`）；后端 funbit-mgr `GET /actuator/health` = `{"status":"UP"}`（2026-11-25 02:37 +08）
+- 版本对照：#408 修复部署记录（TK-0549/TK-0551）要求入口 `index-f609ce81.js`、chunk `recommend-config-319cdf51.js`、test 合并 `55ffc525`；本轮入口与 chunk 一致（test 分支 SHA 由修复任务记录，本工位无仓库读取凭证）
+- 账号：qa-ai；密码运行时注入，不落盘
+- 轮次：`BL5_RUN_ID=R2F`（复用 R2 遗留 QA 测试房间，避免新增房间）；命令：`node projects/feature/lita-admin-voice-room-bl5/tests/<file>.test.ts --evidence-dir=<dir>`
+- 证据目录：`work/bl5-r3/evidence-R3/<file>/`（工位内），公开索引见任务文档 `EVIDENCE`（TK-0552）
+- 单元自测：tc10 `evidence-selftest-tc10b`（22/22 通过）；红证抽查 `evidence-redproof-tc05`（#31-① 临时错误期望→失败→恢复）
+
+| 脚本 | 用例 | 检查点 | 步数(act+check) | 耗时 | 结果 | 备注 |
+| --- | --- | --- | --- | --- | --- | --- |
+| tc05-rec-filters | #31~#39 | 24 | 37 | 81.2s | 全部通过 | 含 P0 #31~#35；红证抽查 #31-① 已恢复 |
+| tc06-rec-fields | #40~#43 | 25 | 34 | 57.4s | 全部通过 | 含 P0 #40~#42（数据行展开） |
+| tc07-rec-export | #44~#48 | 12 | 18 | 63.1s | 全部通过 | 含 P0 #44/#45；#46 四检查点（#407 回归保持通过） |
+| tc09-rec-batch-delete | #58~#60 | 9 | 13 | 85.9s | 全部通过 | 含 P0 #58~#60 |
+| tc10-rec-regression | #61~#64 | 12 | 22 | 43.5s | 全部通过 | #64 v9：AC-6 造数 Total 16→28；第 2 页切 20/page → 页码 1/行数 20/Total 28/无 No Data；API 留痕仅 1 次 page=1&rows=20（无旧 page=2 覆盖） |
+
+合计（本轮）：25 条用例 / 82 个检查点，通过 82；四态 通过 25 / 未通过 0 / 阻塞 0 / 未执行 0。
+累计（R2 结果 + R3 更新）：67 条用例 / 239 个检查点；通过 67 / 未通过 0。
+
+## R3 造数与清理记录
+
+| 项 | 内容 | 结果 |
+| --- | --- | --- |
+| AC-6 分页记录 | `configKey=QA_BL5_TEST_R2F_P`，`POST /api/voiceroom/batchAddVoiceRoomConfigRecommend`，`recommendType=forever`、`weight=0`、12 个房间ID（取自房间管理列表真实行） | 造数后全量 Total=28（基线 15 + AC-1 1 + AC-6 12）；逐脚本结束接口 `batchDeleteVoiceRoomConfigRecommend` 删除并按页面「用户分类/Total」复核 |
+| AC-1~AC-5 记录 | 各脚本页面「批量添加」写入 QA 自建房间（BD-1/BD-2/BD-3）的真实实验KEY | 每个脚本结束按房间页面「批量删除」并复核 |
+| 清理复核（R3 结束） | 推荐列表全量 `GET voiceRoomConfigRecommendList?page=1&rows=100`：Total=15、返回 15 行、`QA_BL5_TEST*` 残留 0 | 通过（`logs-R3/cleanup-verify.log`） |
+| 测试房间 | 复用 `QA-BL5-R2F-room` / `-notag` / `-cinta`；未新建房间 | 房间为既有 QA 测试数据；本轮未修改真实业务数据 |
+| 数据库 | 未执行任何写库操作 | 符合授权（SQL 仅只读，本任务未使用） |
+
+---
+
 ## R2 回归（TK-0548，2026-11-25）
 
 - 环境：https://admin.test.lita.game（前端入口 `static/index-d0fa4676.js`，HTML Last-Modified `2026-11-24 22:57:45 +08:00`；房间管理 chunk `index-3f01b1af.js` 含 `valueTagType`）

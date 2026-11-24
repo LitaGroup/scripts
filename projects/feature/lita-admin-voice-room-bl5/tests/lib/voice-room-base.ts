@@ -11,6 +11,9 @@ import { AdminBase, UI_BASE, fmtTime } from './admin-base.ts';
 export const MANAGER_HASH = '/voice-room/voice-room-manager';
 export const RECOMMEND_HASH = '/voice-room/voice-room-recommend-config';
 
+/** 管理后台接口入口（同源网关注入 l-* 签名头；仅用于前置造数/就绪确认/清理）。 */
+export const API_BASE = (process.env.SCRIPT_API_BASE ?? 'https://m-api.test.lita.game').replace(/\/+$/, '');
+
 /** 房间列表列索引（19 列）。 */
 export const ROOM_COL = {
   locale: 0, country: 1, roomId: 2, roomNo: 3, cover: 4, ownerNo: 5, official: 6, guildId: 7,
@@ -435,6 +438,159 @@ export abstract class VoiceRoomBase extends AdminBase {
     await this.clickAndWaitResponse(this.page!, this.page!.getByRole('button', { name: 'Reset Filters' }), '/voiceroom/voiceRoomConfigRecommendList');
   }
 
+  // ---------- 前置造数接口（AC-6；仅前置，不参与任何验证点） ----------
+
+  /**
+   * 以登录态调用管理后台接口：签名头复现前端同一 wasm（/wasm/test.wasm）与同一入参（pathname + body），
+   * 仅用于前置数据构造/清理（红线：接口响应不得作为验证点断言对象）。
+   */
+  protected async signedApi(path: string, body: unknown, method: 'GET' | 'POST' = 'POST'): Promise<string> {
+    const payload = body === null ? '' : JSON.stringify(body);
+    if (!this.accessToken) throw new Error('未捕获 accesstoken，无法调用前置造数接口');
+    const signed = await this.signHeaders(path, payload);
+    const resp = await this.context!.request.fetch(`${API_BASE}${path}`, {
+      method,
+      timeout: 30000,
+      headers: {
+        'l-timestamp': signed.ts,
+        'l-nonce': signed.nonce,
+        'l-trace-id': signed.trace,
+        'l-user-token': signed.token,
+        'l-sign': signed.sign,
+        accesstoken: this.accessToken,
+        referer: `${UI_BASE}/`,
+        ...(payload ? { 'content-type': 'application/json' } : {})
+      },
+      data: payload || undefined
+    });
+    const text = await resp.text();
+    if (resp.status() !== 200) throw new Error(`前置接口 ${path} HTTP ${resp.status()}：${text.slice(0, 160)}`);
+    if (!/"status":"0"/.test(text)) throw new Error(`前置接口 ${path} 业务失败：${text.slice(0, 160)}`);
+    return text;
+  }
+
+  private async signHeaders(path: string, payload: string): Promise<{ ts: string; nonce: string; trace: string; sign: string; token: string }> {
+    await this.page!.evaluate(async () => {
+      const w = window as unknown as Record<string, unknown>;
+      if (typeof w.__qaSign === 'function') return;
+      const enc = (ex: { __new: (n: number, id: number) => number; memory: WebAssembly.Memory }, v: string): number => {
+        const ptr = ex.__new(v.length << 1, 2);
+        const mem = new Uint16Array(ex.memory.buffer);
+        for (let i = 0; i < v.length; i++) mem[(ptr >>> 1) + i] = v.charCodeAt(i);
+        return ptr;
+      };
+      const dec = (ex: { memory: WebAssembly.Memory }, p: number): string => {
+        const buf = ex.memory.buffer;
+        const len = new Uint32Array(buf)[(p - 4) >>> 2] >>> 1;
+        return new TextDecoder('utf-16le').decode(new Uint16Array(buf, p, len));
+      };
+      const buf = await (await fetch('/wasm/test.wasm')).arrayBuffer();
+      const { instance } = await WebAssembly.instantiate(buf, { env: { abort: () => { throw new Error('wasm abort'); } } });
+      const ex = instance.exports as unknown as {
+        __new: (n: number, id: number) => number;
+        memory: WebAssembly.Memory;
+        generateHeader: (...args: number[]) => number;
+      };
+      w.__qaSign = (path: string, payload: string) => {
+        const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+        const nonce = Array.from({ length: 6 }, () => chars.charAt(Math.floor(Math.random() * chars.length))).join('');
+        const ts = String(Date.now());
+        const trace = Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
+        const token = localStorage.getItem('l-user-token') ?? '';
+        if (!token) throw new Error('l-user-token 缺失');
+        const ptr = ex.generateHeader(enc(ex, path), enc(ex, token), enc(ex, payload), enc(ex, ts), enc(ex, nonce), enc(ex, trace));
+        return { ts, nonce, trace, sign: dec(ex, ptr), token };
+      };
+    });
+    return this.page!.evaluate(({ p, b }) => (window as unknown as Record<string, (p: string, b: string) => { ts: string; nonce: string; trace: string; sign: string; token: string }>).__qaSign(p, b), { p: path, b: payload });
+  }
+
+  /** 从房间管理列表逐页读取真实房间ID（AC-6 造数来源；任一ID不存在会整体失败，故必须取自真实列表）。 */
+  protected async collectRoomIds(n: number): Promise<string[]> {
+    await this.openManager();
+    await this.managerReset();
+    const ids: string[] = [];
+    const collect = async (): Promise<void> => {
+      for (const row of await this.managerRows()) {
+        const id = row[ROOM_COL.roomId];
+        if (/^\d+$/.test(id) && !ids.includes(id)) ids.push(id);
+      }
+    };
+    await collect();
+    for (let page = 2; ids.length < n && page <= 6; page++) {
+      await this.managerGotoPage(page);
+      await collect();
+    }
+    if (ids.length < n) throw new Error(`房间列表仅读取到 ${ids.length} 个房间ID，不足 AC-6 所需 ${n} 个`);
+    return ids.slice(0, n);
+  }
+
+  /** AC-6 造数：同 configKey 一次写入 N 条永久推荐记录。 */
+  protected async recSeedAc6(key: string, roomIds: string[]): Promise<void> {
+    await this.signedApi('/voiceroom/batchAddVoiceRoomConfigRecommend', {
+      configKey: key,
+      recommendType: 'forever',
+      weight: 0,
+      roomIds: roomIds.map((id) => Number(id))
+    });
+  }
+
+  /** AC-6 清理：按 configKey + roomIds 物理删除自建记录。 */
+  protected async recDeleteAc6(key: string, roomIds: string[]): Promise<void> {
+    await this.signedApi('/voiceroom/batchDeleteVoiceRoomConfigRecommend', {
+      configKey: key,
+      roomIds: roomIds.map((id) => Number(id))
+    });
+  }
+
+  /** 分页控件当前页码（不可读时返回空串）。 */
+  protected async recCurrentPage(): Promise<string> {
+    const active = this.page!.locator('.el-pager li.active').first();
+    if ((await active.count()) === 0) return '';
+    return (await active.innerText()).trim();
+  }
+
+  /** 当前每页条数展示值（如 10/page）。 */
+  protected async recPageSizeText(): Promise<string> {
+    const input = this.page!.locator('.el-pagination__sizes input').first();
+    if ((await input.count()) === 0) return '';
+    return (await input.inputValue()).trim();
+  }
+
+  /** 等待推荐列表接口静默：响应计数稳定 quietMs 视为本轮请求全部到达（仅等待，不作为断言）。 */
+  protected async waitRecommendQuiet(quietMs = 1000, timeout = 15000): Promise<void> {
+    const start = Date.now();
+    let last = this.recListResponses;
+    let lastChange = Date.now();
+    while (Date.now() - start < timeout) {
+      await this.page!.waitForTimeout(200);
+      if (this.recListResponses !== last) {
+        last = this.recListResponses;
+        lastChange = Date.now();
+      }
+      if (Date.now() - lastChange >= quietMs) return;
+    }
+  }
+
+  /** #64 专用：严格切换每页条数（控件不可见/选项缺失直接失败，不静默跳过），并等待迟到的旧响应全部到达。 */
+  protected async recPageSizeStrict(n: number): Promise<void> {
+    const sel = this.page!.locator('.el-pagination__sizes .el-select').first();
+    if ((await sel.count()) === 0 || !(await sel.isVisible().catch(() => false))) {
+      throw new Error(`分页条数控件不可见，无法切换 ${n}/page`);
+    }
+    await sel.click();
+    const dd = this.page!.locator('.el-select-dropdown:visible').last();
+    await dd.waitFor({ state: 'visible', timeout: 10000 });
+    const option = dd.locator('.el-select-dropdown__item', { hasText: `${n}/page` }).first();
+    if ((await option.count()) === 0) throw new Error(`每页条数下拉中不存在 ${n}/page 选项`);
+    const resp = this.page!.waitForResponse((r) => r.url().includes('/voiceroom/voiceRoomConfigRecommendList'), { timeout: 15000 }).catch(() => null);
+    await option.click();
+    await resp;
+    await dd.waitFor({ state: 'hidden', timeout: 10000 }).catch(() => undefined);
+    await this.waitTableSettled(this.page!);
+    await this.waitRecommendQuiet();
+  }
+
   /** 推荐列表切换每页条数（等待列表请求完成，避免读取到加载中的空表）。 */
   protected async recPageSize(n: number): Promise<void> {
     const sel = this.page!.locator('.el-pagination__sizes .el-select').first();
@@ -461,6 +617,21 @@ export abstract class VoiceRoomBase extends AdminBase {
       return !!tr && tr.innerText.replace(/\s+/g, ' ').trim() !== prevText;
     }, prevFirst.replace(/\s+/g, ' ').trim(), { timeout: 60000 }).catch(() => undefined);
     await this.waitTableSettled();
+  }
+
+  /** #64 专用：严格翻页（页码不存在或未切换成功直接失败），并等待列表静默。 */
+  protected async recGotoPageStrict(n: number): Promise<void> {
+    const target = this.page!.locator('.el-pager li', { hasText: new RegExp(`^\\s*${n}\\s*$`) }).first();
+    if ((await target.count()) === 0) throw new Error(`分页控件中不存在第 ${n} 页`);
+    const resp = this.page!.waitForResponse((r) => r.url().includes('/voiceroom/voiceRoomConfigRecommendList'), { timeout: 15000 }).catch(() => null);
+    await target.click();
+    await resp;
+    await this.page!.waitForFunction((pageNo) => {
+      const active = document.querySelector('.el-pager li.active') as HTMLElement | null;
+      return (active?.textContent ?? '').trim() === pageNo;
+    }, String(n), { timeout: 15000 }).catch(() => undefined);
+    await this.waitTableSettled(this.page!);
+    await this.waitRecommendQuiet(600, 10000);
   }
 
   protected async recRows(): Promise<string[][]> {
