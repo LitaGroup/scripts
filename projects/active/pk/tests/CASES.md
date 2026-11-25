@@ -70,6 +70,41 @@
 | API-PK2612-REG-03 | 旧 biz 日榜仍在 | P1 | 同上 | 包含 `20260817/18/19` | 复用隔离 |
 | API-PK2612-REG-04 | 旧 biz 家族总榜可读 | P1 | `POST /m/family/detail`，locale=vi | `biz=pk-v202608` | 复用隔离 |
 
+
+## 六、Alias 路由 `/active/v3/pk/**`（ALIAS）
+
+> H5 入口使用 alias `pk`，以下用例验证 alias 路由下 H5 实际消费的接口与完整 biz 一致，数据归属 `pk-v202612`。
+
+| 编号 | 场景 | 优先级 | 请求 | 预期 |
+|---|---|---|---|---|
+| API-PK2612-ALIAS-01 | alias 活动礼物 | P0 | `POST /active/v3/pk/active-gifts` | 12 个，stage0/1/2=4/4/4，special=2 |
+| API-PK2612-ALIAS-02 | alias 陪陪首阶段详情 | P0 | `POST /active/v3/pk/m/player_in_n_200/detail` | biz=pk-v202612，key=-，rounds=4 |
+| API-PK2612-ALIAS-03 | alias 1V1 阶段 3 详情 | P0 | `POST /active/v3/pk/m/player_in_1v1_100_46/detail` | 8 个轮次 key |
+| API-PK2612-ALIAS-04 | alias 陪陪阶段详情聚合 | P0 | `POST /active/v3/pk/p/player-detail` | >=8 模块，全部 biz=pk-v202612 |
+| API-PK2612-ALIAS-05 | alias 陪陪印尼/非印尼详情 | P0 | `POST /active/v3/pk/p/player-in-detail` | >=8 模块，全部 biz=pk-v202612 |
+| API-PK2612-ALIAS-06 | alias 家族阶段详情 | P1 | `POST /active/v3/pk/p/family-detail` | >=5 模块，全部 biz=pk-v202612 |
+| API-PK2612-ALIAS-07 | alias 房间详情 | P1 | `POST /active/v3/pk/p/room-detail` | room 详情 biz=pk-v202612 |
+| API-PK2612-ALIAS-08 | alias 陪陪奖励详情 | P0 | `POST /active/v3/pk/p/player-awards` | >=8 模块，>=1 有 mainAwards |
+| API-PK2612-ALIAS-09 | alias 用户奖励详情 | P0 | `POST /active/v3/pk/p/user-awards` | user biz=pk-v202612，mainAwards 非空 |
+| API-PK2612-ALIAS-10 | alias 房间奖励详情 | P0 | `POST /active/v3/pk/p/room-awards` | room biz=pk-v202612，mainAwards 非空 |
+| API-PK2612-ALIAS-11 | alias 家族奖励详情 | P0 | `POST /active/v3/pk/p/family-awards` | family biz=pk-v202612，mainAwards 非空 |
+| API-PK2612-ALIAS-12 | alias CP 奖励详情 | P0 | `POST /active/v3/pk/p/couple-awards` | couple biz=pk-v202612，mainAwards 非空 |
+| API-PK2612-ALIAS-13 | alias 用户榜详情 | P1 | `POST /active/v3/pk/m/user/detail` | biz=pk-v202612，17 个日榜 |
+| API-PK2612-ALIAS-14 | alias CP 榜详情 | P1 | `POST /active/v3/pk/m/couple/detail` | biz=pk-v202612，17 个日榜 |
+| API-PK2612-ALIAS-15 | alias 房间总榜详情 | P1 | `POST /active/v3/pk/m/room/detail` | biz=pk-v202612，key=- |
+| API-PK2612-ALIAS-16 | alias 家族总榜详情 | P1 | `POST /active/v3/pk/m/family/detail` | biz=pk-v202612，key=- |
+| API-PK2612-ALIAS-17 | alias 陪陪榜 rank | P1 | `POST /active/v3/pk/m/player_in_n_200/rank` | round.biz=pk-v202612，key=- |
+| API-PK2612-ALIAS-18 | alias 用户日榜 rank | P1 | `POST /active/v3/pk/m/user/rank` | round.biz=pk-v202612，key=20261219，rankResult 数组 |
+| API-PK2612-ALIAS-19 | alias 1V1 比分 | P1 | `POST /active/v3/pk/m/player_in_1v1_100_46/score` | round.biz=pk-v202612，key=2026122500 |
+| API-PK2612-ALIAS-20 | alias 全球家族榜 | P1 | `POST /active/v3/pk/global-family-rank` | data 为数组 |
+| API-PK2612-ALIAS-21 | alias 对阵卡片 | P1 | `POST /active/v3/pk/get-pair` body `{playerId}` | 含 player1/player2/endTimestamp |
+| API-PK2612-ALIAS-22 | alias 房间阶段榜 | P1 | `POST /active/v3/pk/p/room-rank` | room.round.biz=pk-v202612 |
+| API-PK2612-ALIAS-23 | alias 家族阶段榜 | P1 | `POST /active/v3/pk/p/family-rank` | >=5 模块，round.biz=pk-v202612 |
+| API-PK2612-ALIAS-24 | alias 与完整 biz 详情一致 | P0 | `m/player_in_n_200/detail` 双通道 | biz/topic/locale/key/起止/轮次 key 完全一致 |
+| API-PK2612-ALIAS-25 | alias 与完整 biz 礼物一致 | P0 | `active-gifts` 双通道 | 阶段/特殊标记完全一致 |
+| API-PK2612-ALIAS-26 | alias 与完整 biz 模块集合一致 | P1 | `p/player-in-detail` 双通道 | 模块 key 集合一致 |
+| API-PK2612-ALIAS-27 | alias 与完整 biz 榜单积分一致 | P1 | `m/user/rank` 双通道 | 同一用户积分一致 |
+
 ## 已确认口径（需求方 2026-11-25）
 
 1. **赛程以 3458 赛事表为准**：陪陪 1V1 两阶段各 4 天 8 场（12/25-28、12/29-1/1），复活 12/29，决赛 1/2；房间/家族 100进50 12/25-27、50进20 12/28-30、20进10 12/31、决赛 1/2。

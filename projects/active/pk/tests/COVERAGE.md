@@ -85,3 +85,31 @@
 | API-PK2612-REG-04 | pk2612-006-old-biz.test.ts | 2612 配置未覆盖旧 biz：旧 biz 数据仍为 pk-v202608 | 待执行 |
 
 > 说明：`pk2612-007-schedule-db.test.ts` 是 SCH-02~33 的只读 SQL 辅助校验脚本，逐 topic 校验 `mod_common_round` 主轮次、日榜、1V1 轮次时间，避免 langSheet 缺失等接口问题干扰赛程配置判定。
+
+| API-PK2612-ALIAS-01 | pk2612-008-alias-api.test.ts | alias active-gifts 返回 12 个礼物，4/4/4，special=2 | 待执行 |
+| API-PK2612-ALIAS-02 | pk2612-008-alias-api.test.ts | alias m/player_in_n_200/detail 返回 pk-v202612 主轮次与 4 个日榜 | 待执行 |
+| API-PK2612-ALIAS-03 | pk2612-008-alias-api.test.ts | alias m/player_in_1v1_100_46/detail 返回 8 个 1V1 轮次 | 待执行 |
+| API-PK2612-ALIAS-04 | pk2612-008-alias-api.test.ts | alias p/player-detail 返回模块详情且全部归属 pk-v202612 | 待执行 |
+| API-PK2612-ALIAS-05 | pk2612-008-alias-api.test.ts | alias p/player-in-detail 返回印尼/非印尼陪陪阶段详情 | 待执行 |
+| API-PK2612-ALIAS-06 | pk2612-008-alias-api.test.ts | alias p/family-detail 返回印尼家族阶段详情 | 待执行 |
+| API-PK2612-ALIAS-07 | pk2612-008-alias-api.test.ts | alias p/room-detail 返回房间总榜详情 | 待执行 |
+| API-PK2612-ALIAS-08 | pk2612-008-alias-api.test.ts | alias p/player-awards 返回陪陪奖励详情 | 待执行 |
+| API-PK2612-ALIAS-09 | pk2612-008-alias-api.test.ts | alias p/user-awards 返回用户榜奖励详情 | 待执行 |
+| API-PK2612-ALIAS-10 | pk2612-008-alias-api.test.ts | alias p/room-awards 返回房间榜奖励详情 | 待执行 |
+| API-PK2612-ALIAS-11 | pk2612-008-alias-api.test.ts | alias p/family-awards 返回家族榜奖励详情 | 待执行 |
+| API-PK2612-ALIAS-12 | pk2612-008-alias-api.test.ts | alias p/couple-awards 返回 CP 榜奖励详情 | 待执行 |
+| API-PK2612-ALIAS-13 | pk2612-008-alias-api.test.ts | alias m/user/detail 返回 17 个日榜 | 待执行 |
+| API-PK2612-ALIAS-14 | pk2612-008-alias-api.test.ts | alias m/couple/detail 返回 17 个日榜 | 待执行 |
+| API-PK2612-ALIAS-15 | pk2612-008-alias-api.test.ts | alias m/room/detail 返回房间总榜主轮次 | 待执行 |
+| API-PK2612-ALIAS-16 | pk2612-008-alias-api.test.ts | alias m/family/detail 返回家族总榜主轮次 | 待执行 |
+| API-PK2612-ALIAS-17 | pk2612-008-alias-api.test.ts | alias m/player_in_n_200/rank 返回主轮次（榜单可为空） | 待执行 |
+| API-PK2612-ALIAS-18 | pk2612-008-alias-api.test.ts | alias m/user/rank 返回 20261219 日榜结构 | 待执行 |
+| API-PK2612-ALIAS-19 | pk2612-008-alias-api.test.ts | alias m/player_in_1v1_100_46/score 返回 1V1 轮次 | 待执行 |
+| API-PK2612-ALIAS-20 | pk2612-008-alias-api.test.ts | alias global-family-rank 返回数组 | 待执行 |
+| API-PK2612-ALIAS-21 | pk2612-008-alias-api.test.ts | alias get-pair 返回对阵结构 | 待执行 |
+| API-PK2612-ALIAS-22 | pk2612-008-alias-api.test.ts | alias p/room-rank 返回房间阶段榜 | 待执行 |
+| API-PK2612-ALIAS-23 | pk2612-008-alias-api.test.ts | alias p/family-rank 返回印尼家族阶段榜 | 待执行 |
+| API-PK2612-ALIAS-24 | pk2612-008-alias-api.test.ts | alias 与完整 biz 的 player_in_n_200 detail 一致 | 待执行 |
+| API-PK2612-ALIAS-25 | pk2612-008-alias-api.test.ts | alias 与完整 biz 的 active-gifts 一致 | 待执行 |
+| API-PK2612-ALIAS-26 | pk2612-008-alias-api.test.ts | alias 与完整 biz 的 player-in-detail 模块集合一致 | 待执行 |
+| API-PK2612-ALIAS-27 | pk2612-008-alias-api.test.ts | alias 与完整 biz 的 m/user/rank 积分一致 | 待执行 |

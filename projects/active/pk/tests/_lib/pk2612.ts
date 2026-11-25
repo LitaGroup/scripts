@@ -453,8 +453,9 @@ export async function queryRank(
   userId: number,
   debugTs = RUN_DEBUG_TS,
   count = 50,
+  biz = BIZ,
 ): Promise<RankResponse> {
-  const data = await api.request(`active/v3/${BIZ}/m/${topic}/rank`, {
+  const data = await api.request(`active/v3/${biz}/m/${topic}/rank`, {
     body: { key, count, locale: null, includeMine: true },
     userId,
     locale,

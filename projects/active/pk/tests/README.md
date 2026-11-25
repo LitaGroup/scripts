@@ -10,10 +10,12 @@
 | `player-001-init.test.ts` | 六周年陪陪榜初始化轮次用例（历史用例） |
 | `pk2612-001-config.test.ts` | 2612 配置与路由：完整 biz / alias / 时间 / 大区 / 旧 biz 隔离 |
 | `pk2612-002-schedule.test.ts` | 2612 17 天赛程与 32 个 module 的主轮次、日榜、1V1 轮次 |
-| `pk2612-003-awards.test.ts` | 2612 奖励配置（515/473/42）、awardName 引用完整性、关键名次内容 |
+| `pk2612-003-awards.test.ts` | 2612 奖励配置（512/470/42）、awardName 引用完整性、关键名次内容、发放对象 |
 | `pk2612-004-gift-buff.test.ts` | 2612 活动礼物展示与 giftBuffs 计分行为 |
 | `pk2612-005-winner-buff.test.ts` | 2612 PK 获胜 Buff（当前 1V1 阶段胜场 → 下一阶段 Buff） |
 | `pk2612-006-old-biz.test.ts` | 六周年 pk-v202608 回归（新旧活动数据隔离） |
+| `pk2612-007-schedule-db.test.ts` | 2612 赛程轮次只读 SQL 辅助校验 |
+| `pk2612-008-alias-api.test.ts` | 2612 alias `/active/v3/pk/**` 接口与完整 biz 一致性 |
 | `_lib/pk2612.ts` | 2612 公共常量、轮次期望、礼物/榜单/只读 SQL 辅助方法 |
 
 ## 运行方式
@@ -31,6 +33,8 @@ node projects/active/pk/tests/pk2612-003-awards.test.ts
 node projects/active/pk/tests/pk2612-004-gift-buff.test.ts
 node projects/active/pk/tests/pk2612-005-winner-buff.test.ts
 node projects/active/pk/tests/pk2612-006-old-biz.test.ts
+node projects/active/pk/tests/pk2612-007-schedule-db.test.ts
+node projects/active/pk/tests/pk2612-008-alias-api.test.ts
 ```
 
 ## 2612 用例口径
