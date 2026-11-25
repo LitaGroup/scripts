@@ -163,10 +163,11 @@ class Pk2612Awards extends TestBaseClass {
       ]);
     });
 
-    await this.check('用户榜 日榜第1名：麦位框 14946 + 气泡 1098，5天', async (): Promise<CheckResult> => {
+    await this.check('用户榜 日榜第1名：麦位框 14946 + 气泡 1098 + EVENT 通票，5天', async (): Promise<CheckResult> => {
       return this.expectAwards('user-daily', 1, [
         ['MICBOX', 14946, 1, 'P5D', 'USER', '*'],
         ['BUBBLE', 1098, 1, 'P5D', 'USER', '*'],
+        ['EVENT', 14, 1, '', 'USER', '*'],
       ]);
     });
 
