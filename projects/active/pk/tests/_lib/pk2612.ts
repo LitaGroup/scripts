@@ -35,7 +35,8 @@ export const INIT_DEBUG_TS = '2026-12-18T10:00:00+08:00';
 
 export type TimeSpec =
   | { kind: 'bj'; value: string }
-  | { kind: 'local'; value: string };
+  | { kind: 'local'; value: string }
+  | { kind: 'abs'; value: string };
 
 export interface TopicSpec {
   topic: string;
@@ -50,7 +51,9 @@ export interface TopicSpec {
 }
 
 export function expectMs(spec: TimeSpec, locale: string): number {
-  return spec.kind === 'bj' ? beijingMs(spec.value) : localAtMs(locale, spec.value);
+  if (spec.kind === 'bj') return beijingMs(spec.value);
+  if (spec.kind === 'abs') return Date.parse(spec.value);
+  return localAtMs(locale, spec.value);
 }
 
 /** 生成 1V1 PK 轮次 key：每天本地 00 点与 18 点各一场 */
@@ -155,8 +158,9 @@ const PLAYER_TOPICS: TopicSpec[] = [
     topic: 'player_50_20',
     module: 'RankModule',
     locales: NON_IN,
-    start: { kind: 'local', value: '2026-12-25 00:00:00' },
-    finish: { kind: 'local', value: '2026-12-28 23:30:00' },
+    // 沿用六周年 +07 绝对时间（非 R），ph/ko 本地分别 01:00/02:00 开始
+    start: { kind: 'abs', value: '2026-12-25T00:00:00+07:00' },
+    finish: { kind: 'abs', value: '2026-12-28T23:30:00+07:00' },
   },
   {
     topic: 'player_1v1_50_20',
@@ -192,7 +196,8 @@ const PLAYER_TOPICS: TopicSpec[] = [
     topic: 'player_10_1',
     module: 'RankModule',
     locales: NON_IN,
-    start: { kind: 'local', value: '2027-01-02 00:00:00' },
+    // 沿用六周年 +07 绝对时间（非 R），ph/ko 本地分别 01:00/02:00 开始
+    start: { kind: 'abs', value: '2027-01-02T00:00:00+07:00' },
     finish: FINAL_FINISH,
   },
 ];

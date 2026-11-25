@@ -2,10 +2,10 @@ import { type CheckResult } from '../../../../src/base/CheckBaseClass.ts';
 import { TestBaseClass } from '../../../../src/base/TestBaseClass.ts';
 import { IN, RUN_DEBUG_TS, initTopic, queryRank, sendGift } from './_lib/pk2612.ts';
 
-const SENDER = 13126;
-const RECEIVER = 13127;
-const DAY_KEY = '20261218';
-const SEND_TS = Date.parse('2026-12-18T10:00:00+07:00');
+const SENDER = 13128;
+const RECEIVER = 13129;
+const DAY_KEY = '20261219';
+const SEND_TS = Date.parse('2026-12-19T10:00:00+07:00');
 
 /** 六周年兜底礼物 Buff；Q22 正式数值提供后按配置表更新 */
 const GIFT_NORMAL = 10561; // buff 1.0
