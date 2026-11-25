@@ -63,3 +63,24 @@
 - `USER ID=23` 查询：仅存量 id=325（印尼/10100001/侧边推荐/权重 1000/操作人 zhangjinyu），未被修改。
 - 审计证据：`workfiles/audit-final/audit.json`、`audit-console.log`。
 
+
+---
+
+## 2026-11-26 TK-0693 缺陷 419/420 修复后定向回归
+
+- 模式：定向回归，仅 tc04（#23/#30/#31）、tc05（#24/#25）、tc06（#26~#29）；脚本沿用 commit `b439708`，零改动。
+- 环境：`https://admin.test.lita.game`；账号 qa-ai 真实 UI 登录 1 次，tc05/tc06 复用 30 分钟内 storageState。
+
+| 时间（CST） | 运行 | 结果 | 证据 |
+|---|---|---|---|
+| 00:09:32 | 平台 testId 174 `tc06-excel-invalid`（run.md / MCP run_test） | **error**，76ms，`ERR_MODULE_NOT_FOUND`；运行 ID 351 → **熔断**，不再调用 | `TEST_REPORT.md` §3 |
+| 00:09:46~00:10:39 | tc06 `--case=27` 预跑 | 12/12 check 通过 | `preflight/tc06-case27.log` |
+| 00:10:50~00:11:43 | 红证：临时改错 #27c 期望 → `--case=27` | 11 通过 / 1 预期失败（#27c-① status=fail） | 公开日志 `338bfff5-…log` |
+| 00:11:50~00:12:44 | 恢复期望 → `--case=27` | 12/12 通过（同一 check status=success） | 公开日志 `e3f5ea4e-…log` |
+| 00:12:53~00:13:04 | 正式 tc04 全量 | **8/8 check 通过** | `formal/tc04/`、`formal/tc04.log` |
+| 00:13:07~00:13:32 | 正式 tc05 全量 | **7/7 check 通过** | `formal/tc05/`、`formal/tc05.log` |
+| 00:13:38~00:14:59 | 正式 tc06 全量 | **18/18 check 通过** | `formal/tc06/`、`formal/tc06.log` |
+| 00:16 左右 | 数据审计（50/page × 4 页） | Total=159；qa-ai=0；999999999=0；USER ID=23 仅存量 id=325 | `audit/full-audit.json` |
+
+- 合计：9 条用例 / 33 checks，**33/33 通过**；FLAKY=0；缺陷 419/420 关闭。
+- 证据总包：`http://work.cinta.team/files/20261125/244a4ff9-6641-4858-a7b4-2c8069212aa2.zip`。

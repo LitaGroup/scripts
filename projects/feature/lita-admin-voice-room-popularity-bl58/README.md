@@ -65,3 +65,12 @@ REUSE_STATE=1 node projects/.../tc03-create-negative.test.ts
 - 执行机实测可直连 `m-api.test.lita.game`（未登录返回 401，不是 WAF 403），默认 **不启用 WAF 转发**；基类保留 `ENABLE_WAF_FORWARD=1` 的同源原样转发能力（`/admin|/api|/voiceroom -> SCRIPT_API_BASE`、`/data-main -> SCRIPT_DB_API`，不改请求/响应体），如未来出现 403 再启用并在报告声明。
 - 页面请求/响应经 `maskSensitive` 脱敏后写入 `evidence/run.json`；密码、token、Cookie 不写入代码、日志、证据或报告。
 - 等待策略：响应事件 + web-first 可见性 + loading 消失 + 表格落定，无固定 sleep 作为断言前置。
+
+## 定向回归记录（2026-11-26，TK-0693）
+
+- 背景：缺陷 419（Excel 导入未校验不存在 ROOM ID，高/后端）与 420（类型非法提示缺行号，中/后端）修复部署后，做定向回归。
+- 范围：仅 tc04（#23/#30/#31）、tc05（#24/#25）、tc06（#26~#29），共 9 条用例 / 33 checks；不重跑 tc01/tc02/tc03/tc07/tc08。
+- 结果：33/33 check 通过；#27c 提示「第 2 行 未知的推荐类型: abc」、#27f 提示「第 2 行 ROOM ID 999999999 不存在」且整表不落库；缺陷 419、420 已关闭。
+- 平台运行器：testId 174 单次 `run.md` 返回 `ERR_MODULE_NOT_FOUND`（运行 ID 351），已按规则熔断，正式结果均为工位 `node xxx.test.ts` 实跑。
+- 数据：回归后 Total=159，qa-ai 自建行 0，ROOM ID=999999999 0 行，USER ID=23 仅存量 id=325。
+- 详细报告：任务 TK-0693 `TEST_REPORT.md` / `EVIDENCE.md` / `RUNS.md` / `COVERAGE.md`。
