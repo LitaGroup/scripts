@@ -9,7 +9,7 @@ Script collection: automated test scripts (`*.test.ts`), online health-check scr
 - No build / test / lint / typecheck tooling is configured; do not assume any.
 
 ## Layout
-- Scripts: `projects/<category>/<activity>/{checks,tests,exports}` (current: `projects/active/pk/{checks,tests,exports}`, `projects/active/didibus/tests`, `projects/active/box-bless/tests`, `projects/funbit/option/{checks,tests}`, `projects/funbit/spindraw/tests`, `projects/funbit/playerduty/tests`, `projects/active/rising-stars/checks`, `projects/feature/game-grade/tests`).
+- Scripts: `projects/<category>/<activity>/{checks,tests,exports}` (current: `projects/active/pk/{checks,tests,exports}`, `projects/active/pk-v202808/tests`, `projects/active/didibus/tests`, `projects/active/box-bless/tests`, `projects/funbit/option/{checks,tests}`, `projects/funbit/spindraw/tests`, `projects/funbit/playerduty/tests`, `projects/active/rising-stars/checks`, `projects/feature/game-grade/tests`).
   - `tests/`  — automated test cases (`.test.ts`)
   - `checks/` — online health checks (`.check.ts`)
   - `exports/` — data export scripts (`.export.ts`)

@@ -1,0 +1,34 @@
+{
+  "players": {
+    "in": [],
+    "vi": [],
+    "ph": [],
+    "ko": []
+  },
+  "users": {
+    "in": [],
+    "vi": [],
+    "ph": [],
+    "ko": []
+  },
+  "rooms": {
+    "in": [],
+    "vi": [],
+    "ph": [],
+    "ko": []
+  },
+  "families": {
+    "in": [{ "id": 0, "members": [] }],
+    "vi": [],
+    "ph": [],
+    "ko": []
+  },
+  "identities": {
+    "normal": [],
+    "svip": [],
+    "rich": []
+  },
+  "couples": {
+    "in": [{ "a": 0, "b": 0, "genderA": 1, "genderB": 2 }]
+  }
+}

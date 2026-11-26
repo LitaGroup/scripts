@@ -4,6 +4,7 @@ import { MySQLTestResource } from '../resources/MySQLTestResource.ts';
 import { RedisTestResource } from '../resources/RedisTestResource.ts';
 import { PkFamilyService } from '../services/PkFamilyService.ts';
 import { PkPlayerService } from '../services/PkPlayerService.ts';
+import { Pk202808Service } from '../services/Pk202808Service.ts';
 import { LitaTeamMessageService } from '../services/LitaTeamMessageService.ts';
 import { DidibusService } from '../services/DidibusService.ts';
 import { SpinDrawService } from '../services/SpinDrawService.ts';
@@ -21,6 +22,7 @@ export abstract class TestBaseClass extends CheckBaseClass {
   private _redis: RedisTestResource | null = null;
   private _family: PkFamilyService | null = null;
   private _player: PkPlayerService | null = null;
+  private _pk202808: Pk202808Service | null = null;
   private _litaTeam: LitaTeamMessageService | null = null;
   private _didibus: DidibusService | null = null;
   private _spindraw: SpinDrawService | null = null;
@@ -46,6 +48,10 @@ export abstract class TestBaseClass extends CheckBaseClass {
 
   protected get player(): PkPlayerService {
     return (this._player ??= new PkPlayerService({ api: this.api, mysql: this.mysql, redis: this.redis }));
+  }
+
+  protected get pk(): Pk202808Service {
+    return (this._pk202808 ??= new Pk202808Service({ api: this.api, mysql: this.mysql, redis: this.redis }));
   }
 
   protected get litaTeam(): LitaTeamMessageService {
